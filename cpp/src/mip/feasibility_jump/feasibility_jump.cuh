@@ -30,7 +30,7 @@
 #include <utilities/event_handler.cuh>
 
 #define FJ_DEBUG_LOAD_BALANCING 0
-#define FJ_SINGLE_STEP          1
+#define FJ_SINGLE_STEP          0
 
 namespace cuopt::linear_programming::detail {
 

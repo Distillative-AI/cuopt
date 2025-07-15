@@ -413,6 +413,11 @@ void fj_t<i_t, f_t>::climber_init(i_t climber_idx, const rmm::cuda_stream_view& 
   climber->violation_score.set_value_to_zero_async(climber_stream);
   climber->weighted_violation_score.set_value_to_zero_async(climber_stream);
   init_lhs_and_violation<i_t, f_t><<<256, 256, 0, climber_stream.value()>>>(view);
+  climber->violated_constraints.sort(climber_stream);
+
+  // printf("init: Violated constraints hash: %x\n", compute_hash(
+  //   make_span(climber->violated_constraints.contents, 0,
+  //   climber->violated_constraints.set_size.value(climber_stream)), climber_stream));
 
   // initialize the best_objective values according to the initial assignment
   f_t best_obj = compute_objective_from_vec<i_t, f_t>(
@@ -625,11 +630,11 @@ void fj_t<i_t, f_t>::run_step_device(const rmm::cuda_stream_view& climber_stream
                                      bool use_graph)
 {
   raft::common::nvtx::range scope("run_step_device");
-  // auto [grid_setval, blocks_setval]                 = setval_launch_dims;
-  // auto [grid_resetmoves, blocks_resetmoves]         = resetmoves_launch_dims;
-  // auto [grid_resetmoves_bin, blocks_resetmoves_bin] = resetmoves_bin_launch_dims;
-  // auto [grid_update_weights, blocks_update_weights] = update_weights_launch_dims;
-  // auto [grid_lift_move, blocks_lift_move]           = lift_move_launch_dims;
+  auto [grid_setval, blocks_setval]                 = setval_launch_dims;
+  auto [grid_resetmoves, blocks_resetmoves]         = resetmoves_launch_dims;
+  auto [grid_resetmoves_bin, blocks_resetmoves_bin] = resetmoves_bin_launch_dims;
+  auto [grid_update_weights, blocks_update_weights] = update_weights_launch_dims;
+  auto [grid_lift_move, blocks_lift_move]           = lift_move_launch_dims;
 
   auto& data    = *climbers[climber_idx];
   auto v        = data.view();
@@ -681,6 +686,10 @@ void fj_t<i_t, f_t>::run_step_device(const rmm::cuda_stream_view& climber_stream
       data.cub_storage_bytes.resize(compaction_temp_storage_bytes, climber_stream);
     }
 
+    // printf("before step: Violated constraints hash: %x\n", compute_hash(
+    //   make_span(data.violated_constraints.contents, 0,
+    //   data.violated_constraints.set_size.value(climber_stream)), climber_stream));
+
     if (use_graph) {
       cudaGraphCreate(&graph, 0);
       cudaStreamBeginCapture(climber_stream, cudaStreamCaptureModeThreadLocal);
@@ -699,16 +708,16 @@ void fj_t<i_t, f_t>::run_step_device(const rmm::cuda_stream_view& climber_stream
           if (is_binary_pb) {
             cudaLaunchCooperativeKernel(
               (void*)compute_mtm_moves_kernel<i_t, f_t, FJ_MTM_VIOLATED, true>,
-              dim3(256),
-              dim3(256),
+              grid_resetmoves_bin,
+              blocks_resetmoves_bin,
               reset_moves_args,
               0,
               climber_stream);
           } else {
             cudaLaunchCooperativeKernel(
               (void*)compute_mtm_moves_kernel<i_t, f_t, FJ_MTM_VIOLATED, false>,
-              dim3(256),
-              dim3(256),
+              grid_resetmoves,
+              blocks_resetmoves,
               reset_moves_args,
               0,
               climber_stream);
@@ -731,18 +740,18 @@ void fj_t<i_t, f_t>::run_step_device(const rmm::cuda_stream_view& climber_stream
         }
 #endif
 
-        // cudaLaunchKernel((void*)update_lift_moves_kernel<i_t, f_t>,
-        //                  grid_lift_move,
-        //                  blocks_lift_move,
-        //                  kernel_args,
-        //                  0,
-        //                  climber_stream);
-        // cudaLaunchKernel((void*)update_breakthrough_moves_kernel<i_t, f_t>,
-        //                  grid_lift_move,
-        //                  blocks_lift_move,
-        //                  kernel_args,
-        //                  0,
-        //                  climber_stream);
+        cudaLaunchKernel((void*)update_lift_moves_kernel<i_t, f_t>,
+                         grid_lift_move,
+                         blocks_lift_move,
+                         kernel_args,
+                         0,
+                         climber_stream);
+        cudaLaunchKernel((void*)update_breakthrough_moves_kernel<i_t, f_t>,
+                         grid_lift_move,
+                         blocks_lift_move,
+                         kernel_args,
+                         0,
+                         climber_stream);
       }
 
       // compaction kernel
@@ -755,24 +764,53 @@ void fj_t<i_t, f_t>::run_step_device(const rmm::cuda_stream_view& climber_stream
                                  pb_ptr->n_variables,
                                  climber_stream);
 
-      cudaLaunchKernel(
-        (void*)select_variable_kernel<i_t, f_t>, dim3(1), dim3(1), kernel_args, 0, climber_stream);
-
+      cudaLaunchKernel((void*)select_variable_kernel<i_t, f_t>,
+                       dim3(1),
+                       dim3(256),
+                       kernel_args,
+                       0,
+                       climber_stream);
       cudaLaunchCooperativeKernel((void*)handle_local_minimum_kernel<i_t, f_t>,
-                                  dim3(256),
-                                  dim3(256),
+                                  grid_update_weights,
+                                  blocks_update_weights,
                                   kernel_args,
                                   0,
                                   climber_stream);
       raft::copy(data.break_condition.data(), data.temp_break_condition.data(), 1, climber_stream);
       cudaLaunchKernel((void*)update_assignment_kernel<i_t, f_t>,
-                       dim3(256),
-                       dim3(256),
+                       grid_setval,
+                       blocks_setval,
                        update_assignment_args,
                        0,
                        climber_stream);
-      cudaLaunchKernel(
-        (void*)update_changed_constraints_kernel<i_t, f_t>, 1, 1, kernel_args, 0, climber_stream);
+
+      // {
+      //   printf("Changed constraints hash: %x, size: %d\n", compute_hash(
+      //     make_span(data.constraints_changed, 0,
+      //     data.constraints_changed_count.value(climber_stream)), climber_stream),
+      //     data.constraints_changed_count.value(climber_stream));
+
+      //   printf("before update: Violated constraints hash: %x, size: %d\n", compute_hash(
+      //     make_span(data.violated_constraints.contents, 0,
+      //     data.violated_constraints.set_size.value(climber_stream)), climber_stream),
+      //     data.violated_constraints.set_size.value(climber_stream));
+      // }
+
+      cudaLaunchKernel((void*)update_changed_constraints_kernel<i_t, f_t>,
+                       1,
+                       blocks_setval,
+                       kernel_args,
+                       0,
+                       climber_stream);
+
+      // data.violated_constraints.sort(climber_stream);
+
+      // {
+      //   printf("Violated constraints hash: %x, size: %d\n", compute_hash(
+      //     make_span(data.violated_constraints.contents, 0,
+      //     data.violated_constraints.set_size.value(climber_stream)), climber_stream),
+      //     data.violated_constraints.set_size.value(climber_stream));
+      // }
     }
 
     if (use_graph) {
@@ -815,6 +853,7 @@ void fj_t<i_t, f_t>::refresh_lhs_and_violation(const rmm::cuda_stream_view& stre
   data.violation_score.set_value_to_zero_async(stream);
   data.weighted_violation_score.set_value_to_zero_async(stream);
   init_lhs_and_violation<i_t, f_t><<<4096, 256, 0, stream>>>(v);
+  data.violated_constraints.sort(stream);
 }
 
 template <typename i_t, typename f_t>

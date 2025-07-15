@@ -355,4 +355,21 @@ bool has_variable_bounds_violation(const raft::handle_t* handle_ptr,
     });
 }
 
+template <typename i_t>
+inline uint32_t compute_hash(raft::device_span<i_t> values, rmm::cuda_stream_view stream)
+{
+  // FNV-1a hash
+
+  uint32_t hash   = 2166136261u;  // FNV-1a 32-bit offset basis
+  auto h_contents = cuopt::host_copy(values, stream);
+  RAFT_CHECK_CUDA(stream);
+  std::vector<uint8_t> byte_contents(h_contents.size() * sizeof(i_t));
+  std::memcpy(byte_contents.data(), h_contents.data(), h_contents.size() * sizeof(i_t));
+  for (size_t i = 0; i < byte_contents.size(); ++i) {
+    hash ^= byte_contents[i];
+    hash *= 16777619u;
+  }
+  return hash;
+}
+
 }  // namespace cuopt::linear_programming::detail

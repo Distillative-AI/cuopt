@@ -185,6 +185,8 @@ static bool run_fj_check_objective(std::string test_instance, int iter_limit, do
 
 static bool run_fj_check_determinism(std::string test_instance, int iter_limit)
 {
+  int seed = std::getenv("FJ_SEED") ? std::stoi(std::getenv("FJ_SEED")) : 42;
+
   detail::fj_settings_t fj_settings;
   fj_settings.time_limit             = 30.;
   fj_settings.mode                   = detail::fj_mode_t::EXIT_NON_IMPROVING;
@@ -194,8 +196,8 @@ static bool run_fj_check_determinism(std::string test_instance, int iter_limit)
   fj_settings.termination         = detail::fj_termination_flags_t::FJ_TERMINATION_ITERATION_LIMIT;
   fj_settings.iteration_limit     = iter_limit;
   fj_settings.load_balancing_mode = detail::fj_load_balancing_mode_t::ALWAYS_OFF;
-  fj_settings.seed                = 42;
-  cuopt::seed_generator::set_seed(42);
+  fj_settings.seed                = seed;
+  cuopt::seed_generator::set_seed(fj_settings.seed);
 
   auto state     = run_fj(test_instance, fj_settings);
   auto& solution = state.solution;
@@ -205,6 +207,10 @@ static bool run_fj_check_determinism(std::string test_instance, int iter_limit)
                   solution.get_feasible(),
                   solution.get_user_objective(),
                   solution.get_objective());
+
+  static auto first_val = solution.get_user_objective();
+
+  if (abs(solution.get_user_objective() - first_val) > 1) exit(0);
 
   return true;
 }
@@ -305,10 +311,15 @@ static bool run_fj_check_feasible(std::string test_instance)
 
 TEST(mip_solve, feasibility_jump_determinism)
 {
-  for (const auto& instance : {"gen-ip054.mps", "50v-10.mps",
-                               /*"buildingenergy.mps"*/}) {
-    for (int i = 0; i < 10; i++) {
-      run_fj_check_determinism(instance, 200);
+  for (const auto& instance : {
+         //"thor50dday.mps",
+         //"gen-ip054.mps",
+         "50v-10.mps",
+         //"seymour1.mps",
+       }) {
+    // for (int i = 0; i < 10; i++)
+    while (true) {
+      run_fj_check_determinism(instance, 1000);
     }
   }
 }

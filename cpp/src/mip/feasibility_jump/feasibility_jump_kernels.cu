@@ -24,6 +24,8 @@
 
 #include <raft/random/rng.cuh>
 
+#include <thrust/sort.h>
+
 #include <cooperative_groups.h>
 
 namespace cg = cooperative_groups;
@@ -729,31 +731,6 @@ __global__ void update_assignment_kernel(typename fj_t<i_t, f_t>::climber_data_t
   // Update the LHSs of all involved constraints.
   auto [offset_begin, offset_end] = fj.pb.reverse_range_for_var(var_idx);
 
-  if (blockIdx.x == 0) {
-    for (auto i = offset_begin; i < offset_end; i += 1) {
-      cuopt_assert(i < (i_t)fj.pb.reverse_constraints.size(), "");
-      auto cstr_idx   = fj.pb.reverse_constraints[i];
-      auto cstr_coeff = fj.pb.reverse_coefficients[i];
-      f_t old_lhs     = fj.incumbent_lhs[cstr_idx];
-      f_t new_lhs     = old_lhs + cstr_coeff * fj.jump_move_delta[var_idx];
-      f_t old_cost    = fj.excess_score(cstr_idx, old_lhs);
-      f_t new_cost    = fj.excess_score(cstr_idx, new_lhs);
-
-      if (threadIdx.x == 0) {
-        cuopt_assert(*fj.constraints_changed_count >= 0 &&
-                       *fj.constraints_changed_count <= fj.pb.n_constraints,
-                     "");
-        f_t cstr_tolerance = fj.get_corrected_tolerance(cstr_idx);
-        if (new_cost < -cstr_tolerance && !fj.violated_constraints.contains(cstr_idx))
-          fj.constraints_changed[atomicAdd(fj.constraints_changed_count, 1)] =
-            (cstr_idx << 1) | CONSTRAINT_FLAG_INSERT;
-        else if (!(new_cost < -cstr_tolerance) && fj.violated_constraints.contains(cstr_idx))
-          fj.constraints_changed[atomicAdd(fj.constraints_changed_count, 1)] =
-            cstr_idx << 1 | CONSTRAINT_FLAG_REMOVE;
-      }
-    }
-  }
-
   for (auto i = offset_begin + blockIdx.x; i < offset_end; i += gridDim.x) {
     cuopt_assert(i < (i_t)fj.pb.reverse_constraints.size(), "");
 
@@ -764,6 +741,19 @@ __global__ void update_assignment_kernel(typename fj_t<i_t, f_t>::climber_data_t
     f_t new_lhs  = old_lhs + cstr_coeff * fj.jump_move_delta[var_idx];
     f_t old_cost = fj.excess_score(cstr_idx, old_lhs);
     f_t new_cost = fj.excess_score(cstr_idx, new_lhs);
+
+    if (threadIdx.x == 0) {
+      cuopt_assert(
+        *fj.constraints_changed_count >= 0 && *fj.constraints_changed_count <= fj.pb.n_constraints,
+        "");
+      f_t cstr_tolerance = fj.get_corrected_tolerance(cstr_idx);
+      if (new_cost < -cstr_tolerance && !fj.violated_constraints.contains(cstr_idx))
+        fj.constraints_changed[atomicAdd(fj.constraints_changed_count, 1)] =
+          (cstr_idx << 1) | CONSTRAINT_FLAG_INSERT;
+      else if (!(new_cost < -cstr_tolerance) && fj.violated_constraints.contains(cstr_idx))
+        fj.constraints_changed[atomicAdd(fj.constraints_changed_count, 1)] =
+          cstr_idx << 1 | CONSTRAINT_FLAG_REMOVE;
+    }
 
     __syncthreads();
 
@@ -1089,6 +1079,10 @@ DI void update_changed_constraints(typename fj_t<i_t, f_t>::climber_data_t::view
   if (blockIdx.x == 0) {
     if (threadIdx.x == 0) {
       // sort changed constraints to guarantee determinism
+      // TODO: horribly slow as it is
+      thrust::sort(thrust::seq,
+                   fj.constraints_changed.begin(),
+                   fj.constraints_changed.begin() + *fj.constraints_changed_count);
 
       for (i_t i = 0; i < *fj.constraints_changed_count; ++i) {
         i_t idx = fj.constraints_changed[i];
@@ -1359,6 +1353,14 @@ __global__ void select_variable_kernel(typename fj_t<i_t, f_t>::climber_data_t::
         good_var_count);
 #endif
       cuopt_assert(fj.jump_move_scores[selected_var].valid(), "");
+    } else {
+#if FJ_SINGLE_STEP
+      DEVICE_LOG_INFO("=[%d]---- FJ: no var selected, obj is %g, viol %d, out of %d\n",
+                      *fj.iterations,
+                      *fj.incumbent_objective,
+                      fj.violated_constraints.size(),
+                      good_var_count);
+#endif
     }
   }
 }
@@ -1469,6 +1471,9 @@ DI thrust::tuple<i_t, f_t, typename fj_t<i_t, f_t>::move_score_t> best_random_mt
   raft::random::PCGenerator rng(fj.settings->seed + *fj.iterations, 0, 0);
 
   i_t cstr_idx = fj.violated_constraints.contents[rng.next_u32() % fj.violated_constraints.size()];
+  cuopt_assert(fj.excess_score(cstr_idx, fj.incumbent_lhs[cstr_idx]) < 0,
+               "constraint isn't violated");
+
   auto [offset_begin, offset_end] = fj.pb.range_for_constraint(cstr_idx);
 
   return gridwide_reduce_best_move<i_t, f_t, TPB, /*WeakTabu=*/true, /*recompute_score=*/true>(
