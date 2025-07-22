@@ -204,7 +204,8 @@ static uint32_t run_fp(std::string test_instance, local_search_mode_t mode)
 
 static uint32_t run_fp_check_determinism(std::string test_instance, local_search_mode_t mode)
 {
-  int seed = std::getenv("FJ_SEED") ? std::stoi(std::getenv("FJ_SEED")) : 42;
+  int seed =
+    std::getenv("CUOPT_SEED") ? std::stoi(std::getenv("CUOPT_SEED")) : std::random_device{}();
   cuopt::seed_generator::set_seed(seed);
 
   return run_fp(test_instance, mode);

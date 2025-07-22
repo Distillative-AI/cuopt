@@ -273,7 +273,7 @@ void diversity_manager_t<i_t, f_t>::generate_initial_solutions()
                   population.var_threshold);
   population.print();
   auto new_sol_vector = population.get_external_solutions();
-  if (!fj_only_run) { recombine_and_ls_with_all(new_sol_vector); }
+  if (!settings.fj_only_run) { recombine_and_ls_with_all(new_sol_vector); }
 }
 
 template <typename i_t, typename f_t>
@@ -353,9 +353,12 @@ void diversity_manager_t<i_t, f_t>::run_fj_alone(solution_t<i_t, f_t>& solution)
   ls.fj.settings.n_of_minimums_for_exit = 20000 * 1000;
   ls.fj.settings.update_weights         = true;
   ls.fj.settings.feasibility_run        = false;
-  ls.fj.settings.termination            = fj_termination_flags_t::FJ_TERMINATION_TIME_LIMIT;
-  ls.fj.settings.time_limit             = timer.remaining_time();
-  ls.fj.solve(solution);
+  // ls.fj.settings.termination            = fj_termination_flags_t::FJ_TERMINATION_TIME_LIMIT;
+
+  ls.fj.settings.termination     = fj_termination_flags_t::FJ_TERMINATION_ITERATION_LIMIT;
+  ls.fj.settings.iteration_limit = 10000;
+  ls.fj.settings.time_limit      = timer.remaining_time();
+  // ls.fj.solve(solution);
   CUOPT_LOG_INFO("FJ alone finished!");
 }
 
@@ -396,7 +399,7 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
     std::min(max_time_on_probing, time_limit * time_ratio_of_probing_cache);
   timer_t probing_timer{time_for_probing_cache};
   if (check_b_b_preemption()) { return population.best_feasible(); }
-  if (!fj_only_run) {
+  if (!settings.fj_only_run) {
     compute_probing_cache(ls.constraint_prop.bounds_update, *problem_ptr, probing_timer);
   }
   // careful, assign the correct probing cache
@@ -412,7 +415,7 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
   lp_settings.tolerance             = context.settings.tolerances.absolute_tolerance;
   lp_settings.return_first_feasible = false;
   lp_settings.save_state            = true;
-  if (!fj_only_run) {
+  if (!settings.fj_only_run) {
     auto lp_result =
       get_relaxed_lp_solution(*problem_ptr, lp_optimal_solution, lp_state, lp_settings);
     ls.lp_optimal_exists = true;
@@ -442,7 +445,7 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
       population.best_feasible().get_user_objective();
   }
 
-  if (fj_only_run) {
+  if (settings.fj_only_run) {
     run_fj_alone(population.best_feasible());
     return population.best_feasible();
   }

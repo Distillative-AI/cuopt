@@ -225,6 +225,8 @@ void constraint_prop_t<i_t, f_t>::sort_by_interval_and_frac(solution_t<i_t, f_t>
                           return bounds_interval_1 < bounds_interval_2;
                         }
                       });
+
+  CUOPT_LOG_DEBUG("hash vars 0x%x", detail::compute_hash(vars));
   // now do the suffling, for that we need to assign some random values to rnd array
   // we will sort this rnd array and the vars in subsections, so that each subsection will be
   // shuffled in total we will have 3(binary, ternary and rest) x 7 intervals = 21 subsections.
@@ -277,7 +279,10 @@ void constraint_prop_t<i_t, f_t>::sort_by_interval_and_frac(solution_t<i_t, f_t>
                        }
                      }
                    });
+
+  CUOPT_LOG_DEBUG("hash subsection_offsets 0x%x", detail::compute_hash(subsection_offsets));
   auto random_vector = get_random_uniform_vector<i_t, f_t>((i_t)vars.size(), rng);
+  CUOPT_LOG_DEBUG("hash random_vector 0x%x", detail::compute_hash(random_vector));
   rmm::device_uvector<f_t> device_random_vector(random_vector.size(), sol.handle_ptr->get_stream());
   raft::copy(device_random_vector.data(),
              random_vector.data(),
@@ -748,6 +753,7 @@ bool constraint_prop_t<i_t, f_t>::run_repair_procedure(problem_t<i_t, f_t>& prob
                                                        timer_t& timer,
                                                        const raft::handle_t* handle_ptr)
 {
+  CUOPT_LOG_DEBUG("Running repair procedure");
   // select the first probing value
   i_t select = 0;
   multi_probe.set_updated_bounds(problem, select, handle_ptr);
@@ -822,7 +828,9 @@ bool constraint_prop_t<i_t, f_t>::find_integer(
 {
   using crit_t             = termination_criterion_t;
   auto& unset_integer_vars = unset_vars;
-  std::mt19937 rng(cuopt::seed_generator::get_seed());
+  i_t seed                 = cuopt::seed_generator::get_seed();
+  CUOPT_LOG_DEBUG("seed 0x%x", seed);
+  std::mt19937 rng(seed);
   lb_restore.resize(sol.problem_ptr->n_variables, sol.handle_ptr->get_stream());
   ub_restore.resize(sol.problem_ptr->n_variables, sol.handle_ptr->get_stream());
   assignment_restore.resize(sol.problem_ptr->n_variables, sol.handle_ptr->get_stream());
@@ -846,6 +854,7 @@ bool constraint_prop_t<i_t, f_t>::find_integer(
              sol.problem_ptr->integer_indices.data(),
              sol.problem_ptr->n_integer_vars,
              sol.handle_ptr->get_stream());
+  CUOPT_LOG_DEBUG("sol hash 0x%x", sol.get_hash());
   CUOPT_LOG_DEBUG("Bounds propagation rounding: unset vars %lu", unset_integer_vars.size());
   if (unset_integer_vars.size() == 0) {
     CUOPT_LOG_ERROR("No integer variables provided in the bounds prop rounding");
@@ -855,6 +864,7 @@ bool constraint_prop_t<i_t, f_t>::find_integer(
   }
   // this is needed for the sort inside of the loop
   bool problem_ii = is_problem_ii(*sol.problem_ptr);
+  CUOPT_LOG_DEBUG("is problem ii %d\n", problem_ii);
   // if the problem is ii, run the bounds prop in the beginning
   if (problem_ii) {
     bool bounds_repaired =
@@ -871,16 +881,23 @@ bool constraint_prop_t<i_t, f_t>::find_integer(
   }
   // do the sort if the problem is not ii. crossing bounds might cause some issues on the sort order
   else {
+    CUOPT_LOG_DEBUG("hash unset_integer_vars 0x%x, sol 0x%x before sort\n",
+                    detail::compute_hash(unset_integer_vars),
+                    sol.get_hash());
     // this is a sort to have initial shuffling, so that stable sort within will keep the order and
     // some randomness will be achieved
     sort_by_interval_and_frac(sol, make_span(unset_integer_vars), rng);
+    CUOPT_LOG_DEBUG("hash unset_integer_vars 0x%x sol 0x%x after sort\n",
+                    detail::compute_hash(unset_integer_vars),
+                    sol.get_hash());
   }
   set_host_bounds(sol);
   size_t set_count               = 0;
   bool timeout_happened          = false;
   i_t n_failed_repair_iterations = 0;
   while (set_count < unset_integer_vars.size()) {
-    CUOPT_LOG_TRACE("n_set_vars %d vars to set %lu", set_count, unset_integer_vars.size());
+    CUOPT_LOG_DEBUG("n_set_vars %d vars to set %lu", set_count, unset_integer_vars.size());
+    CUOPT_LOG_DEBUG("hash unset_integer_vars 0x%x\n", detail::compute_hash(unset_integer_vars));
     update_host_assignment(sol);
     if (max_timer.check_time_limit()) {
       CUOPT_LOG_DEBUG("Second time limit is reached returning nearest rounding!");
@@ -915,6 +932,9 @@ bool constraint_prop_t<i_t, f_t>::find_integer(
                unset_integer_vars.data() + set_count,
                n_vars_to_set,
                sol.handle_ptr->get_stream());
+
+    printf("host_vars_to_set hash 0x%x\n", detail::compute_hash(host_vars_to_set));
+
     auto var_probe_vals =
       generate_bulk_rounding_vector(sol, orig_sol, host_vars_to_set, probing_config);
     probe(
@@ -951,7 +971,7 @@ bool constraint_prop_t<i_t, f_t>::find_integer(
                                      make_span(orig_sol.problem_ptr->variable_upper_bounds),
                                      make_span(sol.assignment)});
         i_t n_fixed_vars = (iter - (unset_vars.begin() + set_count));
-        CUOPT_LOG_TRACE("After repair procedure, number of additional fixed vars %d", n_fixed_vars);
+        CUOPT_LOG_DEBUG("After repair procedure, number of additional fixed vars %d", n_fixed_vars);
         set_count += n_fixed_vars;
       }
     }

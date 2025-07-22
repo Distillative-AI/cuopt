@@ -223,7 +223,8 @@ static bool run_fj_check_feasible(std::string test_instance)
 
 static bool run_fj_check_determinism(std::string test_instance, int iter_limit)
 {
-  int seed = std::getenv("FJ_SEED") ? std::stoi(std::getenv("FJ_SEED")) : 42;
+  int seed =
+    std::getenv("CUOPT_SEED") ? std::stoi(std::getenv("CUOPT_SEED")) : std::random_device{}();
 
   detail::fj_settings_t fj_settings;
   fj_settings.time_limit             = 30.;

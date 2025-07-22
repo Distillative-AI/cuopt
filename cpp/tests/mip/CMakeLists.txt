@@ -55,3 +55,6 @@ ConfigureTest(PRESOLVE_TEST
 ConfigureTest(LOCAL_SEARCH_TEST
     ${CMAKE_CURRENT_SOURCE_DIR}/local_search_test.cu
 )
+ConfigureTest(DIVERSITY_TEST
+    ${CMAKE_CURRENT_SOURCE_DIR}/diversity_test.cu
+)

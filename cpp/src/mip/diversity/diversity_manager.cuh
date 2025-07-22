@@ -37,6 +37,11 @@ namespace cuopt::linear_programming::detail {
 template <typename i_t, typename f_t>
 class diversity_manager_t {
  public:
+  struct diversity_settings_t {
+    bool fj_only_run = false;
+  };
+
+ public:
   diversity_manager_t(mip_solver_context_t<i_t, f_t>& context);
   bool run_presolve(f_t time_limit);
   solution_t<i_t, f_t> run_solver();
@@ -82,6 +87,7 @@ class diversity_manager_t {
   i_t current_step{0};
   solver_stats_t<i_t, f_t>& stats;
   std::vector<solution_t<i_t, f_t>> initial_sol_vector;
+  diversity_settings_t settings;
 
   // Enhanced statistics structure for UCB with exponential recency weighting
   struct mab_arm_stats_t {

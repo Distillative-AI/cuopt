@@ -104,7 +104,7 @@ class solution_t {
   f_t compute_max_constraint_violation();
   f_t compute_max_int_violation();
   f_t compute_max_variable_violation();
-  uint32_t get_hash();
+  uint32_t get_hash() const;
 
   struct view_t {
     // let's not bloat the class for every simple getter and setters

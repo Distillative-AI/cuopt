@@ -24,6 +24,7 @@
 #include <linear_programming/utilities/problem_checking.cuh>
 #include <mip/presolve/bounds_presolve.cuh>
 #include <mip/presolve/multi_probe.cuh>
+#include <mip/presolve/trivial_presolve.cuh>
 #include <mip/utils.cuh>
 #include <mps_parser/parser.hpp>
 #include <raft/core/handle.hpp>
@@ -171,22 +172,91 @@ uint32_t test_probing_cache_determinism(std::string path,
   return detail::compute_hash(hashes);
 }
 
-// TEST(presolve, multi_probe)
+uint32_t test_scaling_determinism(std::string path, unsigned long seed = std::random_device{}())
+{
+  auto memory_resource = make_async();
+  rmm::mr::set_current_device_resource(memory_resource.get());
+  const raft::handle_t handle_{};
+  cuopt::mps_parser::mps_data_model_t<int, double> mps_problem =
+    cuopt::mps_parser::parse_mps<int, double>(path, false);
+  handle_.sync_stream();
+  auto op_problem = mps_data_model_to_optimization_problem(&handle_, mps_problem);
+  problem_checking_t<int, double>::check_problem_representation(op_problem);
+  detail::problem_t<int, double> problem(op_problem);
+
+  pdlp_hyper_params::update_primal_weight_on_initial_solution = false;
+  pdlp_hyper_params::update_step_size_on_initial_solution     = true;
+  // problem contains unpreprocessed data
+  detail::problem_t<int, double> scaled_problem(problem);
+
+  detail::pdhg_solver_t<int, double> pdhg_solver(scaled_problem.handle_ptr, scaled_problem);
+  detail::pdlp_initial_scaling_strategy_t<int, double> scaling(
+    scaled_problem.handle_ptr,
+    scaled_problem,
+    pdlp_hyper_params::default_l_inf_ruiz_iterations,
+    (double)pdlp_hyper_params::default_alpha_pock_chambolle_rescaling,
+    pdhg_solver,
+    scaled_problem.reverse_coefficients,
+    scaled_problem.reverse_offsets,
+    scaled_problem.reverse_constraints,
+    true);
+
+  scaling.scale_problem();
+
+  // generate a random initial solution in order to ensure scaling of solution vectors is
+  // deterministic as well as the initial step size
+  std::vector<double> initial_solution(scaled_problem.n_variables);
+  std::mt19937 m{seed};
+  std::generate(initial_solution.begin(), initial_solution.end(), [&m]() { return m(); });
+  auto d_initial_solution = device_copy(initial_solution, handle_.get_stream());
+  scaling.scale_primal(d_initial_solution);
+
+  scaled_problem.preprocess_problem();
+
+  detail::trivial_presolve(scaled_problem);
+
+  std::vector<uint32_t> hashes;
+  hashes.push_back(detail::compute_hash(d_initial_solution, handle_.get_stream()));
+  hashes.push_back(scaled_problem.get_fingerprint());
+  return detail::compute_hash(hashes);
+}
+
+// TEST(presolve, probing_cache_deterministic)
 // {
-//   std::vector<std::string> test_instances = {
-//     "mip/50v-10-free-bound.mps", "mip/neos5-free-bound.mps", "mip/neos5.mps"};
+//   spin_stream_raii_t spin_stream_1;
+
+//   std::vector<std::string> test_instances = {"mip/50v-10-free-bound.mps",
+//                                              "mip/neos5-free-bound.mps",
+//                                              "mip/neos5.mps",
+//                                              "mip/50v-10.mps",
+//                                              "mip/gen-ip054.mps",
+//                                              "mip/rmatr200-p5.mps"};
 //   for (const auto& test_instance : test_instances) {
 //     std::cout << "Running: " << test_instance << std::endl;
-//     auto path = make_path_absolute(test_instance);
-//     test_multi_probe(path);
+//     unsigned long seed = std::random_device{}();
+//     std::cerr << "Tested with seed " << seed << "\n";
+//     auto path          = make_path_absolute(test_instance);
+//     uint32_t gold_hash = 0;
+//     for (int i = 0; i < 10; ++i) {
+//       auto hash = test_probing_cache_determinism(path, seed);
+//       if (i == 0) {
+//         gold_hash = hash;
+//         std::cout << "Gold hash: " << gold_hash << std::endl;
+//       } else {
+//         EXPECT_EQ(hash, gold_hash);
+//       }
+//     }
 //   }
 // }
 
-TEST(presolve, probing_cache_deterministic)
+TEST(presolve, mip_scaling_deterministic)
 {
   spin_stream_raii_t spin_stream_1;
+  spin_stream_raii_t spin_stream_2;
 
-  std::vector<std::string> test_instances = {"mip/50v-10-free-bound.mps",
+  std::vector<std::string> test_instances = {"mip/sct2.mps",
+                                             "mip/thor50dday.mps",
+                                             "mip/uccase9.mps",
                                              "mip/neos5-free-bound.mps",
                                              "mip/neos5.mps",
                                              "mip/50v-10.mps",
@@ -199,7 +269,7 @@ TEST(presolve, probing_cache_deterministic)
     auto path          = make_path_absolute(test_instance);
     uint32_t gold_hash = 0;
     for (int i = 0; i < 10; ++i) {
-      auto hash = test_probing_cache_determinism(path, seed);
+      auto hash = test_scaling_determinism(path, seed);
       if (i == 0) {
         gold_hash = hash;
         std::cout << "Gold hash: " << gold_hash << std::endl;
@@ -209,4 +279,5 @@ TEST(presolve, probing_cache_deterministic)
     }
   }
 }
+
 }  // namespace cuopt::linear_programming::test
