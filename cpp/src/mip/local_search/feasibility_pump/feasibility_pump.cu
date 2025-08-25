@@ -67,6 +67,10 @@ feasibility_pump_t<i_t, f_t>::feasibility_pump_t(
     rng(cuopt::seed_generator::get_seed()),
     timer(20.)
 {
+  thrust::fill(context.problem_ptr->handle_ptr->get_thrust_policy(),
+               last_projection.begin(),
+               last_projection.end(),
+               (f_t)0);
 }
 
 template <typename Iter_T>

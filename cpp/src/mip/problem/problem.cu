@@ -889,6 +889,9 @@ void problem_t<i_t, f_t>::compute_related_variables(double time_limit)
 
     // generate the related var offsets from the prefix sum
     auto offset_it = related_variables_offsets.begin() + 1 + output_offset;
+
+    // avoid initcheck false positive
+    cuopt::mark_span_as_initialized(make_span(offsets), handle_ptr->get_stream());
     thrust::tabulate(handle_ptr->get_thrust_policy(),
                      offset_it,
                      offset_it + slice_size,

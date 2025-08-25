@@ -24,6 +24,7 @@
 #include <mip/local_search/rounding/simple_rounding.cuh>
 #include <mip/mip_constants.hpp>
 #include <utilities/copy_helpers.hpp>
+#include <utilities/cuda_helpers.cuh>
 #include <utilities/seed_generator.cuh>
 
 #include <raft/sparse/detail/cusparse_wrappers.h>
@@ -86,6 +87,18 @@ void solution_t<i_t, f_t>::copy_from(const solution_t<i_t, f_t>& other_sol)
   h_user_obj           = other_sol.h_user_obj;
   h_infeasibility_cost = other_sol.h_infeasibility_cost;
   expand_device_copy(assignment, other_sol.assignment, handle_ptr->get_stream());
+
+  // slack, excess, and constraint value may be uninitialized (and computed later). Mark them as
+  // such
+  cuopt::mark_span_as_initialized(make_span(other_sol.lower_excess), handle_ptr->get_stream());
+  cuopt::mark_span_as_initialized(make_span(other_sol.upper_excess), handle_ptr->get_stream());
+  cuopt::mark_span_as_initialized(make_span(other_sol.lower_slack), handle_ptr->get_stream());
+  cuopt::mark_span_as_initialized(make_span(other_sol.upper_slack), handle_ptr->get_stream());
+  cuopt::mark_span_as_initialized(make_span(other_sol.constraint_value), handle_ptr->get_stream());
+  cuopt::mark_span_as_initialized(make_span(other_sol.obj_val), handle_ptr->get_stream());
+  cuopt::mark_span_as_initialized(make_span(other_sol.n_feasible_constraints),
+                                  handle_ptr->get_stream());
+
   expand_device_copy(lower_excess, other_sol.lower_excess, handle_ptr->get_stream());
   expand_device_copy(upper_excess, other_sol.upper_excess, handle_ptr->get_stream());
   expand_device_copy(lower_slack, other_sol.lower_slack, handle_ptr->get_stream());
@@ -273,6 +286,7 @@ void solution_t<i_t, f_t>::compute_constraints()
 {
   if (problem_ptr->n_constraints == 0) { return; }
 
+  n_feasible_constraints.set_value_to_zero_async(handle_ptr->get_stream());
   i_t TPB = 64;
   compute_constraint_values<i_t, f_t>
     <<<problem_ptr->n_constraints, TPB, 0, handle_ptr->get_stream()>>>(view());
@@ -304,7 +318,6 @@ f_t solution_t<i_t, f_t>::compute_l2_residual()
 template <typename i_t, typename f_t>
 bool solution_t<i_t, f_t>::compute_feasibility()
 {
-  n_feasible_constraints.set_value_to_zero_async(handle_ptr->get_stream());
   compute_constraints();
   compute_objective();
   compute_infeasibility();
@@ -476,6 +489,8 @@ template <typename i_t, typename f_t>
 f_t solution_t<i_t, f_t>::get_quality(const rmm::device_uvector<f_t>& cstr_weights,
                                       const rmm::device_scalar<f_t>& objective_weight)
 {
+  compute_constraints();
+
   // TODO we can as well keep the weights in the solution and compute this once
   f_t weighted_infeasibility = thrust::transform_reduce(
     handle_ptr->get_thrust_policy(),

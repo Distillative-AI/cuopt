@@ -56,8 +56,24 @@ class lp_state_t {
 
   void resize(problem_t<i_t, f_t>& problem, rmm::cuda_stream_view stream)
   {
+    i_t prev_primal_size = prev_primal.size();
+    i_t prev_dual_size   = prev_dual.size();
     prev_primal.resize(problem.n_variables, stream);
     prev_dual.resize(problem.n_constraints, stream);
+
+    // zero-fill the newly allocated space
+    if (prev_primal_size < problem.n_variables) {
+      thrust::fill(problem.handle_ptr->get_thrust_policy(),
+                   prev_primal.data() + prev_primal_size,
+                   prev_primal.data() + problem.n_variables,
+                   0);
+    }
+    if (prev_dual_size < problem.n_constraints) {
+      thrust::fill(problem.handle_ptr->get_thrust_policy(),
+                   prev_dual.data() + prev_dual_size,
+                   prev_dual.data() + problem.n_constraints,
+                   0);
+    }
   }
 
   void set_state(const rmm::device_uvector<f_t>& primal_solution,

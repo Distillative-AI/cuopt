@@ -115,6 +115,7 @@ class bound_prop_recombiner_t : public recombiner_t<i_t, f_t> {
     auto other_view     = other.view();
     auto offspring_view = offspring.view();
     const f_t int_tol   = guiding.problem_ptr->tolerances.integrality_tolerance;
+    cuopt_assert(variable_map.size() == probing_values.size(), "The number of vars should match!");
     thrust::for_each(
       guiding.handle_ptr->get_thrust_policy(),
       thrust::make_counting_iterator(0lu),
@@ -183,6 +184,7 @@ class bound_prop_recombiner_t : public recombiner_t<i_t, f_t> {
     if (guiding_solution.get_feasible()) {
       this->compute_vars_to_fix(offspring, vars_to_fix, n_vars_from_other, n_vars_from_guiding);
       auto [fixed_problem, fixed_assignment, variable_map] = offspring.fix_variables(vars_to_fix);
+      probing_values.resize(fixed_problem.n_variables, a.handle_ptr->get_stream());
       timer_t timer(bp_recombiner_config_t::bounds_prop_time_limit);
       rmm::device_uvector<f_t> old_assignment(offspring.assignment,
                                               offspring.handle_ptr->get_stream());

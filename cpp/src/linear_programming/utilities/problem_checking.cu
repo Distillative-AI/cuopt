@@ -21,6 +21,7 @@
 #include <cuopt/linear_programming/optimization_problem.hpp>
 #include <mip/mip_constants.hpp>
 #include <utilities/copy_helpers.hpp>
+#include <utilities/cuda_helpers.cuh>
 
 #include <thrust/functional.h>
 #include <thrust/logical.h>

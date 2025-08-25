@@ -68,18 +68,19 @@ optimization_problem_solution_t<i_t, f_t> get_relaxed_lp_solution(
       op_problem.n_variables,
       op_problem.n_constraints);
     lp_state.resize(op_problem, op_problem.handle_ptr->get_stream());
-    clamp_within_var_bounds(assignment, &op_problem, op_problem.handle_ptr);
-    // The previous dual sometimes contain invalid values w.r.t current problem
-    // Adjust better dual values when we use warm start
-    thrust::tabulate(op_problem.handle_ptr->get_thrust_policy(),
-                     lp_state.prev_dual.data(),
-                     lp_state.prev_dual.data() + op_problem.n_constraints,
-                     [prev_size, dual = make_span(lp_state.prev_dual)] __device__(i_t i) {
-                       f_t x = dual[i];
-                       if (!isfinite(x) || i >= prev_size) { return 0.0; }
-                       return x;
-                     });
+
     if (settings.has_initial_primal) {
+      // The previous dual sometimes contain invalid values w.r.t current problem
+      // Adjust better dual values when we use warm start
+      thrust::tabulate(op_problem.handle_ptr->get_thrust_policy(),
+                       lp_state.prev_dual.data(),
+                       lp_state.prev_dual.data() + op_problem.n_constraints,
+                       [prev_size, dual = make_span(lp_state.prev_dual)] __device__(i_t i) {
+                         f_t x = dual[i];
+                         if (!isfinite(x) || i >= prev_size) { return 0.0; }
+                         return x;
+                       });
+
       clamp_within_var_bounds(assignment, &op_problem, op_problem.handle_ptr);
       lp_solver.set_initial_primal_solution(assignment);
       lp_solver.set_initial_dual_solution(lp_state.prev_dual);

@@ -745,6 +745,7 @@ void population_t<i_t, f_t>::print()
     if (index.first == 0 && solutions[0].first) {
       CUOPT_LOG_DEBUG(" Best feasible: %f", solutions[index.first].second.get_user_objective());
     }
+    if (index.first == 0 && !solutions[0].first) continue;
     CUOPT_LOG_DEBUG("%d :  %f\t%f\t%f\t%d",
                     i,
                     index.second,

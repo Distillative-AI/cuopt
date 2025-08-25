@@ -214,6 +214,11 @@ DI void sorted_insert(T* array, T item, int curr_size, int max_size)
   array[0] = item;
 }
 
+// NOTE: this marks a range of virtual memory as initialized. This is not tied to any object's
+// lifetime As such, when using a pool for allocations, false negatives could occurs e.g. a range
+// previously marked as initialized is now occupied by a new uninitialized object Unlikely to cause
+// issues in practice - but worth noting (RAII? I'm not even sure the API allows to un-mark a range
+// as initialized)
 static inline void mark_memory_as_initialized(const void* ptr, size_t size, cudaStream_t stream = 0)
 {
 #if CUDART_VERSION >= 12080
