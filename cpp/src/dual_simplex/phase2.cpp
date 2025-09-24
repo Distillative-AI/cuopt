@@ -767,7 +767,8 @@ i_t steepest_edge_pricing_with_infeasibilities(const lp_problem_t<i_t, f_t>& lp,
   for (i_t k = 0; k < nz; ++k) {
     const i_t j              = infeasibility_indices[k];
     const f_t squared_infeas = squared_infeasibilities[j];
-    const f_t val            = squared_infeas / dy_steepest_edge[j];
+    const f_t val            = dy_steepest_edge[j] == 0.0 ? std::numeric_limits<f_t>::infinity()
+                                                          : squared_infeas / dy_steepest_edge[j];
     if (val > max_val || (val == max_val && j > leaving_index)) {
       max_val                = val;
       leaving_index          = j;

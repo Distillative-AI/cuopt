@@ -159,6 +159,7 @@ f_t sgn(f_t x)
 template <typename f_t>
 f_t relative_gap(f_t obj_value, f_t lower_bound)
 {
+  if (!std::isfinite(obj_value)) return std::numeric_limits<f_t>::infinity();
   f_t user_mip_gap = obj_value == 0.0
                        ? (lower_bound == 0.0 ? 0.0 : std::numeric_limits<f_t>::infinity())
                        : std::abs(obj_value - lower_bound) / std::abs(obj_value);
