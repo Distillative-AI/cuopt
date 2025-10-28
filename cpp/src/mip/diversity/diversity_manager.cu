@@ -272,6 +272,10 @@ void diversity_manager_t<i_t, f_t>::run_fj_alone(solution_t<i_t, f_t>& solution)
   ls.fj.settings.update_weights         = true;
   ls.fj.settings.feasibility_run        = false;
   ls.fj.settings.time_limit             = timer.remaining_time();
+  if (context.settings.deterministic) {
+    ls.fj.settings.time_limit      = timer.remaining_time();
+    ls.fj.settings.iteration_limit = 10000;
+  }
   ls.fj.solve(solution);
   CUOPT_LOG_INFO("FJ alone finished!");
 }
@@ -313,7 +317,7 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
   problem_ptr->check_problem_representation(true);
   // have the structure ready for reusing later
   problem_ptr->compute_integer_fixed_problem();
-  recombiner_t<i_t, f_t>::init_enabled_recombiners(*problem_ptr);
+  recombiner_t<i_t, f_t>::init_enabled_recombiners(context, *problem_ptr);
   mab_recombiner.resize_mab_arm_stats(recombiner_t<i_t, f_t>::enabled_recombiners.size());
   // test problem is not ii
   cuopt_func_call(
@@ -417,12 +421,14 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
       population.best_feasible().get_user_objective();
   }
 
+  if (diversity_config.dry_run) { return population.best_feasible(); }
   if (diversity_config.fj_only_run) {
     solution_t<i_t, f_t> sol(*problem_ptr);
     run_fj_alone(sol);
     return sol;
   }
   generate_solution(timer.remaining_time(), false);
+  if (diversity_config.initial_solution_only) { return population.best_feasible(); }
   if (timer.check_time_limit()) {
     population.add_external_solutions_to_population();
     return population.best_feasible();

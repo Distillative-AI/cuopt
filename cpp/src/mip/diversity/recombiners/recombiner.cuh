@@ -216,7 +216,8 @@ class recombiner_t {
                  "vars_to_fix should be sorted!");
   }
 
-  static void init_enabled_recombiners(const problem_t<i_t, f_t>& problem)
+  static void init_enabled_recombiners(mip_solver_context_t<i_t, f_t>& context,
+                                       const problem_t<i_t, f_t>& problem)
   {
     std::unordered_set<recombiner_enum_t> enabled_recombiners;
     for (auto recombiner : recombiner_types) {
@@ -231,6 +232,8 @@ class recombiner_t {
         (i_t)sub_mip_recombiner_config_t::max_continuous_vars) {
       enabled_recombiners.erase(recombiner_enum_t::SUB_MIP);
     }
+    // submip not supported in deterministic mode yet
+    if (context.settings.deterministic) { enabled_recombiners.erase(recombiner_enum_t::SUB_MIP); }
     recombiner_t::enabled_recombiners =
       std::vector<recombiner_enum_t>(enabled_recombiners.begin(), enabled_recombiners.end());
   }

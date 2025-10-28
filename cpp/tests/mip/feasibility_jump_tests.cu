@@ -56,23 +56,11 @@ void init_handler(const raft::handle_t* handle_ptr)
     handle_ptr->get_cusparse_handle(), CUSPARSE_POINTER_MODE_DEVICE, handle_ptr->get_stream()));
 }
 
-struct fj_tweaks_t {
-  double objective_weight = 0;
-};
-
-struct fj_state_t {
-  detail::solution_t<int, double> solution;
-  std::vector<double> solution_vector;
-  int minimums;
-  double incumbent_objective;
-  double incumbent_violation;
-};
-
 // Helper function to setup MIP solver and run FJ with given settings and initial solution
-static fj_state_t run_fj(std::string test_instance,
-                         const detail::fj_settings_t& fj_settings,
-                         fj_tweaks_t tweaks                   = {},
-                         std::vector<double> initial_solution = {})
+static fj_state_t run_fj_instance(std::string test_instance,
+                                  const detail::fj_settings_t& fj_settings,
+                                  fj_tweaks_t tweaks                   = {},
+                                  std::vector<double> initial_solution = {})
 {
   const raft::handle_t handle_{};
   std::cout << "Running: " << test_instance << std::endl;
@@ -88,45 +76,8 @@ static fj_state_t run_fj(std::string test_instance,
   // run the problem constructor of MIP, so that we do bounds standardization
   detail::problem_t<int, double> problem(op_problem);
   problem.preprocess_problem();
-  detail::pdlp_initial_scaling_strategy_t<int, double> scaling(&handle_,
-                                                               problem,
-                                                               10,
-                                                               1.0,
-                                                               problem.reverse_coefficients,
-                                                               problem.reverse_offsets,
-                                                               problem.reverse_constraints,
-                                                               nullptr,
-                                                               true);
 
-  auto settings       = mip_solver_settings_t<int, double>{};
-  settings.time_limit = 30.;
-  auto timer          = cuopt::timer_t(30);
-  detail::mip_solver_t<int, double> solver(problem, settings, scaling, timer);
-
-  detail::solution_t<int, double> solution(*solver.context.problem_ptr);
-  if (initial_solution.size() > 0) {
-    expand_device_copy(solution.assignment, initial_solution, solution.handle_ptr->get_stream());
-  } else {
-    thrust::fill(solution.handle_ptr->get_thrust_policy(),
-                 solution.assignment.begin(),
-                 solution.assignment.end(),
-                 0.0);
-  }
-  solution.clamp_within_bounds();
-
-  detail::fj_t<int, double> fj(solver.context, fj_settings);
-  fj.reset_weights(solution.handle_ptr->get_stream(), 1.);
-  fj.objective_weight.set_value_async(tweaks.objective_weight, solution.handle_ptr->get_stream());
-  solution.handle_ptr->sync_stream();
-
-  fj.solve(solution);
-  auto solution_vector = host_copy(solution.assignment, solution.handle_ptr->get_stream());
-
-  return {solution,
-          solution_vector,
-          fj.climbers[0]->local_minimums_reached.value(solution.handle_ptr->get_stream()),
-          fj.climbers[0]->incumbent_objective.value(solution.handle_ptr->get_stream()),
-          fj.climbers[0]->violation_score.value(solution.handle_ptr->get_stream())};
+  return run_fj(problem, fj_settings, tweaks, initial_solution);
 }
 
 // FJ had a bug causing objective/violation values to explode in magnitude in certain scenarios.
@@ -141,7 +92,7 @@ static bool run_fj_check_no_obj_runoff(std::string test_instance)
   fj_settings.feasibility_run        = false;
   fj_settings.iteration_limit        = 20000;
 
-  auto state = run_fj(test_instance, fj_settings);
+  auto state = run_fj_instance(test_instance, fj_settings);
 
   // ensure that the objective and the violation in the FJ state are not too large (<1e60)
   EXPECT_LE(state.incumbent_violation, 1e60) << "FJ violation too large";
@@ -163,7 +114,7 @@ static bool run_fj_check_objective(std::string test_instance, int iter_limit, do
   fj_settings.feasibility_run        = obj_target == +std::numeric_limits<double>::infinity();
   fj_settings.iteration_limit        = iter_limit;
 
-  auto state     = run_fj(test_instance, fj_settings);
+  auto state     = run_fj_instance(test_instance, fj_settings);
   auto& solution = state.solution;
 
   CUOPT_LOG_DEBUG("%s: Solution generated with FJ: is_feasible %d, objective %g (raw %g)",
@@ -190,7 +141,7 @@ static bool run_fj_check_feasible(std::string test_instance)
   fj_settings.feasibility_run        = false;
   fj_settings.iteration_limit        = 25000;
 
-  auto state     = run_fj(test_instance, fj_settings);
+  auto state     = run_fj_instance(test_instance, fj_settings);
   auto& solution = state.solution;
 
   bool previous_feasible = solution.get_feasible();
@@ -201,8 +152,8 @@ static bool run_fj_check_feasible(std::string test_instance)
   // again but with very large obj weight to force FJ into the infeasible region
   fj_tweaks_t tweaks;
   tweaks.objective_weight = 1e6;
-  auto new_state          = run_fj(test_instance, fj_settings, tweaks, state.solution_vector);
-  auto& new_solution      = new_state.solution;
+  auto new_state     = run_fj_instance(test_instance, fj_settings, tweaks, state.solution_vector);
+  auto& new_solution = new_state.solution;
 
   CUOPT_LOG_DEBUG("%s: Solution generated with FJ: is_feasible %d, objective %g (raw %g)",
                   test_instance.c_str(),
@@ -233,7 +184,7 @@ static bool run_fj_check_determinism(std::string test_instance, int iter_limit)
   fj_settings.seed                   = seed;
   cuopt::seed_generator::set_seed(fj_settings.seed);
 
-  auto state     = run_fj(test_instance, fj_settings);
+  auto state     = run_fj_instance(test_instance, fj_settings);
   auto& solution = state.solution;
 
   CUOPT_LOG_DEBUG("%s: Solution generated with FJ: is_feasible %d, objective %g (raw %g)",

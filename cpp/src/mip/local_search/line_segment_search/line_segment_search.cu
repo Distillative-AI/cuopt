@@ -27,8 +27,10 @@ namespace cuopt::linear_programming::detail {
 
 template <typename i_t, typename f_t>
 line_segment_search_t<i_t, f_t>::line_segment_search_t(
-  fj_t<i_t, f_t>& fj_, constraint_prop_t<i_t, f_t>& constraint_prop_)
-  : fj(fj_), constraint_prop(constraint_prop_)
+  mip_solver_context_t<i_t, f_t>& context_,
+  fj_t<i_t, f_t>& fj_,
+  constraint_prop_t<i_t, f_t>& constraint_prop_)
+  : context(context_), fj(fj_), constraint_prop(constraint_prop_)
 {
 }
 
@@ -196,7 +198,9 @@ bool line_segment_search_t<i_t, f_t>::search_line_segment(
                               best_feasible_cost,
                               curr_cost);
     }
-    if (timer.check_time_limit()) { break; }
+    if (!context.settings.deterministic) {
+      if (timer.check_time_limit()) { break; }
+    }
     i_t number_of_integer_var_diff = compute_number_of_integer_var_diff<i_t, f_t>(
       solution.problem_ptr->integer_indices,
       solution.assignment,
@@ -217,7 +221,13 @@ bool line_segment_search_t<i_t, f_t>::search_line_segment(
     fj.settings.update_weights         = false;
     fj.settings.feasibility_run        = is_feasibility_run;
     fj.settings.time_limit             = std::min(1., timer.remaining_time());
-    is_feasible                        = fj.solve(solution);
+    if (context.settings.deterministic) {
+      // fj.settings.time_limit = timer.remaining_time();
+      fj.settings.time_limit =
+        std::numeric_limits<double>::max();  // TODO should be global time limit
+      fj.settings.iteration_limit = 500;
+    }
+    is_feasible = fj.solve(solution);
     if (is_feasibility_run) {
       if (is_feasible) {
         CUOPT_LOG_DEBUG("Line segment found feasible");
@@ -234,7 +244,10 @@ bool line_segment_search_t<i_t, f_t>::search_line_segment(
                               best_feasible_cost,
                               curr_cost);
     }
-    if (timer.check_time_limit()) { break; }
+    // cuopt_assert(context.settings.deterministic, "");
+    if (!context.settings.deterministic) {
+      if (timer.check_time_limit()) { break; }
+    }
   }
   // if not recombiner mode but local search mode
   if (!settings.recombiner_mode) {

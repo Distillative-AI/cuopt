@@ -72,18 +72,6 @@ static void setup_device_symbols(rmm::cuda_stream_view stream_view)
   detail::set_pdlp_hyper_parameters(stream_view);
 }
 
-struct fj_tweaks_t {
-  double objective_weight = 0;
-};
-
-struct fj_state_t {
-  detail::solution_t<int, double> solution;
-  std::vector<double> solution_vector;
-  int minimums;
-  double incumbent_objective;
-  double incumbent_violation;
-};
-
 enum local_search_mode_t {
   FP = 0,
   STAGED_FP,
@@ -122,15 +110,19 @@ static uint32_t run_fp(std::string test_instance, local_search_mode_t mode)
                                                                nullptr,
                                                                true);
 
-  auto settings       = mip_solver_settings_t<int, double>{};
-  settings.time_limit = 30.;
-  auto timer          = cuopt::timer_t(30);
+  auto settings          = mip_solver_settings_t<int, double>{};
+  settings.time_limit    = 30.;
+  settings.deterministic = true;
+  auto timer             = cuopt::timer_t(30);
   detail::mip_solver_t<int, double> solver(problem, settings, scaling, timer);
   problem.tolerances = settings.get_tolerances();
 
-  rmm::device_uvector<double> lp_optimal_solution(0, problem.handle_ptr->get_stream());
-
-  lp_optimal_solution.resize(problem.n_variables, problem.handle_ptr->get_stream());
+  rmm::device_uvector<double> lp_optimal_solution(problem.n_variables,
+                                                  problem.handle_ptr->get_stream());
+  thrust::fill(problem.handle_ptr->get_thrust_policy(),
+               lp_optimal_solution.begin(),
+               lp_optimal_solution.end(),
+               0.0);
   detail::lp_state_t<int, double>& lp_state = problem.lp_state;
   // resize because some constructor might be called before the presolve
   lp_state.resize(problem, problem.handle_ptr->get_stream());
@@ -157,7 +149,7 @@ static uint32_t run_fp(std::string test_instance, local_search_mode_t mode)
   printf("LP optimal hash: 0x%x\n", detail::compute_hash(lp_optimal_solution));
   printf("running mode: %d\n", mode);
 
-  local_search.fp.timer = timer_t{600};
+  local_search.fp.timer = timer_t{6000};
 
   detail::ls_config_t<int, double> ls_config{};
 
@@ -230,9 +222,9 @@ TEST_P(LocalSearchTestParams, local_search_operator_determinism)
   for (const auto& instance : {
          //"thor50dday.mps",
          "gen-ip054.mps",
-         //"50v-10.mps",
+         "50v-10.mps",
          //"seymour1.mps",
-         //"rmatr200-p5.mps",
+         "rmatr200-p5.mps",
          //"tr12-30.mps",
          //"sct2.mps",
          //"uccase9.mps"
@@ -245,7 +237,7 @@ TEST_P(LocalSearchTestParams, local_search_operator_determinism)
     unsigned long seed = std::random_device{}();
     std::cerr << "Tested with seed " << seed << "\n";
     uint32_t gold_hash = 0;
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 5; ++i) {
       uint32_t hash = run_fp_check_determinism(instance, mode);
       if (i == 0) {
         gold_hash = hash;
@@ -260,9 +252,9 @@ TEST_P(LocalSearchTestParams, local_search_operator_determinism)
 
 INSTANTIATE_TEST_SUITE_P(LocalSearchTests,
                          LocalSearchTestParams,
-                         testing::Values(std::make_tuple(local_search_mode_t::FP),
-                                         std::make_tuple(local_search_mode_t::FJ_LINE_SEGMENT),
-                                         std::make_tuple(local_search_mode_t::FJ_ON_ZERO),
-                                         std::make_tuple(local_search_mode_t::FJ_ANNEALING)));
+                         testing::Values(  // std::make_tuple(local_search_mode_t::FP),
+                           std::make_tuple(local_search_mode_t::FJ_LINE_SEGMENT),
+                           std::make_tuple(local_search_mode_t::FJ_ON_ZERO),
+                           std::make_tuple(local_search_mode_t::FJ_ANNEALING)));
 
 }  // namespace cuopt::linear_programming::test

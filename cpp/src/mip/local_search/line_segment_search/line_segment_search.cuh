@@ -36,7 +36,9 @@ template <typename i_t, typename f_t>
 class line_segment_search_t {
  public:
   line_segment_search_t() = delete;
-  line_segment_search_t(fj_t<i_t, f_t>& fj, constraint_prop_t<i_t, f_t>& constraint_prop);
+  line_segment_search_t(mip_solver_context_t<i_t, f_t>& context,
+                        fj_t<i_t, f_t>& fj,
+                        constraint_prop_t<i_t, f_t>& constraint_prop);
   bool search_line_segment(solution_t<i_t, f_t>& solution,
                            const rmm::device_uvector<f_t>& point_1,
                            const rmm::device_uvector<f_t>& point_2,
@@ -59,6 +61,7 @@ class line_segment_search_t {
                                f_t& best_feasible_cost,
                                f_t curr_cost);
 
+  mip_solver_context_t<i_t, f_t>& context;
   fj_t<i_t, f_t>& fj;
   constraint_prop_t<i_t, f_t>& constraint_prop;
   line_segment_settings_t settings;

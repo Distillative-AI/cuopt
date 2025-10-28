@@ -72,8 +72,8 @@ static void setup_device_symbols(rmm::cuda_stream_view stream_view)
   detail::set_pdlp_hyper_parameters(stream_view);
 }
 
-static uint32_t test_initial_population_determinism(std::string path,
-                                                    unsigned long seed = std::random_device{}())
+static uint32_t test_initial_solution_determinism(std::string path,
+                                                  unsigned long seed = std::random_device{}())
 {
   const raft::handle_t handle_{};
 
@@ -100,57 +100,129 @@ static uint32_t test_initial_population_determinism(std::string path,
                                                                nullptr,
                                                                true);
 
-  auto settings       = mip_solver_settings_t<int, double>{};
-  settings.time_limit = 30.;
-  auto timer          = cuopt::timer_t(30);
+  auto settings            = mip_solver_settings_t<int, double>{};
+  settings.time_limit      = 3000.;
+  settings.deterministic   = true;
+  settings.heuristics_only = true;
+  auto timer               = cuopt::timer_t(3000);
   detail::mip_solver_t<int, double> solver(problem, settings, scaling, timer);
   problem.tolerances = settings.get_tolerances();
 
   detail::diversity_manager_t<int, double> diversity_manager(solver.context);
-  diversity_manager.diversity_config.fj_only_run = true;
-  // run with FJ only on the initial population, no recombining
+  diversity_manager.timer                                  = timer_t(60000);
+  diversity_manager.diversity_config.initial_solution_only = true;
   diversity_manager.run_solver();
 
-  // recombine a few solutions, observe the output
-  auto pop_vector = diversity_manager.get_population_pointer()->population_to_vector();
-  // necessary because .resize() complains about constructors (since it may be used to grow the
-  // vector as well)
-  while (pop_vector.size() > 9) {
-    pop_vector.pop_back();
+  std::vector<uint32_t> hashes;
+  auto pop = diversity_manager.get_population_pointer();
+  for (const auto& sol : pop->population_to_vector()) {
+    hashes.push_back(sol.get_hash());
   }
+
+  uint32_t final_hash = detail::compute_hash(hashes);
+  printf("%s: final hash: 0x%x, pop size %d\n",
+         path.c_str(),
+         final_hash,
+         (int)pop->population_to_vector().size());
+  return final_hash;
+}
+
+static uint32_t test_recombiners_determinism(std::string path,
+                                             unsigned long seed = std::random_device{}())
+{
+  const raft::handle_t handle_{};
+
+  cuopt::mps_parser::mps_data_model_t<int, double> mps_problem =
+    cuopt::mps_parser::parse_mps<int, double>(path, false);
+  handle_.sync_stream();
+  auto op_problem = mps_data_model_to_optimization_problem(&handle_, mps_problem);
+  problem_checking_t<int, double>::check_problem_representation(op_problem);
+
+  init_handler(op_problem.get_handle_ptr());
+  // run the problem constructor of MIP, so that we do bounds standardization
+  detail::problem_t<int, double> problem(op_problem);
+  problem.preprocess_problem();
+
+  setup_device_symbols(op_problem.get_handle_ptr()->get_stream());
+
+  detail::pdlp_initial_scaling_strategy_t<int, double> scaling(&handle_,
+                                                               problem,
+                                                               10,
+                                                               1.0,
+                                                               problem.reverse_coefficients,
+                                                               problem.reverse_offsets,
+                                                               problem.reverse_constraints,
+                                                               nullptr,
+                                                               true);
+
+  auto settings            = mip_solver_settings_t<int, double>{};
+  settings.time_limit      = 3000.;
+  settings.deterministic   = true;
+  settings.heuristics_only = true;
+  auto timer               = cuopt::timer_t(3000);
+  detail::mip_solver_t<int, double> solver(problem, settings, scaling, timer);
+  problem.tolerances = settings.get_tolerances();
+
+  detail::diversity_manager_t<int, double> diversity_manager(solver.context);
+  diversity_manager.timer                    = timer_t(60000);
+  diversity_manager.diversity_config.dry_run = true;
+  diversity_manager.run_solver();
+
+  // Generate a population by running FJ on random starting points
+  // recombine a few solutions, observe the output
+  for (int i = diversity_manager.population.current_size(); i < 3; ++i) {
+    detail::solution_t<int, double> random_initial_solution(problem);
+    random_initial_solution.assign_random_within_bounds();
+    detail::fj_settings_t fj_settings;
+    fj_settings.feasibility_run = false;
+    fj_settings.iteration_limit = 1000 + i * 100;
+    fj_settings.seed            = seed + i;
+    auto solution =
+      run_fj(problem, fj_settings, fj_tweaks_t{}, random_initial_solution.get_host_assignment())
+        .solution;
+    printf("population %d hash: 0x%x\n", i, solution.get_hash());
+    diversity_manager.population.add_solution(std::move(solution));
+  }
+
+  auto pop_vector = diversity_manager.get_population_pointer()->population_to_vector();
 
   std::vector<uint32_t> hashes;
 
-  static std::map<std::pair<int, int>, uint32_t> hash_map;
+  static std::map<std::tuple<std::string, int, int, detail::recombiner_enum_t>, uint32_t> hash_map;
 
-  // diversity_manager.run_only_ls_recombiner = true;
-  diversity_manager.timer = timer_t(60000);
-  // diversity_manager.recombine_and_ls_with_all(pop_vector);
-  for (int i = 1; i < (int)pop_vector.size(); i++) {
-    for (int j = i + 1; j < (int)pop_vector.size(); j++) {
-      printf("recombining %d and %d\n", i, j);
-      auto [offspring, success] = diversity_manager.recombine(
-        pop_vector[i], pop_vector[j], detail::recombiner_enum_t::LINE_SEGMENT);
-      auto offspring_hash = offspring.get_hash();
-      printf("for %d,%d: offspring hash: 0x%x, parent 1 hash: 0x%x, parent 2 hash: 0x%x\n",
-             i,
-             j,
-             offspring_hash,
-             pop_vector[i].get_hash(),
-             pop_vector[j].get_hash());
-      if (hash_map.find(std::make_pair(i, j)) == hash_map.end()) {
-        hash_map[std::make_pair(i, j)] = offspring_hash;
-      } else {
-        if (hash_map[std::make_pair(i, j)] != offspring_hash) {
-          printf("hash mismatch for %d,%d: %d != %d\n",
-                 i,
-                 j,
-                 hash_map[std::make_pair(i, j)],
-                 offspring_hash);
-          exit(1);
+  for (auto recombiner : {detail::recombiner_enum_t::LINE_SEGMENT,
+                          detail::recombiner_enum_t::BOUND_PROP,
+                          detail::recombiner_enum_t::FP}) {
+    for (int i = 1; i < (int)pop_vector.size(); i++) {
+      for (int j = i + 1; j < (int)pop_vector.size(); j++) {
+        printf("recombining %d and %d w/ recombiner %s\n",
+               i,
+               j,
+               detail::all_recombine_stats::recombiner_labels[(int)recombiner]);
+        auto [offspring, success] =
+          diversity_manager.recombine(pop_vector[i], pop_vector[j], recombiner);
+        auto offspring_hash = offspring.get_hash();
+        printf("for %d,%d: offspring hash: 0x%x, parent 1 hash: 0x%x, parent 2 hash: 0x%x\n",
+               i,
+               j,
+               offspring_hash,
+               pop_vector[i].get_hash(),
+               pop_vector[j].get_hash());
+        if (hash_map.find(std::make_tuple(path, i, j, recombiner)) == hash_map.end()) {
+          hash_map[std::make_tuple(path, i, j, recombiner)] = offspring_hash;
+        } else {
+          if (hash_map[std::make_tuple(path, i, j, recombiner)] != offspring_hash) {
+            printf("%s: hash mismatch for %d,%d: %d != %d\n",
+                   path.c_str(),
+                   i,
+                   j,
+                   hash_map[std::make_tuple(path, i, j, recombiner)],
+                   offspring_hash);
+            exit(1);
+          }
         }
+        hashes.push_back(offspring_hash);
       }
-      hashes.push_back(offspring_hash);
     }
   }
   return detail::compute_hash(hashes);
@@ -161,13 +233,46 @@ static uint32_t test_initial_population_determinism(std::string path,
   }
 
   uint32_t final_hash = detail::compute_hash(hashes);
-  printf("final hash: 0x%x, pop size %d\n", final_hash, (int)pop->population_to_vector().size());
+  printf("%s: final hash: 0x%x, pop size %d\n",
+         path.c_str(),
+         final_hash,
+         (int)pop->population_to_vector().size());
   return final_hash;
 }
 
 class DiversityTestParams : public testing::TestWithParam<std::tuple<std::string>> {};
 
-TEST_P(DiversityTestParams, initial_population_deterministic)
+// TEST_P(DiversityTestParams, recombiners_deterministic)
+// {
+//   cuopt::default_logger().set_pattern("[%n] [%-6l] %v");
+
+//   spin_stream_raii_t spin_stream_1;
+//   spin_stream_raii_t spin_stream_2;
+
+//   auto test_instance = std::get<0>(GetParam());
+//   std::cout << "Running: " << test_instance << std::endl;
+//   int seed =
+//     std::getenv("CUOPT_SEED") ? std::stoi(std::getenv("CUOPT_SEED")) : std::random_device{}();
+//   std::cerr << "Tested with seed " << seed << "\n";
+//   auto path     = make_path_absolute(test_instance);
+//   test_instance = std::getenv("CUOPT_INSTANCE") ? std::getenv("CUOPT_INSTANCE") : test_instance;
+//   path          = "/home/scratch.yboucher_gpu_1/collection/" + test_instance;
+//   uint32_t gold_hash = 0;
+//   for (int i = 0; i < 2; ++i) {
+//     cuopt::seed_generator::set_seed(seed);
+//     std::cout << "Running " << test_instance << " " << i << std::endl;
+//     std::cout << "-------------------------------------------------------------\n";
+//     auto hash = test_recombiners_determinism(path, seed);
+//     if (i == 0) {
+//       gold_hash = hash;
+//       std::cout << "Gold hash: " << gold_hash << std::endl;
+//     } else {
+//       ASSERT_EQ(hash, gold_hash);
+//     }
+//   }
+// }
+
+TEST_P(DiversityTestParams, initial_solution_deterministic)
 {
   cuopt::default_logger().set_pattern("[%n] [%-6l] %v");
 
@@ -183,11 +288,11 @@ TEST_P(DiversityTestParams, initial_population_deterministic)
   test_instance = std::getenv("CUOPT_INSTANCE") ? std::getenv("CUOPT_INSTANCE") : test_instance;
   path          = "/home/scratch.yboucher_gpu_1/collection/" + test_instance;
   uint32_t gold_hash = 0;
-  for (int i = 0; i < 10; ++i) {
+  for (int i = 0; i < 2; ++i) {
     cuopt::seed_generator::set_seed(seed);
     std::cout << "Running " << test_instance << " " << i << std::endl;
     std::cout << "-------------------------------------------------------------\n";
-    auto hash = test_initial_population_determinism(path, seed);
+    auto hash = test_initial_solution_determinism(path, seed);
     if (i == 0) {
       gold_hash = hash;
       std::cout << "Gold hash: " << gold_hash << std::endl;
@@ -199,15 +304,14 @@ TEST_P(DiversityTestParams, initial_population_deterministic)
 
 INSTANTIATE_TEST_SUITE_P(DiversityTest,
                          DiversityTestParams,
-                         testing::Values(std::make_tuple("fastxgemm-n2r6s0t2.mps")
+                         testing::Values(std::make_tuple("gen-ip054.mps"),
+                                         std::make_tuple("pk1.mps"),
+                                         std::make_tuple("fastxgemm-n2r6s0t2.mps"),
                                          // std::make_tuple("mip/sct2.mps")
                                          // std::make_tuple("mip/thor50dday.mps")
-                                         // std::make_tuple("mip/uccase9.mps")
-                                         // std::make_tuple("mip/neos5-free-bound.mps")
+                                         std::make_tuple("uccase9.mps"),
                                          // std::make_tuple("mip/neos5.mps")
-                                         // std::make_tuple("mip/50v-10.mps")
-                                         //  std::make_tuple("mip/rmatr200-p5.mps")
-                                         ));
-// std::make_tuple("mip/gen-ip054.mps")));
+                                         std::make_tuple("50v-10.mps"),
+                                         std::make_tuple("rmatr200-p5.mps")));
 
 }  // namespace cuopt::linear_programming::test

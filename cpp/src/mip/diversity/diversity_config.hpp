@@ -41,6 +41,8 @@ struct diversity_config_t {
   double lp_run_time_if_infeasible    = 1.;
   bool halve_population               = false;
   bool fj_only_run                    = false;
+  bool dry_run                        = false;
+  bool initial_solution_only          = false;
 };
 
 }  // namespace cuopt::linear_programming::detail

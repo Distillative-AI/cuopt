@@ -93,7 +93,12 @@ class fp_recombiner_t : public recombiner_t<i_t, f_t> {
       CUOPT_LOG_DEBUG("FP rec: running LP with infeasibility detection");
       relaxed_lp_settings_t lp_settings;
       lp_settings.time_limit = fp_recombiner_config_t::infeasibility_detection_time_limit;
-      lp_settings.tolerance  = fixed_problem.tolerances.absolute_tolerance;
+      if (this->context.settings.deterministic) {
+        lp_settings.time_limit =
+          std::numeric_limits<double>::max();  // TODO should be global time limit
+        lp_settings.iteration_limit = 5000;
+      }
+      lp_settings.tolerance             = fixed_problem.tolerances.absolute_tolerance;
       lp_settings.return_first_feasible = true;
       lp_settings.save_state            = true;
       lp_settings.check_infeasibility   = true;
@@ -118,6 +123,9 @@ class fp_recombiner_t : public recombiner_t<i_t, f_t> {
       offspring.assignment = std::move(fixed_assignment);
       cuopt_func_call(offspring.test_variable_bounds(false));
       timer_t timer(fp_recombiner_config_t::fp_time_limit);
+      if (this->context.settings.deterministic) {
+        timer = timer_t(std::numeric_limits<double>::max());  // TODO should be global time limit
+      }
       fp.timer = timer;
       fp.cycle_queue.reset(offspring);
       fp.reset();

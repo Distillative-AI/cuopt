@@ -873,7 +873,9 @@ bool constraint_prop_t<i_t, f_t>::find_integer(
   std::mt19937 rng(seed);
 
   // CHANGE
-  timer = timer_t(std::numeric_limits<f_t>::infinity());
+  if (this->context.settings.deterministic) {
+    timer = timer_t(std::numeric_limits<f_t>::infinity());
+  }
 
   lb_restore.resize(sol.problem_ptr->n_variables, sol.handle_ptr->get_stream());
   ub_restore.resize(sol.problem_ptr->n_variables, sol.handle_ptr->get_stream());
@@ -1105,6 +1107,9 @@ bool constraint_prop_t<i_t, f_t>::apply_round(
 {
   raft::common::nvtx::range fun_scope("constraint prop round");
   max_timer = timer_t{max_time_for_bounds_prop};
+  if (this->context.settings.deterministic) {
+    max_timer = timer_t(std::numeric_limits<double>::infinity());
+  }
   if (check_brute_force_rounding(sol)) { return true; }
   recovery_mode      = false;
   rounding_ii        = false;

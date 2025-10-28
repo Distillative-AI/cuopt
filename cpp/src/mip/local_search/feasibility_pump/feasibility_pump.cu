@@ -331,6 +331,10 @@ bool feasibility_pump_t<i_t, f_t>::test_fj_feasible(solution_t<i_t, f_t>& soluti
   fj.settings.feasibility_run        = true;
   fj.settings.n_of_minimums_for_exit = 5000;
   fj.settings.time_limit             = std::min(time_limit, timer.remaining_time());
+  if (context.settings.deterministic) {
+    fj.settings.time_limit      = timer.remaining_time();
+    fj.settings.iteration_limit = 10000;
+  }
   cuopt_func_call(solution.test_variable_bounds(true));
   is_feasible = fj.solve(solution);
   cuopt_func_call(solution.test_variable_bounds(true));
