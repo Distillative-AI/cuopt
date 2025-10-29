@@ -208,6 +208,7 @@ rapids_cpm_rapids_logger(BUILD_EXPORT_SET cuopt-exports INSTALL_EXPORT_SET cuopt
 create_logger_macros(CUOPT "cuopt::default_logger()" include/cuopt)
 
 find_package(CUDSS REQUIRED)
+find_package(xgboost REQUIRED)
 
 if(BUILD_TESTS)
   include(cmake/thirdparty/get_gtest.cmake)
@@ -316,6 +317,7 @@ target_link_libraries(cuopt
   rapids_logger::rapids_logger
   CCCL::CCCL
   raft::raft
+  xgboost::xgboost
   cuopt::mps_parser
   ${CUDSS_LIB_FILE}
   PRIVATE

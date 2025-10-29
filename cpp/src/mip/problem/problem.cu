@@ -96,6 +96,7 @@ void problem_t<i_t, f_t>::op_problem_cstr_body(const optimization_problem_t<i_t,
     compute_vars_with_objective_coeffs();
   }
   compute_transpose_of_problem();
+  compute_auxiliary_data();
   // Check after modifications
   cuopt_func_call(check_problem_representation(true, is_mip));
   combine_constraint_bounds<i_t, f_t>(*this, combined_bounds);
@@ -725,6 +726,55 @@ void problem_t<i_t, f_t>::recompute_auxilliary_data(bool check_representation)
 }
 
 template <typename i_t, typename f_t>
+void problem_t<i_t, f_t>::compute_auxiliary_data()
+{
+  raft::common::nvtx::range fun_scope("compute_auxiliary_data");
+
+  // Compute sparsity: nnz / (n_rows * n_cols)
+  sparsity = (n_constraints > 0 && n_variables > 0)
+               ? static_cast<double>(nnz) / (static_cast<double>(n_constraints) * n_variables)
+               : 0.0;
+
+  // Compute stddev of non-zeros per row (on device)
+  nnz_stddev     = 0.0;
+  unbalancedness = 0.0;
+  if (offsets.size() == static_cast<size_t>(n_constraints + 1) && n_constraints > 0) {
+    // First: compute nnz per row on device
+    rmm::device_uvector<i_t> d_nnz_per_row(n_constraints, handle_ptr->get_stream());
+    thrust::transform(handle_ptr->get_thrust_policy(),
+                      offsets.begin() + 1,
+                      offsets.begin() + n_constraints + 1,
+                      offsets.begin(),
+                      d_nnz_per_row.begin(),
+                      thrust::minus<i_t>());
+
+    // Compute mean
+    double sum  = thrust::reduce(handle_ptr->get_thrust_policy(),
+                                d_nnz_per_row.begin(),
+                                d_nnz_per_row.end(),
+                                0.0,
+                                thrust::plus<double>());
+    double mean = sum / n_constraints;
+
+    // Compute variance
+    double variance = thrust::transform_reduce(
+                        handle_ptr->get_thrust_policy(),
+                        d_nnz_per_row.begin(),
+                        d_nnz_per_row.end(),
+                        [mean] __device__(i_t x) -> double {
+                          double diff = static_cast<double>(x) - mean;
+                          return diff * diff;
+                        },
+                        0.0,
+                        thrust::plus<double>()) /
+                      n_constraints;
+
+    nnz_stddev     = std::sqrt(variance);
+    unbalancedness = nnz_stddev / mean;
+  }
+}
+
+template <typename i_t, typename f_t>
 void problem_t<i_t, f_t>::compute_n_integer_vars()
 {
   raft::common::nvtx::range fun_scope("compute_n_integer_vars");
@@ -1276,6 +1326,7 @@ void problem_t<i_t, f_t>::remove_given_variables(problem_t<i_t, f_t>& original_p
   coefficients.resize(nnz, handle_ptr->get_stream());
   variables.resize(nnz, handle_ptr->get_stream());
   compute_transpose_of_problem();
+  compute_auxiliary_data();
   combine_constraint_bounds<i_t, f_t>(*this, combined_bounds);
   handle_ptr->sync_stream();
   recompute_auxilliary_data();
@@ -1492,6 +1543,7 @@ void problem_t<i_t, f_t>::preprocess_problem()
   standardize_bounds(variable_constraint_map, *this);
   compute_csr(variable_constraint_map, *this);
   compute_transpose_of_problem();
+  compute_auxiliary_data();
   cuopt_func_call(check_problem_representation(true, false));
   presolve_data.initialize_var_mapping(*this, handle_ptr);
   integer_indices.resize(n_variables, handle_ptr->get_stream());
@@ -1659,6 +1711,7 @@ void problem_t<i_t, f_t>::add_cutting_plane_at_objective(f_t objective)
                                objective);
   insert_constraints(h_constraints);
   compute_transpose_of_problem();
+  compute_auxiliary_data();
   cuopt_func_call(check_problem_representation(true));
 }
 

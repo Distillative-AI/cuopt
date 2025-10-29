@@ -66,5 +66,6 @@ docs/cuopt/build
 
 # generated version file
 cpp/include/cuopt/semantic_version.hpp
+cpp/src/utilities/models_ubj.h
 !datasets/quadratic_programming
 !datasets/quadratic_programming/**

@@ -38,6 +38,9 @@
 
 #include <cooperative_groups.h>
 
+#include <iomanip>
+#include <sstream>
+
 #define FJ_LOG_PREFIX "FJ: "
 
 namespace cuopt::linear_programming::detail {
@@ -888,6 +891,181 @@ void fj_t<i_t, f_t>::refresh_lhs_and_violation(const rmm::cuda_stream_view& stre
 }
 
 template <typename i_t, typename f_t>
+std::map<std::string, float> fj_t<i_t, f_t>::get_feature_vector(i_t climber_idx) const
+{
+  auto& data          = *climbers[climber_idx];
+  auto climber_stream = data.stream.view();
+  if (climber_idx == 0) climber_stream = handle_ptr->get_stream();
+
+  std::map<std::string, float> features;
+
+  // Basic problem dimensions
+  features["n_variables"]   = (float)pb_ptr->n_variables;
+  features["n_constraints"] = (float)pb_ptr->n_constraints;
+  features["nnz"]           = (float)pb_ptr->coefficients.size();
+
+  // Matrix sparsity metrics (already computed)
+  features["sparsity"]       = (float)pb_ptr->sparsity;
+  features["nnz_stddev"]     = (float)pb_ptr->nnz_stddev;
+  features["unbalancedness"] = (float)pb_ptr->unbalancedness;
+
+  // Algorithm settings
+  features["target_time"]            = (float)settings.work_unit_limit;
+  features["n_of_minimums_for_exit"] = (float)settings.n_of_minimums_for_exit;
+  features["feasibility_run"]        = (float)settings.feasibility_run;
+
+  // Variable type metrics
+  features["n_integer_vars"] = (float)pb_ptr->n_integer_vars;
+  features["n_binary_vars"]  = (float)pb_ptr->n_binary_vars;
+  features["integer_ratio"] =
+    pb_ptr->n_variables > 0 ? (float)pb_ptr->n_integer_vars / pb_ptr->n_variables : 0.0f;
+  features["binary_ratio"] =
+    pb_ptr->n_variables > 0 ? (float)pb_ptr->n_binary_vars / pb_ptr->n_variables : 0.0f;
+
+  // Initial violation metrics (from current state)
+  features["initial_violation_count"] =
+    (float)data.violated_constraints.set_size.value(climber_stream);
+  // features["initial_violation_score"] = (float)data.violation_score.value(climber_stream);
+  // features["initial_weighted_violation"] =
+  // (float)data.weighted_violation_score.value(climber_stream);
+
+  // Load balancing decision
+  bool use_load_balancing = false;
+  if (settings.load_balancing_mode == fj_load_balancing_mode_t::ALWAYS_OFF) {
+    use_load_balancing = false;
+  } else if (settings.load_balancing_mode == fj_load_balancing_mode_t::ALWAYS_ON) {
+    use_load_balancing = true;
+  } else if (settings.load_balancing_mode == fj_load_balancing_mode_t::AUTO) {
+    use_load_balancing =
+      pb_ptr->n_variables > settings.parameters.load_balancing_codepath_min_varcount;
+  }
+  if (settings.mode == fj_mode_t::ROUNDING) { use_load_balancing = false; }
+  features["uses_load_balancing"] = (float)use_load_balancing;
+
+  // Related variables metrics (if available)
+  if (pb_ptr->related_variables_offsets.size() > 0) {
+    auto h_offsets = cuopt::host_copy(pb_ptr->related_variables_offsets, handle_ptr->get_stream());
+    i_t total_related = 0;
+    i_t max_related   = 0;
+    for (i_t i = 0; i < pb_ptr->n_variables; ++i) {
+      i_t count = h_offsets[i + 1] - h_offsets[i];
+      total_related += count;
+      max_related = std::max(max_related, count);
+    }
+    features["avg_related_vars_per_var"] =
+      pb_ptr->n_variables > 0 ? (float)total_related / pb_ptr->n_variables : 0.0f;
+    features["max_related_vars"] = (float)max_related;
+  } else {
+    features["avg_related_vars_per_var"] = 0.0f;
+    features["max_related_vars"]         = 0.0f;
+  }
+
+  // Constraint characteristics
+  auto h_lower    = cuopt::host_copy(pb_ptr->constraint_lower_bounds, handle_ptr->get_stream());
+  auto h_upper    = cuopt::host_copy(pb_ptr->constraint_upper_bounds, handle_ptr->get_stream());
+  i_t n_equality  = 0;
+  i_t n_tight     = 0;
+  f_t total_range = 0.0;
+  i_t n_range_constraints = 0;
+
+  for (i_t i = 0; i < pb_ptr->n_constraints; ++i) {
+    if (pb_ptr->integer_equal(h_lower[i], h_upper[i])) {
+      n_equality++;
+    } else {
+      f_t range = h_upper[i] - h_lower[i];
+      if (std::isfinite(range)) {
+        total_range += range;
+        n_range_constraints++;
+        if (range < 1.0) n_tight++;
+      }
+    }
+  }
+  features["equality_ratio"] =
+    pb_ptr->n_constraints > 0 ? (float)n_equality / pb_ptr->n_constraints : 0.0f;
+  features["avg_constraint_range"] =
+    n_range_constraints > 0 ? (float)(total_range / n_range_constraints) : 0.0f;
+  features["tight_constraint_ratio"] =
+    pb_ptr->n_constraints > 0 ? (float)n_tight / pb_ptr->n_constraints : 0.0f;
+
+  // Variable bound characteristics
+  auto h_var_bounds   = cuopt::host_copy(pb_ptr->variable_bounds, handle_ptr->get_stream());
+  i_t n_unbounded     = 0;
+  i_t n_fixed         = 0;
+  f_t total_var_range = 0.0;
+  i_t n_bounded_vars  = 0;
+
+  for (i_t i = 0; i < pb_ptr->n_variables; ++i) {
+    f_t lower = get_lower(h_var_bounds[i]);
+    f_t upper = get_upper(h_var_bounds[i]);
+
+    if (!std::isfinite(lower) || !std::isfinite(upper)) {
+      n_unbounded++;
+    } else if (pb_ptr->integer_equal(lower, upper)) {
+      n_fixed++;
+    } else {
+      f_t range = upper - lower;
+      total_var_range += range;
+      n_bounded_vars++;
+    }
+  }
+  features["unbounded_var_ratio"] =
+    pb_ptr->n_variables > 0 ? (float)n_unbounded / pb_ptr->n_variables : 0.0f;
+  features["fixed_var_ratio"] =
+    pb_ptr->n_variables > 0 ? (float)n_fixed / pb_ptr->n_variables : 0.0f;
+  features["avg_variable_range"] =
+    n_bounded_vars > 0 ? (float)(total_var_range / n_bounded_vars) : 0.0f;
+
+  // Objective characteristics
+  auto h_obj_coeffs = cuopt::host_copy(pb_ptr->objective_coefficients, handle_ptr->get_stream());
+  i_t n_obj_vars    = 0;
+  f_t total_obj_magnitude = 0.0;
+  for (i_t i = 0; i < pb_ptr->n_variables; ++i) {
+    if (h_obj_coeffs[i] != 0.0) {
+      n_obj_vars++;
+      total_obj_magnitude += std::abs(h_obj_coeffs[i]);
+    }
+  }
+  features["obj_var_ratio"] =
+    pb_ptr->n_variables > 0 ? (float)n_obj_vars / pb_ptr->n_variables : 0.0f;
+  features["avg_obj_coeff_magnitude"] =
+    n_obj_vars > 0 ? (float)(total_obj_magnitude / n_obj_vars) : 0.0f;
+
+  // Matrix density patterns
+  auto h_offsets      = cuopt::host_copy(pb_ptr->offsets, handle_ptr->get_stream());
+  i_t max_nnz_per_row = 0;
+  i_t min_nnz_per_row = pb_ptr->n_variables;
+  f_t sum_sq_dev      = 0.0;
+  f_t mean_nnz =
+    pb_ptr->n_constraints > 0 ? (f_t)pb_ptr->coefficients.size() / pb_ptr->n_constraints : 0.0f;
+
+  for (i_t i = 0; i < pb_ptr->n_constraints; ++i) {
+    i_t nnz_row     = h_offsets[i + 1] - h_offsets[i];
+    max_nnz_per_row = std::max(max_nnz_per_row, nnz_row);
+    min_nnz_per_row = std::min(min_nnz_per_row, nnz_row);
+    f_t dev         = nnz_row - mean_nnz;
+    sum_sq_dev += dev * dev;
+  }
+  features["max_nnz_per_row"] = (float)max_nnz_per_row;
+  features["min_nnz_per_row"] = (float)min_nnz_per_row;
+  features["nnz_variance"] =
+    pb_ptr->n_constraints > 0 ? (float)(sum_sq_dev / pb_ptr->n_constraints) : 0.0f;
+
+  // Average variable degree (avg constraints per variable)
+  features["avg_var_degree"] =
+    pb_ptr->n_variables > 0 ? (float)pb_ptr->coefficients.size() / pb_ptr->n_variables : 0.0f;
+
+  // Derived complexity metrics
+  features["problem_size_score"] =
+    (float)(pb_ptr->n_variables * pb_ptr->n_constraints) * (float)pb_ptr->sparsity;
+  features["structural_complexity"] =
+    (features["integer_ratio"] + 1.0f) * (float)pb_ptr->unbalancedness;
+  features["constraint_var_ratio"] =
+    pb_ptr->n_variables > 0 ? (float)pb_ptr->n_constraints / pb_ptr->n_variables : 0.0f;
+
+  return features;
+}
+
+template <typename i_t, typename f_t>
 i_t fj_t<i_t, f_t>::host_loop(solution_t<i_t, f_t>& solution, i_t climber_idx)
 {
   auto& data = *climbers[climber_idx];
@@ -999,6 +1177,9 @@ i_t fj_t<i_t, f_t>::host_loop(solution_t<i_t, f_t>& solution, i_t climber_idx)
                   solution.get_feasible(),
                   data.local_minimums_reached.value(climber_stream));
 
+  // compute total time spent
+  double elapsed_time = timer.elapsed_time();
+
   CUOPT_LOG_TRACE("best fractional count %d",
                   data.saved_best_fractional_count.value(climber_stream));
 
@@ -1098,6 +1279,26 @@ i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution)
   pb_ptr->check_problem_representation(true);
   resize_vectors(solution.handle_ptr);
 
+  // if work_limit is set: compute an estimate of the number of iterations required
+  if (settings.work_unit_limit != std::numeric_limits<double>::infinity()) {
+    auto features = std::vector<float>{
+      (float)settings.work_unit_limit,
+      (float)settings.n_of_minimums_for_exit,
+      (float)pb_ptr->n_variables,
+      (float)pb_ptr->n_constraints,
+      (float)pb_ptr->coefficients.size(),
+      (float)pb_ptr->sparsity,
+      (float)pb_ptr->nnz_stddev,
+      (float)pb_ptr->unbalancedness,
+    };
+    float iter_prediction = std::max(
+      (f_t)0.0, (f_t)ceil(context.work_unit_predictors.fj_predictor.predict_scalar(features)));
+    CUOPT_LOG_DEBUG("FJ determ: Estimated number of iterations for %f WU: %f",
+                    settings.work_unit_limit,
+                    iter_prediction);
+    settings.iteration_limit = std::min(settings.iteration_limit, (i_t)iter_prediction);
+  }
+
   bool is_initial_feasible = solution.compute_feasibility();
   auto initial_solution    = solution;
   // if we're in rounding mode, split the time/iteration limit between the first and second stage
@@ -1131,6 +1332,9 @@ i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution)
   climber_init(0);
   RAFT_CHECK_CUDA(handle_ptr->get_stream());
   handle_ptr->sync_stream();
+
+  // Compute and store feature vector for later logging
+  feature_vector = get_feature_vector(0);
 
   i_t iterations = host_loop(solution);
   RAFT_CHECK_CUDA(handle_ptr->get_stream());
@@ -1180,6 +1384,20 @@ i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution)
   }
 
   cuopt_func_call(solution.test_variable_bounds());
+
+  // Print compact feature vector summary
+  char logbuf[4096];
+  int offset = 0;
+  offset += snprintf(logbuf + offset,
+                     sizeof(logbuf) - offset,
+                     "FJ: iter=%d time=%g",
+                     iterations,
+                     timer.elapsed_time());
+  for (const auto& [name, value] : feature_vector) {
+    offset += snprintf(logbuf + offset, sizeof(logbuf) - offset, " %s=%g", name.c_str(), value);
+    if (offset >= (int)(sizeof(logbuf) - 32)) break;
+  }
+  CUOPT_LOG_INFO("%s", logbuf);
 
   return is_new_feasible;
 }

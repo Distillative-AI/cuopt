@@ -81,6 +81,7 @@ class problem_t {
   void check_problem_representation(bool check_transposed       = false,
                                     bool check_mip_related_data = true);
   void recompute_auxilliary_data(bool check_representation = true);
+  void compute_auxiliary_data();
   void compute_n_integer_vars();
   void compute_binary_var_table();
   void compute_related_variables(double time_limit);
@@ -222,6 +223,11 @@ class problem_t {
   bool maximize{false};
   bool is_binary_pb{false};
   bool empty{false};
+
+  // Auxiliary problem statistics
+  double sparsity{0.0};
+  double nnz_stddev{0.0};
+  double unbalancedness{0.0};
 
   presolve_data_t<i_t, f_t> presolve_data;
 

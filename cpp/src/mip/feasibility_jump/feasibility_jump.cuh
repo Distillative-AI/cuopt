@@ -29,6 +29,9 @@
 
 #include <utilities/event_handler.cuh>
 
+#include <map>
+#include <string>
+
 #define FJ_DEBUG_LOAD_BALANCING 0
 #define FJ_SINGLE_STEP          0
 
@@ -109,6 +112,7 @@ struct fj_settings_t {
   fj_mode_t mode{fj_mode_t::FIRST_FEASIBLE};
   fj_candidate_selection_t candidate_selection{fj_candidate_selection_t::WEIGHTED_SCORE};
   double time_limit{60.0};
+  double work_unit_limit{std::numeric_limits<double>::infinity()};
   int iteration_limit{std::numeric_limits<int>::max()};
   fj_hyper_parameters_t parameters{};
   int n_of_minimums_for_exit  = 7000;
@@ -637,6 +641,10 @@ class fj_t {
   std::vector<std::unique_ptr<climber_data_t>> climbers;
   rmm::device_uvector<typename climber_data_t::view_t> climber_views;
   fj_settings_t settings;
+  std::map<std::string, float> feature_vector;
+
+ private:
+  std::map<std::string, float> get_feature_vector(i_t climber_idx = 0) const;
 };
 
 }  // namespace cuopt::linear_programming::detail

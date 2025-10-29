@@ -20,10 +20,15 @@
 #include <linear_programming/initial_scaling_strategy/initial_scaling.cuh>
 #include <mip/problem/problem.cuh>
 #include <mip/relaxed_lp/lp_state.cuh>
+#include <utilities/work_unit_predictor.hpp>
 
 #pragma once
 
 namespace cuopt::linear_programming::detail {
+
+struct mip_solver_work_unit_predictors_t {
+  work_unit_predictor_t fj_predictor{"fj"};
+};
 
 // Aggregate structure containing the global context of the solving process for convenience:
 // The current problem, user settings, raft handle and statistics objects
@@ -45,6 +50,8 @@ struct mip_solver_context_t {
   const mip_solver_settings_t<i_t, f_t> settings;
   pdlp_initial_scaling_strategy_t<i_t, f_t>& scaling;
   solver_stats_t<i_t, f_t> stats;
+  // TODO: ensure thread local (or use locks...?)
+  mip_solver_work_unit_predictors_t work_unit_predictors;
 };
 
 }  // namespace cuopt::linear_programming::detail

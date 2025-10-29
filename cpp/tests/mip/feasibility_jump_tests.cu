@@ -66,6 +66,12 @@ static fj_state_t run_fj_instance(std::string test_instance,
   std::cout << "Running: " << test_instance << std::endl;
 
   auto path = cuopt::test::get_rapids_dataset_root_dir() + ("/mip/" + test_instance);
+
+  if (std::getenv("CUOPT_INSTANCE")) {
+    path = std::string("/home/scratch.yboucher_gpu_1/collection/") + std::getenv("CUOPT_INSTANCE");
+    std::cout << "Using instance from CUOPT_INSTANCE: " << path << std::endl;
+  }
+
   cuopt::mps_parser::mps_data_model_t<int, double> mps_problem =
     cuopt::mps_parser::parse_mps<int, double>(path, false);
   handle_.sync_stream();
@@ -87,7 +93,7 @@ static bool run_fj_check_no_obj_runoff(std::string test_instance)
   detail::fj_settings_t fj_settings;
   fj_settings.time_limit             = 30.;
   fj_settings.mode                   = detail::fj_mode_t::EXIT_NON_IMPROVING;
-  fj_settings.n_of_minimums_for_exit = 20000 * 1000;
+  fj_settings.n_of_minimums_for_exit = 5000;
   fj_settings.update_weights         = true;
   fj_settings.feasibility_run        = false;
   fj_settings.iteration_limit        = 20000;
@@ -109,7 +115,7 @@ static bool run_fj_check_objective(std::string test_instance, int iter_limit, do
   detail::fj_settings_t fj_settings;
   fj_settings.time_limit             = 30.;
   fj_settings.mode                   = detail::fj_mode_t::EXIT_NON_IMPROVING;
-  fj_settings.n_of_minimums_for_exit = 20000 * 1000;
+  fj_settings.n_of_minimums_for_exit = 5000;
   fj_settings.update_weights         = true;
   fj_settings.feasibility_run        = obj_target == +std::numeric_limits<double>::infinity();
   fj_settings.iteration_limit        = iter_limit;
@@ -136,7 +142,7 @@ static bool run_fj_check_feasible(std::string test_instance)
   detail::fj_settings_t fj_settings;
   fj_settings.time_limit             = 30.;
   fj_settings.mode                   = detail::fj_mode_t::EXIT_NON_IMPROVING;
-  fj_settings.n_of_minimums_for_exit = 20000 * 1000;
+  fj_settings.n_of_minimums_for_exit = 5000;
   fj_settings.update_weights         = true;
   fj_settings.feasibility_run        = false;
   fj_settings.iteration_limit        = 25000;
@@ -170,19 +176,16 @@ static bool run_fj_check_feasible(std::string test_instance)
 
 static bool run_fj_check_determinism(std::string test_instance, int iter_limit)
 {
-  int seed =
-    std::getenv("CUOPT_SEED") ? std::stoi(std::getenv("CUOPT_SEED")) : std::random_device{}();
-
   detail::fj_settings_t fj_settings;
   fj_settings.time_limit             = std::numeric_limits<double>::max();
   fj_settings.mode                   = detail::fj_mode_t::EXIT_NON_IMPROVING;
-  fj_settings.n_of_minimums_for_exit = 20000 * 1000;
+  fj_settings.n_of_minimums_for_exit = 5000;
+  fj_settings.work_unit_limit        = 0.15;  // run for 0.5wu (~0.5s)
   fj_settings.update_weights         = true;
   fj_settings.feasibility_run        = false;
-  fj_settings.iteration_limit        = iter_limit;
-  fj_settings.load_balancing_mode    = detail::fj_load_balancing_mode_t::ALWAYS_ON;
-  fj_settings.seed                   = seed;
-  cuopt::seed_generator::set_seed(fj_settings.seed);
+  // fj_settings.iteration_limit        = iter_limit;
+  fj_settings.load_balancing_mode = detail::fj_load_balancing_mode_t::ALWAYS_ON;
+  fj_settings.seed                = cuopt::seed_generator::get_seed();
 
   auto state     = run_fj_instance(test_instance, fj_settings);
   auto& solution = state.solution;
@@ -265,6 +268,9 @@ static bool run_fj_check_determinism(std::string test_instance, int iter_limit)
 
 TEST(mip_solve, feasibility_jump_determinism)
 {
+  int seed =
+    std::getenv("CUOPT_SEED") ? std::stoi(std::getenv("CUOPT_SEED")) : std::random_device{}();
+
   for (const auto& instance : {"thor50dday.mps",
                                "gen-ip054.mps",
                                "50v-10.mps",
@@ -275,6 +281,7 @@ TEST(mip_solve, feasibility_jump_determinism)
                                "uccase9.mps"}) {
     for (int i = 0; i < 10; i++) {
       // while (true) {
+      cuopt::seed_generator::set_seed(seed);
       run_fj_check_determinism(instance, 1000);
     }
   }

@@ -208,7 +208,7 @@ class bound_prop_recombiner_t : public recombiner_t<i_t, f_t> {
       constraint_prop.apply_round(offspring, lp_run_time_after_feasible, timer, probing_config);
       constraint_prop.single_rounding_only = false;
       offspring.compute_feasibility();
-      cuopt_func_call(bool feasible_after_bounds_prop = offspring.get_feasible());
+      bool feasible_after_bounds_prop = offspring.get_feasible();
       cuopt_func_call(f_t excess_before = offspring.get_total_excess());
       CUOPT_LOG_ERROR("Excess before: %g, %g, %g, %g, feas %d",
                       offspring.get_total_excess(),
@@ -223,7 +223,7 @@ class bound_prop_recombiner_t : public recombiner_t<i_t, f_t> {
       offspring.handle_ptr->sync_stream();
       offspring.unfix_variables(fixed_assignment, variable_map);
       offspring.compute_feasibility();
-      cuopt_func_call(bool feasible_after_unfix = offspring.get_feasible());
+      bool feasible_after_unfix = offspring.get_feasible();
       cuopt_func_call(f_t excess_after_unfix = offspring.get_total_excess());
       if (feasible_after_unfix != feasible_after_bounds_prop) {
         CUOPT_LOG_WARN("Numerical issue in bounds prop, infeasibility after unfix");
