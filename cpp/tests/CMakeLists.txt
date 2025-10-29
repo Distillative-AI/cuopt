@@ -74,8 +74,8 @@ function(cuopt_add_cupti_dep dep_name)
   )
 endfunction()
 
-cuopt_add_cupti_dep(nvperf_target)
-cuopt_add_cupti_dep(nvperf_host)
+#cuopt_add_cupti_dep(nvperf_target)
+#cuopt_add_cupti_dep(nvperf_host)
 cuopt_add_cupti_dep(cupti)
 
 # ################################################################ ------------------------------------------------------------------
