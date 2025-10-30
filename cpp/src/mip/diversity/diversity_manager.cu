@@ -322,7 +322,7 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
 {
   raft::common::nvtx::range fun_scope("run_solver");
 
-  diversity_config.fj_only_run = true;
+  diversity_config.fj_only_run = false;
 
   population.timer     = timer;
   const f_t time_limit = timer.remaining_time();

@@ -182,8 +182,10 @@ termination_criterion_t bound_presolve_t<i_t, f_t>::bound_update_loop(problem_t<
   termination_criterion_t criteria = termination_criterion_t::ITERATION_LIMIT;
 
   // CHANGE
-  timer                    = timer_t(std::numeric_limits<f_t>::infinity());
-  settings.iteration_limit = std::min(settings.iteration_limit, 50);
+  if (context.settings.deterministic) {
+    timer                    = timer_t(std::numeric_limits<f_t>::infinity());
+    settings.iteration_limit = std::min(settings.iteration_limit, 50);
+  }
 
   i_t iter;
   upd.init_changed_constraints(pb.handle_ptr);

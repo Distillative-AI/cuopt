@@ -775,9 +775,6 @@ bool constraint_prop_t<i_t, f_t>::run_repair_procedure(problem_t<i_t, f_t>& prob
 {
   CUOPT_LOG_DEBUG("Running repair procedure");
 
-  // CHANGE
-  timer = timer_t(std::numeric_limits<f_t>::infinity());
-
   // select the first probing value
   i_t select = 0;
   multi_probe.set_updated_bounds(problem, select, handle_ptr);
@@ -785,7 +782,11 @@ bool constraint_prop_t<i_t, f_t>::run_repair_procedure(problem_t<i_t, f_t>& prob
   repair_stats.repair_attempts++;
   f_t repair_start_time                = timer.remaining_time();
   i_t n_of_repairs_needed_for_feasible = 0;
-  i_t iter_limit                       = 100;
+  i_t iter_limit                       = std::numeric_limits<i_t>::max();
+  if (this->context.settings.deterministic) {
+    timer      = timer_t(std::numeric_limits<f_t>::infinity());
+    iter_limit = 100;
+  }
   do {
     n_of_repairs_needed_for_feasible++;
     if (timer.check_time_limit() || iter_limit-- <= 0) {
@@ -1082,11 +1083,13 @@ bool constraint_prop_t<i_t, f_t>::find_integer(
     relaxed_lp_settings_t lp_settings;
     lp_settings.time_limit = lp_run_time_after_feasible;
     // CHANGE
-    lp_settings.time_limit            = 600;
     lp_settings.tolerance             = orig_sol.problem_ptr->tolerances.absolute_tolerance;
     lp_settings.save_state            = false;
     lp_settings.return_first_feasible = true;
-    lp_settings.iteration_limit       = 13000;
+    if (this->context.settings.deterministic) {
+      lp_settings.iteration_limit = 13000;
+      lp_settings.time_limit      = std::numeric_limits<double>::infinity();
+    }
     run_lp_with_vars_fixed(*orig_sol.problem_ptr,
                            orig_sol,
                            orig_sol.problem_ptr->integer_indices,

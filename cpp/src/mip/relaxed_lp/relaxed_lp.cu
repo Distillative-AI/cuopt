@@ -132,7 +132,9 @@ optimization_problem_solution_t<i_t, f_t> get_relaxed_lp_solution(
   auto elapsed_ms =
     std::chrono::duration_cast<std::chrono::milliseconds>(function_end_time - function_start_time)
       .count();
-  CUOPT_LOG_DEBUG("get_relaxed_lp_solution took %lld ms", elapsed_ms);
+  CUOPT_LOG_DEBUG("get_relaxed_lp_solution took %lld ms for %d iterations",
+                  elapsed_ms,
+                  solver_response.get_additional_termination_information().number_of_steps_taken);
 
   return solver_response;
 }
