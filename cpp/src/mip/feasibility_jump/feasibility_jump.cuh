@@ -112,7 +112,7 @@ struct fj_settings_t {
   fj_mode_t mode{fj_mode_t::FIRST_FEASIBLE};
   fj_candidate_selection_t candidate_selection{fj_candidate_selection_t::WEIGHTED_SCORE};
   double time_limit{60.0};
-  double work_unit_limit{std::numeric_limits<double>::infinity()};
+  double work_limit{std::numeric_limits<double>::infinity()};
   int iteration_limit{std::numeric_limits<int>::max()};
   fj_hyper_parameters_t parameters{};
   int n_of_minimums_for_exit  = 7000;

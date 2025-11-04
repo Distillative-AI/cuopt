@@ -337,7 +337,7 @@ void local_search_t<i_t, f_t>::generate_fast_solution(solution_t<i_t, f_t>& solu
       work_limit_timer_t(context.settings.deterministic, std::min(timer.remaining_time(), 2.));
     // do constraint prop on lp optimal solution
     constraint_prop.apply_round(solution, 1., constr_prop_timer);
-    constr_prop_timer.record_work(213762);
+    constr_prop_timer.record_work(0);
     if (solution.compute_feasibility()) { return; }
     if (timer.check_time_limit()) { return; };
     f_t time_limit = std::min(3., timer.remaining_time());
@@ -489,7 +489,7 @@ bool local_search_t<i_t, f_t>::check_fj_on_lp_optimal(solution_t<i_t, f_t>& solu
     work_limit_timer_t(context.settings.deterministic, std::min(timer.remaining_time(), 10.));
   bool is_feasible =
     constraint_prop.apply_round(solution, lp_run_time_after_feasible, bounds_prop_timer);
-  bounds_prop_timer.record_work(213762);
+  bounds_prop_timer.record_work(0);
   if (!is_feasible) {
     f_t lp_run_time = 2.;
     // CHANGE

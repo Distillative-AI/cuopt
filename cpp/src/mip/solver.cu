@@ -159,7 +159,9 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
   branch_and_bound_solution_helper_t solution_helper(&dm, branch_and_bound_settings);
   dual_simplex::mip_solution_t<i_t, f_t> branch_and_bound_solution(1);
 
-  if (!context.settings.heuristics_only) {
+  // for now, disable B&B in deterministic mode
+  bool run_bb = !context.settings.deterministic && !context.settings.heuristics_only;
+  if (run_bb) {
     // Convert the presolved problem to dual_simplex::user_problem_t
     op_problem_.get_host_user_problem(branch_and_bound_problem);
     // Resize the solution now that we know the number of columns/variables
@@ -223,7 +225,7 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
 
   // Start the primal heuristics
   auto sol = dm.run_solver();
-  if (!context.settings.heuristics_only) {
+  if (run_bb) {
     // Wait for the branch and bound to finish
     auto bb_status = branch_and_bound_status_future.get();
     if (branch_and_bound_solution.lower_bound > -std::numeric_limits<f_t>::infinity()) {

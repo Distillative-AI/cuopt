@@ -54,7 +54,7 @@ float work_unit_predictor_t<model_t>::predict_scalar(
       printf("Feature %s: missing\n", model_t::feature_names[i]);
     } else {
       data[i].fvalue = features.at(std::string(model_t::feature_names[i]));
-      printf("Feature %s: %f\n", model_t::feature_names[i], data[i].fvalue);
+      // printf("Feature %s: %f\n", model_t::feature_names[i], data[i].fvalue);
     }
   }
   // Compute a hash key for the relevant inputs

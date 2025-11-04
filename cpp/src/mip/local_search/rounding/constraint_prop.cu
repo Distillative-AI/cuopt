@@ -229,11 +229,11 @@ void constraint_prop_t<i_t, f_t>::sort_by_interval_and_frac(solution_t<i_t, f_t>
       }
     });
 
-  CUOPT_LOG_DEBUG("hash vars 0x%x", detail::compute_hash(vars));
-  // now do the suffling, for that we need to assign some random values to rnd array
-  // we will sort this rnd array and the vars in subsections, so that each subsection will be
-  // shuffled in total we will have 3(binary, ternary and rest) x 7 intervals = 21 subsections.
-  // first extract these subsections from the data
+  // CUOPT_LOG_DEBUG("hash vars 0x%x", detail::compute_hash(vars));
+  //  now do the suffling, for that we need to assign some random values to rnd array
+  //  we will sort this rnd array and the vars in subsections, so that each subsection will be
+  //  shuffled in total we will have 3(binary, ternary and rest) x 7 intervals = 21 subsections.
+  //  first extract these subsections from the data
   rmm::device_uvector<i_t> subsection_offsets(size_of_subsections, sol.handle_ptr->get_stream());
   thrust::fill(
     sol.handle_ptr->get_thrust_policy(), subsection_offsets.begin(), subsection_offsets.end(), -1);
@@ -284,9 +284,9 @@ void constraint_prop_t<i_t, f_t>::sort_by_interval_and_frac(solution_t<i_t, f_t>
                      }
                    });
 
-  CUOPT_LOG_DEBUG("hash subsection_offsets 0x%x", detail::compute_hash(subsection_offsets));
+  // CUOPT_LOG_DEBUG("hash subsection_offsets 0x%x", detail::compute_hash(subsection_offsets));
   auto random_vector = get_random_uniform_vector<i_t, f_t>((i_t)vars.size(), rng);
-  CUOPT_LOG_DEBUG("hash random_vector 0x%x", detail::compute_hash(random_vector));
+  // CUOPT_LOG_DEBUG("hash random_vector 0x%x", detail::compute_hash(random_vector));
   rmm::device_uvector<f_t> device_random_vector(random_vector.size(), sol.handle_ptr->get_stream());
   raft::copy(device_random_vector.data(),
              random_vector.data(),
@@ -871,7 +871,6 @@ bool constraint_prop_t<i_t, f_t>::find_integer(
   using crit_t             = termination_criterion_t;
   auto& unset_integer_vars = unset_vars;
   i_t seed                 = cuopt::seed_generator::get_seed();
-  CUOPT_LOG_DEBUG("seed 0x%x", seed);
   std::mt19937 rng(seed);
 
   // CHANGE
@@ -938,8 +937,8 @@ bool constraint_prop_t<i_t, f_t>::find_integer(
   }
   // this is needed for the sort inside of the loop
   bool problem_ii = is_problem_ii(*sol.problem_ptr);
-  CUOPT_LOG_DEBUG("is problem ii %d\n", problem_ii);
-  // if the problem is ii, run the bounds prop in the beginning
+  // CUOPT_LOG_DEBUG("is problem ii %d", problem_ii);
+  //  if the problem is ii, run the bounds prop in the beginning
   if (problem_ii) {
     bool bounds_repaired =
       bounds_repair.repair_problem(*sol.problem_ptr, *orig_sol.problem_ptr, timer, sol.handle_ptr);
@@ -1115,26 +1114,26 @@ bool constraint_prop_t<i_t, f_t>::apply_round(
   // === CONSTRAINT PROP PREDICTOR FEATURES - START ===
   auto cp_start_time = std::chrono::high_resolution_clock::now();
 
-  CUOPT_LOG_INFO("CP_FEATURES: n_variables=%d n_constraints=%d n_integer_vars=%d",
-                 sol.problem_ptr->n_variables,
-                 sol.problem_ptr->n_constraints,
-                 sol.problem_ptr->n_integer_vars);
+  // CUOPT_LOG_INFO("CP_FEATURES: n_variables=%d n_constraints=%d n_integer_vars=%d",
+  //                sol.problem_ptr->n_variables,
+  //                sol.problem_ptr->n_constraints,
+  //                sol.problem_ptr->n_integer_vars);
 
-  CUOPT_LOG_INFO("CP_FEATURES: nnz=%lu sparsity=%.6f",
-                 sol.problem_ptr->coefficients.size(),
-                 sol.problem_ptr->sparsity);
+  // CUOPT_LOG_INFO("CP_FEATURES: nnz=%lu sparsity=%.6f",
+  //                sol.problem_ptr->coefficients.size(),
+  //                sol.problem_ptr->sparsity);
 
   sol.compute_feasibility();
   i_t n_unset_integers = sol.problem_ptr->n_integer_vars - sol.compute_number_of_integers();
 
-  CUOPT_LOG_INFO("CP_FEATURES: n_unset_vars=%d initial_excess=%.6f time_budget=%.6f",
-                 n_unset_integers,
-                 sol.get_total_excess(),
-                 max_time_for_bounds_prop);
+  // CUOPT_LOG_INFO("CP_FEATURES: n_unset_vars=%d initial_excess=%.6f time_budget=%.6f",
+  //                n_unset_integers,
+  //                sol.get_total_excess(),
+  //                max_time_for_bounds_prop);
 
-  CUOPT_LOG_INFO("CP_FEATURES: round_all_vars=%d lp_run_time_after_feasible=%.6f",
-                 round_all_vars,
-                 lp_run_time_after_feasible);
+  // CUOPT_LOG_INFO("CP_FEATURES: round_all_vars=%d lp_run_time_after_feasible=%.6f",
+  //                round_all_vars,
+  //                lp_run_time_after_feasible);
   // === CONSTRAINT PROP PREDICTOR FEATURES - END ===
 
   max_timer = work_limit_timer_t{context.settings.deterministic, max_time_for_bounds_prop};
@@ -1182,16 +1181,16 @@ bool constraint_prop_t<i_t, f_t>::apply_round(
 
   if (!sol_found) {
     sol.compute_feasibility();
-    CUOPT_LOG_INFO("CP_RESULT: time_ms=%lld termination=FAILED iterations=%d",
-                   cp_elapsed_ms,
-                   0);  // TODO: track actual iterations
+    // CUOPT_LOG_INFO("CP_RESULT: time_ms=%lld termination=FAILED iterations=%d",
+    //                cp_elapsed_ms,
+    //                0);  // TODO: track actual iterations
     return false;
   }
   bool result = sol.compute_feasibility();
-  CUOPT_LOG_INFO("CP_RESULT: time_ms=%lld termination=%s iterations=%d",
-                 cp_elapsed_ms,
-                 result ? "SUCCESS" : "FAILED",
-                 0);  // TODO: track actual iterations
+  // CUOPT_LOG_INFO("CP_RESULT: time_ms=%lld termination=%s iterations=%d",
+  //                cp_elapsed_ms,
+  //                result ? "SUCCESS" : "FAILED",
+  //                0);  // TODO: track actual iterations
   return result;
 }
 

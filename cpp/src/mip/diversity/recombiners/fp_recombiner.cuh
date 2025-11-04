@@ -96,7 +96,7 @@ class fp_recombiner_t : public recombiner_t<i_t, f_t> {
       if (this->context.settings.deterministic) {
         lp_settings.time_limit =
           std::numeric_limits<double>::max();  // TODO should be global time limit
-        lp_settings.iteration_limit = 5000;
+        lp_settings.work_limit = fp_recombiner_config_t::infeasibility_detection_time_limit;
       }
       lp_settings.tolerance             = fixed_problem.tolerances.absolute_tolerance;
       lp_settings.return_first_feasible = true;

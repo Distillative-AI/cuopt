@@ -910,7 +910,7 @@ std::map<std::string, float> fj_t<i_t, f_t>::get_feature_vector(i_t climber_idx)
   features["unbalancedness"] = (float)pb_ptr->unbalancedness;
 
   // Algorithm settings
-  features["time"]                   = (float)settings.work_unit_limit;
+  features["time"]                   = (float)settings.work_limit;
   features["n_of_minimums_for_exit"] = (float)settings.n_of_minimums_for_exit;
   features["feasibility_run"]        = (float)settings.feasibility_run;
 
@@ -1280,12 +1280,12 @@ i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution)
   resize_vectors(solution.handle_ptr);
 
   // if work_limit is set: compute an estimate of the number of iterations required
-  if (settings.work_unit_limit != std::numeric_limits<double>::infinity()) {
+  if (settings.work_limit != std::numeric_limits<double>::infinity()) {
     std::map<std::string, float> features_map = get_feature_vector(0);
     float iter_prediction                     = std::max(
       (f_t)0.0, (f_t)ceil(context.work_unit_predictors.fj_predictor.predict_scalar(features_map)));
     CUOPT_LOG_DEBUG("FJ determ: Estimated number of iterations for %f WU: %f",
-                    settings.work_unit_limit,
+                    settings.work_limit,
                     iter_prediction);
     settings.iteration_limit = std::min(settings.iteration_limit, (i_t)iter_prediction);
   }

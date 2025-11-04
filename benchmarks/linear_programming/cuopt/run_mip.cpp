@@ -366,8 +366,9 @@ int main(int argc, char* argv[])
     .default_value(std::string("f"));
 
   program.add_argument("-d", "--determinism")
-    .help("enable deterministic mode (t/f)")
-    .default_value(std::string("f"));
+    .help("enable deterministic mode")
+    .default_value(false)
+    .implicit_value(true);
 
   // Parse arguments
   try {
@@ -397,7 +398,7 @@ int main(int argc, char* argv[])
   bool log_to_console    = program.get<std::string>("--log-to-console")[0] == 't';
   double memory_limit    = program.get<double>("--memory-limit");
   bool track_allocations = program.get<std::string>("--track-allocations")[0] == 't';
-  bool deterministic     = program.get<std::string>("--determinism")[0] == 't';
+  bool deterministic     = program.get<bool>("--determinism");
 
   if (num_cpu_threads < 0) { num_cpu_threads = omp_get_max_threads() / n_gpus; }
 

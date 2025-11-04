@@ -191,7 +191,7 @@ bool diversity_manager_t<i_t, f_t>::run_presolve(f_t time_limit)
   CUOPT_LOG_INFO("Running presolve!");
   work_limit_timer_t presolve_timer(context.settings.deterministic, time_limit);
   auto term_crit = ls.constraint_prop.bounds_update.solve(*problem_ptr);
-  presolve_timer.record_work(213762);
+  presolve_timer.record_work(0);
   if (ls.constraint_prop.bounds_update.infeas_constraints_count > 0) {
     stats.presolve_time = timer.elapsed_time();
     return false;
@@ -235,7 +235,7 @@ void diversity_manager_t<i_t, f_t>::generate_quick_feasible_solution()
   work_limit_timer_t sol_timer(context.settings.deterministic, generate_fast_solution_time);
   // do very short LP run to get somewhere close to the optimal point
   ls.generate_fast_solution(solution, sol_timer);
-  sol_timer.record_work(213762);
+  sol_timer.record_work(0);
   if (solution.get_feasible()) {
     population.run_solution_callbacks(solution);
     initial_sol_vector.emplace_back(std::move(solution));
@@ -325,7 +325,10 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
   raft::common::nvtx::range fun_scope("run_solver");
 
   diversity_config.fj_only_run = false;
-  if (context.settings.deterministic) { remaining_work_limit = context.settings.work_limit; }
+  if (context.settings.deterministic) {
+    remaining_work_limit = context.settings.work_limit;
+    CUOPT_LOG_INFO("Deterministic mode, remaining work limit: %f", remaining_work_limit);
+  }
 
   population.timer     = timer;
   const f_t time_limit = timer.remaining_time();
@@ -356,7 +359,7 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
   // Run CPUFJ early to find quick initial solutions
   population.allocate_solutions();
   ls_cpufj_raii_guard_t ls_cpufj_raii_guard(ls);  // RAII to stop cpufj threads on solve stop
-  ls.start_cpufj_scratch_threads(population);
+  if (!context.settings.deterministic) { ls.start_cpufj_scratch_threads(population); }
 
   // before probing cache or LP, run FJ to generate initial primal feasible solution
   const f_t time_ratio_of_probing_cache = diversity_config.time_ratio_of_probing_cache;
@@ -367,7 +370,7 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
   if (check_b_b_preemption()) { return population.best_feasible(); }
   if (!diversity_config.fj_only_run) {
     compute_probing_cache(ls.constraint_prop.bounds_update, *problem_ptr, probing_timer);
-    probing_timer.record_work(213762);
+    probing_timer.record_work(0);
   }
 
   if (check_b_b_preemption()) { return population.best_feasible(); }
@@ -430,21 +433,21 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
   }
 
   // Run this 100 times with varying iteration limits
-  for (int i = 0; i < 100; i++) {
-    relaxed_lp_settings_t lp_settings;
-    lp_settings.time_limit            = lp_time_limit;
-    lp_settings.tolerance             = context.settings.tolerances.absolute_tolerance;
-    lp_settings.return_first_feasible = false;
-    lp_settings.save_state            = true;
-    lp_settings.concurrent_halt       = &global_concurrent_halt;
-    lp_settings.has_initial_primal    = false;
-    lp_settings.iteration_limit       = 100 + i * 100;
-    rmm::device_uvector<f_t> lp_optimal_solution_copy(lp_optimal_solution.size(),
-                                                      problem_ptr->handle_ptr->get_stream());
-    auto lp_result =
-      get_relaxed_lp_solution(*problem_ptr, lp_optimal_solution_copy, lp_state, lp_settings);
-  }
-  exit(0);
+  // for (int i = 0; i < 100; i++) {
+  //   relaxed_lp_settings_t lp_settings;
+  //   lp_settings.time_limit            = lp_time_limit;
+  //   lp_settings.tolerance             = context.settings.tolerances.absolute_tolerance;
+  //   lp_settings.return_first_feasible = false;
+  //   lp_settings.save_state            = true;
+  //   lp_settings.concurrent_halt       = &global_concurrent_halt;
+  //   lp_settings.has_initial_primal    = false;
+  //   lp_settings.iteration_limit       = 100 + i * 100;
+  //   rmm::device_uvector<f_t> lp_optimal_solution_copy(lp_optimal_solution.size(),
+  //                                                     problem_ptr->handle_ptr->get_stream());
+  //   auto lp_result =
+  //     get_relaxed_lp_solution(*problem_ptr, lp_optimal_solution_copy, lp_state, lp_settings);
+  // }
+  // exit(0);
 
   if (ls.lp_optimal_exists) {
     solution_t<i_t, f_t> lp_rounded_sol(*problem_ptr);
@@ -452,7 +455,7 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
     lp_rounded_sol.round_nearest();
     lp_rounded_sol.compute_feasibility();
     population.add_solution(std::move(lp_rounded_sol));
-    ls.start_cpufj_lptopt_scratch_threads(population);
+    if (!context.settings.deterministic) { ls.start_cpufj_lptopt_scratch_threads(population); }
   }
 
   population.add_solutions_from_vec(std::move(initial_sol_vector));
