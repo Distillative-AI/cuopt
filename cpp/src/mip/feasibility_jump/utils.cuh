@@ -152,6 +152,10 @@ struct contiguous_set_t {
                      thrust::make_counting_iterator<i_t>(0),
                      thrust::make_counting_iterator<i_t>(set_size.value(stream)),
                      [v = view()] __device__(i_t idx) { v.index_map[v.contents[idx]] = idx; });
+
+    // TODO: remove, only useful for debugging and ensuring the same hashes
+    thrust::fill(
+      rmm::exec_policy(stream), contents.begin() + set_size.value(stream), contents.end(), 0);
   }
 
   struct view_t {

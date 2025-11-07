@@ -180,10 +180,7 @@ __global__ void init_lhs_and_violation(typename fj_t<i_t, f_t>::climber_data_t::
       fj_kahan_babushka_neumaier_sum<i_t, f_t>(delta_it + offset_begin, delta_it + offset_end);
     fj.incumbent_lhs_sumcomp[cstr_idx] = 0;
 
-    f_t th_violation       = fj.excess_score(cstr_idx, fj.incumbent_lhs[cstr_idx]);
-    f_t weighted_violation = th_violation * fj.cstr_weights[cstr_idx];
-    atomicAdd(fj.violation_score, th_violation);
-    atomicAdd(fj.weighted_violation_score, weighted_violation);
+    f_t th_violation   = fj.excess_score(cstr_idx, fj.incumbent_lhs[cstr_idx]);
     f_t cstr_tolerance = fj.get_corrected_tolerance(cstr_idx);
     if (th_violation < -cstr_tolerance) { fj.violated_constraints.insert(cstr_idx); }
   }
@@ -604,14 +601,16 @@ __global__ void update_assignment_kernel(typename fj_t<i_t, f_t>::climber_data_t
 
     __syncthreads();
 
-    cuopt_assert(isfinite(fj.jump_move_delta[var_idx]), "delta should be finite");
-    // Kahan compensated summation
-    // fj.incumbent_lhs[cstr_idx] = old_lhs + cstr_coeff * fj.jump_move_delta[var_idx];
-    f_t y = cstr_coeff * fj.jump_move_delta[var_idx] - fj.incumbent_lhs_sumcomp[cstr_idx];
-    f_t t = old_lhs + y;
-    fj.incumbent_lhs_sumcomp[cstr_idx] = (t - old_lhs) - y;
-    fj.incumbent_lhs[cstr_idx]         = t;
-    cuopt_assert(isfinite(fj.incumbent_lhs[cstr_idx]), "assignment should be finite");
+    if (threadIdx.x == 0) {
+      cuopt_assert(isfinite(fj.jump_move_delta[var_idx]), "delta should be finite");
+      // Kahan compensated summation
+      // fj.incumbent_lhs[cstr_idx] = old_lhs + cstr_coeff * fj.jump_move_delta[var_idx];
+      f_t y = cstr_coeff * fj.jump_move_delta[var_idx] - fj.incumbent_lhs_sumcomp[cstr_idx];
+      f_t t = old_lhs + y;
+      fj.incumbent_lhs_sumcomp[cstr_idx] = (t - old_lhs) - y;
+      fj.incumbent_lhs[cstr_idx]         = t;
+      cuopt_assert(isfinite(fj.incumbent_lhs[cstr_idx]), "assignment should be finite");
+    }
   }
 
   // update the assignment and objective proper

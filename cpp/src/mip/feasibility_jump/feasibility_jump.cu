@@ -441,10 +441,7 @@ void fj_t<i_t, f_t>::climber_init(i_t climber_idx, const rmm::cuda_stream_view& 
   f_t inf = std::numeric_limits<f_t>::infinity();
   climber->best_objective.set_value_async(inf, climber_stream);
   climber->saved_solution_objective.set_value_async(inf, climber_stream);
-  climber->violation_score.set_value_to_zero_async(climber_stream);
-  climber->weighted_violation_score.set_value_to_zero_async(climber_stream);
-  init_lhs_and_violation<i_t, f_t><<<256, 256, 0, climber_stream.value()>>>(view);
-  climber->violated_constraints.sort(climber_stream);
+  refresh_lhs_and_violation(climber_stream);
 
   // printf("init: Violated constraints hash: %x\n", compute_hash(
   //   make_span(climber->violated_constraints.contents, 0,
@@ -894,10 +891,38 @@ void fj_t<i_t, f_t>::refresh_lhs_and_violation(const rmm::cuda_stream_view& stre
   auto v     = data.view();
 
   data.violated_constraints.clear(stream);
-  data.violation_score.set_value_to_zero_async(stream);
-  data.weighted_violation_score.set_value_to_zero_async(stream);
   init_lhs_and_violation<i_t, f_t><<<4096, 256, 0, stream>>>(v);
+  // both transformreduce could be fused; but oh well hardly a bottleneck
+  auto violation =
+    thrust::transform_reduce(rmm::exec_policy(stream),
+                             thrust::make_counting_iterator<i_t>(0),
+                             thrust::make_counting_iterator<i_t>(pb_ptr->n_constraints),
+                             cuda::proclaim_return_type<f_t>([v] __device__(i_t cstr_idx) {
+                               return v.excess_score(cstr_idx, v.incumbent_lhs[cstr_idx]);
+                             }),
+                             (f_t)0,
+                             thrust::plus<f_t>());
+  auto weighted_violation = thrust::transform_reduce(
+    rmm::exec_policy(stream),
+    thrust::make_counting_iterator<i_t>(0),
+    thrust::make_counting_iterator<i_t>(pb_ptr->n_constraints),
+    cuda::proclaim_return_type<f_t>([v] __device__(i_t cstr_idx) {
+      return v.excess_score(cstr_idx, v.incumbent_lhs[cstr_idx]) * v.cstr_weights[cstr_idx];
+    }),
+    (f_t)0,
+    thrust::plus<f_t>());
+  data.violation_score.set_value_async(violation, stream);
+  data.weighted_violation_score.set_value_async(weighted_violation, stream);
   data.violated_constraints.sort(stream);
+#if FJ_SINGLE_STEP
+  CUOPT_LOG_DEBUG("hash assignment %x, hash lhs %x, hash lhscomp %x",
+                  detail::compute_hash(data.incumbent_assignment, stream),
+                  detail::compute_hash(data.incumbent_lhs, stream),
+                  detail::compute_hash(data.incumbent_lhs_sumcomp, stream));
+  CUOPT_LOG_DEBUG("Violated constraints hash post sort: %x, index map %x",
+                  detail::compute_hash(data.violated_constraints.contents, stream),
+                  detail::compute_hash(data.violated_constraints.index_map, stream));
+#endif
 }
 
 template <typename i_t, typename f_t>
@@ -1103,13 +1128,14 @@ i_t fj_t<i_t, f_t>::host_loop(solution_t<i_t, f_t>& solution, i_t climber_idx)
     if (timer.check_time_limit() || steps >= settings.iteration_limit) { limit_reached = true; }
 
 #if !FJ_SINGLE_STEP
-    if (steps % 500 == 0)
+    // if (steps % 500 == 0)
+    if (false)
 #endif
     {
-      CUOPT_LOG_TRACE(
+      CUOPT_LOG_DEBUG(
         "FJ "
         "step %d viol %.2g [%d], obj %.8g, best %.8g, mins %d, maxw %g, "
-        "objw %g, sol hash %x, delta hash %x",
+        "objw %g, sol %x, delta %x, inc %x, lhs %x, lhscomp %x, viol %x, weights %x",
         steps,
         data.violation_score.value(climber_stream),
         data.violated_constraints.set_size.value(climber_stream),
@@ -1119,7 +1145,12 @@ i_t fj_t<i_t, f_t>::host_loop(solution_t<i_t, f_t>& solution, i_t climber_idx)
         max_cstr_weight.value(climber_stream),
         objective_weight.value(climber_stream),
         solution.get_hash(),
-        detail::compute_hash(data.jump_move_delta, climber_stream));
+        detail::compute_hash(data.jump_move_delta, climber_stream),
+        detail::compute_hash(data.incumbent_assignment, climber_stream),
+        detail::compute_hash(data.incumbent_lhs, climber_stream),
+        detail::compute_hash(data.incumbent_lhs_sumcomp, climber_stream),
+        detail::compute_hash(data.violated_constraints.contents, climber_stream),
+        detail::compute_hash(cstr_left_weights, climber_stream));
     }
 
     if (!limit_reached) { run_step_device(climber_stream, climber_idx); }
