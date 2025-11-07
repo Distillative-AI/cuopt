@@ -1501,7 +1501,7 @@ __global__ void handle_local_minimum_kernel(typename fj_t<i_t, f_t>::climber_dat
                      best_var, fj.incumbent_assignment[best_var] + best_delta),
                    "assignment not within bounds");
       fj.jump_move_delta[best_var] = best_delta;
-      // DEVICE_LOG_DEBUG("FJ[%d] selected_var: %d, delta %g, score {%d %d}, type %c\n",
+      // 1DEVICE_LOG_DEBUG("FJ[%d] selected_var: %d, delta %g, score {%d %d}, type %c\n",
       // *fj.iterations, best_var, best_delta, best_score.base, best_score.bonus, best_movetype);
     }
   }
