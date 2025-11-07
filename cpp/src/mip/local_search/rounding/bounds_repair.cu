@@ -78,8 +78,7 @@ f_t bounds_repair_t<i_t, f_t>::get_ii_violation(problem_t<i_t, f_t>& problem)
      min_act              = bound_presolve.upd.min_activity.data(),
      max_act              = bound_presolve.upd.max_activity.data(),
      cstr_violations_up   = cstr_violations_up.data(),
-     cstr_violations_down = cstr_violations_down.data(),
-     total_vio            = total_vio.data()] __device__(i_t cstr_idx) {
+     cstr_violations_down = cstr_violations_down.data()] __device__(i_t cstr_idx) -> f_t {
       f_t cnst_lb = pb_v.constraint_lower_bounds[cstr_idx];
       f_t cnst_ub = pb_v.constraint_upper_bounds[cstr_idx];
       f_t eps     = get_cstr_tolerance<i_t, f_t>(
@@ -89,21 +88,30 @@ f_t bounds_repair_t<i_t, f_t>::get_ii_violation(problem_t<i_t, f_t>& problem)
       f_t violation                = max(curr_cstr_violation_up, curr_cstr_violation_down);
       if (violation >= ROUNDOFF_TOLERANCE) {
         violated_cstr_map[cstr_idx] = 1;
-        atomicAdd(total_vio, violation);
       } else {
         violated_cstr_map[cstr_idx] = 0;
       }
       cstr_violations_up[cstr_idx]   = curr_cstr_violation_up;
       cstr_violations_down[cstr_idx] = curr_cstr_violation_down;
     });
-  auto iter           = thrust::copy_if(handle_ptr->get_thrust_policy(),
+  auto iter         = thrust::copy_if(handle_ptr->get_thrust_policy(),
                               thrust::make_counting_iterator(0),
                               thrust::make_counting_iterator(0) + problem.n_constraints,
                               violated_cstr_map.data(),
                               violated_constraints.data(),
                               cuda::std::identity{});
-  h_n_violated_cstr   = iter - violated_constraints.data();
-  f_t total_violation = total_vio.value(handle_ptr->get_stream());
+  h_n_violated_cstr = iter - violated_constraints.data();
+  // Use deterministic reduction instead of non-deterministic atomicAdd
+  f_t total_violation = thrust::transform_reduce(
+    handle_ptr->get_thrust_policy(),
+    thrust::make_counting_iterator(0),
+    thrust::make_counting_iterator(0) + problem.n_constraints,
+    [cstr_violations_up   = cstr_violations_up.data(),
+     cstr_violations_down = cstr_violations_down.data()] __device__(i_t cstr_idx) -> f_t {
+      return max(cstr_violations_up[cstr_idx], cstr_violations_down[cstr_idx]);
+    },
+    (f_t)0,
+    thrust::plus<f_t>());
   CUOPT_LOG_TRACE(
     "Repair: n_violated_cstr %d total_violation %f", h_n_violated_cstr, total_violation);
   return total_violation;

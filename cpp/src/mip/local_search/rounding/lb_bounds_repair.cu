@@ -78,8 +78,7 @@ std::tuple<f_t, i_t> lb_bounds_repair_t<i_t, f_t>::get_ii_violation(
      constraint_upper_bounds = problem.constraint_upper_bounds,
      cnst_slack              = make_span_2(lb_bound_presolve.cnst_slack),
      cstr_violations_up      = cstr_violations_up.data(),
-     cstr_violations_down    = cstr_violations_down.data(),
-     total_vio               = total_vio.data()] __device__(i_t cstr_idx) {
+     cstr_violations_down    = cstr_violations_down.data()] __device__(i_t cstr_idx) {
       f_t cnst_lb = constraint_lower_bounds[cstr_idx];
       f_t cnst_ub = constraint_upper_bounds[cstr_idx];
       f_t2 slack  = cnst_slack[cstr_idx];
@@ -90,7 +89,6 @@ std::tuple<f_t, i_t> lb_bounds_repair_t<i_t, f_t>::get_ii_violation(
       f_t violation                = max(curr_cstr_violation_up, curr_cstr_violation_down);
       if (violation >= ROUNDOFF_TOLERANCE) {
         violated_cstr_map[cstr_idx] = 1;
-        atomicAdd(total_vio, violation);
       } else {
         violated_cstr_map[cstr_idx] = 0;
       }
@@ -104,7 +102,17 @@ std::tuple<f_t, i_t> lb_bounds_repair_t<i_t, f_t>::get_ii_violation(
                               violated_constraints.data(),
                               cuda::std::identity{});
   i_t n_violated_cstr = iter - violated_constraints.data();
-  f_t total_violation = total_vio.value(handle_ptr->get_stream());
+  // Use deterministic reduction instead of non-deterministic atomicAdd
+  f_t total_violation = thrust::transform_reduce(
+    handle_ptr->get_thrust_policy(),
+    thrust::make_counting_iterator(0),
+    thrust::make_counting_iterator(0) + problem.n_constraints,
+    [cstr_violations_up   = cstr_violations_up.data(),
+     cstr_violations_down = cstr_violations_down.data()] __device__(i_t cstr_idx) -> f_t {
+      return max(cstr_violations_up[cstr_idx], cstr_violations_down[cstr_idx]);
+    },
+    (f_t)0,
+    thrust::plus<f_t>());
   CUOPT_LOG_TRACE(
     "Repair: n_violated_cstr %d total_violation %f", n_violated_cstr, total_violation);
   return std::make_tuple(total_violation, n_violated_cstr);
