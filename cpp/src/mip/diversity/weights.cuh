@@ -22,7 +22,7 @@ struct weight_t {
     : cstr_weights(cstr_size, handle_ptr->get_stream()), objective_weight(handle_ptr->get_stream())
   {
     thrust::fill(handle_ptr->get_thrust_policy(), cstr_weights.begin(), cstr_weights.end(), 1.0);
-    // objective_weight.set_value_to_zero_async(handle_ptr->get_stream());1
+    // objective_weight.set_value_to_zero_async(handle_ptr->get_stream());
     const f_t one = 1.;
     objective_weight.set_value_async(one, handle_ptr->get_stream());
   }
