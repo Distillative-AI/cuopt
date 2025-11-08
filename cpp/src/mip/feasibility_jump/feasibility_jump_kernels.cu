@@ -989,7 +989,7 @@ __device__ void compute_mtm_moves(typename fj_t<i_t, f_t>::climber_data_t::view_
   if (*fj.full_refresh_iteration == *fj.iterations) full_refresh = true;
   if (*fj.selected_var == std::numeric_limits<i_t>::max()) full_refresh = true;
 
-  // always do a full sweep when looking for satisfied mtm moves1
+  // always do a full sweep when looking for satisfied mtm moves
   i_t split_begin, split_end;
   if constexpr (move_type == MTMMoveType::FJ_MTM_SATISFIED) {
     full_refresh = true;
