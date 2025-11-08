@@ -1324,7 +1324,11 @@ DI thrust::tuple<i_t, f_t, typename fj_t<i_t, f_t>::move_score_t> best_sat_cstr_
   typename fj_t<i_t, f_t>::climber_data_t::view_t fj)
 {
   // compute all MTM moves within satisfied constraints
+  // TODO: only compute such moves over the objective variables. that way, the grid sync can be
+  // eliminated
   compute_mtm_moves<i_t, f_t, MTMMoveType::FJ_MTM_SATISFIED, false, TPB>(fj, true);
+  // TODO: could probably be eliminated
+  cg::this_grid().sync();
   return gridwide_reduce_best_move<i_t, f_t, TPB, /*WeakTabu=*/false, /*recompute_score=*/false>(
     fj, fj.objective_vars.begin(), fj.objective_vars.end(), [fj] __device__(i_t var_idx) {
       return fj.jump_move_delta[var_idx];
@@ -1491,8 +1495,15 @@ __global__ void handle_local_minimum_kernel(typename fj_t<i_t, f_t>::climber_dat
                      best_var, fj.incumbent_assignment[best_var] + best_delta),
                    "assignment not within bounds");
       fj.jump_move_delta[best_var] = best_delta;
-      // DEVICE_LOG_DEBUG("FJ[%d] selected_var: %d, delta %g, score {%d %d}, type %c\n",
-      // *fj.iterations, best_var, best_delta, best_score.base, best_score.bonus, best_movetype);
+#if FJ_SINGLE_STEP
+      DEVICE_LOG_DEBUG("FJ[%d] selected_var: %d, delta %g, score {%d %d}, type %c\n",
+                       *fj.iterations,
+                       best_var,
+                       best_delta,
+                       best_score.base,
+                       best_score.bonus,
+                       best_movetype);
+#endif
     }
   }
 }
