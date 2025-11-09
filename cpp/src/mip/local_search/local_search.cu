@@ -306,21 +306,17 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
                   cpu_better[source]);
 
   total_calls[source]++;
-  // ignore the CPUFJ solution if we're in determinism mode
-  // TODO: use work limits here
-  if (!context.settings.deterministic) {
-    if (cpu_feasible && !gpu_feasible ||
-        (cpu_feasible && solution_cpu.get_objective() < solution.get_objective())) {
-      CUOPT_LOG_DEBUG(
-        "CPU FJ returns better solution! cpu_obj %g, gpu_obj %g, stats %d/%d, source %s",
-        solution_cpu.get_user_objective(),
-        solution.get_user_objective(),
-        total_calls[source],
-        cpu_better[source],
-        source.c_str());
-      solution.copy_from(solution_cpu);
-      cpu_better[source]++;
-    }
+  if (cpu_feasible && !gpu_feasible ||
+      (cpu_feasible && solution_cpu.get_objective() < solution.get_objective())) {
+    CUOPT_LOG_DEBUG(
+      "CPU FJ returns better solution! cpu_obj %g, gpu_obj %g, stats %d/%d, source %s",
+      solution_cpu.get_user_objective(),
+      solution.get_user_objective(),
+      total_calls[source],
+      cpu_better[source],
+      source.c_str());
+    solution.copy_from(solution_cpu);
+    cpu_better[source]++;
   }
   solution.compute_feasibility();
 
