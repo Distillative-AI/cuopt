@@ -88,9 +88,13 @@ void cpu_fj_thread_t<i_t, f_t>::stop_cpu_solver()
 template <typename i_t, typename f_t>
 bool cpu_fj_thread_t<i_t, f_t>::wait_for_cpu_solver()
 {
+  auto wait_start = std::chrono::high_resolution_clock::now();
   while (!cpu_thread_done && !cpu_thread_terminate) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
+  auto wait_end    = std::chrono::high_resolution_clock::now();
+  double wait_time = std::chrono::duration<double>(wait_end - wait_start).count();
+  if (wait_time > 1.0) { CUOPT_LOG_DEBUG("CPU FJ thread wait time: %.2f seconds", wait_time); }
 
   return cpu_fj_solution_found;
 }
@@ -134,6 +138,9 @@ void local_search_t<i_t, f_t>::start_cpufj_scratch_threads(population_t<i_t, f_t
 
   std::vector<f_t> default_weights(context.problem_ptr->n_constraints, 1.);
 
+  fj_settings_t cpu_fj_settings{};
+  cpu_fj_settings.time_limit = std::numeric_limits<f_t>::infinity();
+
   solution_t<i_t, f_t> solution(*context.problem_ptr);
   thrust::fill(solution.handle_ptr->get_thrust_policy(),
                solution.assignment.begin(),
@@ -147,7 +154,7 @@ void local_search_t<i_t, f_t>::start_cpufj_scratch_threads(population_t<i_t, f_t
                                                       default_weights,
                                                       default_weights,
                                                       0.,
-                                                      fj_settings_t{},
+                                                      cpu_fj_settings,
                                                       /*randomize=*/counter > 0);
 
     cpu_fj.fj_cpu->log_prefix = "******* scratch " + std::to_string(counter) + ": ";
@@ -181,11 +188,14 @@ void local_search_t<i_t, f_t>::start_cpufj_lptopt_scratch_threads(
 
   std::vector<f_t> default_weights(context.problem_ptr->n_constraints, 1.);
 
+  fj_settings_t cpu_fj_settings{};
+  cpu_fj_settings.time_limit = std::numeric_limits<f_t>::infinity();
+
   solution_t<i_t, f_t> solution_lp(*context.problem_ptr);
   solution_lp.copy_new_assignment(host_copy(lp_optimal_solution));
   solution_lp.round_random_nearest(500);
   scratch_cpu_fj_on_lp_opt.fj_cpu =
-    fj.create_cpu_climber(solution_lp, default_weights, default_weights, 0.);
+    fj.create_cpu_climber(solution_lp, default_weights, default_weights, 0., cpu_fj_settings, true);
   scratch_cpu_fj_on_lp_opt.fj_cpu->log_prefix = "******* scratch on LP optimal: ";
   if (!context.settings.deterministic) {
     scratch_cpu_fj_on_lp_opt.fj_cpu->improvement_callback =
@@ -228,9 +238,19 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
 
   auto h_weights          = cuopt::host_copy(in_fj.cstr_weights, solution.handle_ptr->get_stream());
   auto h_objective_weight = in_fj.objective_weight.value(solution.handle_ptr->get_stream());
+
+  // for now: always assign the CPUFJs to perform 1000 iters per s
+  fj_settings_t cpu_fj_settings{};
+  if (context.settings.deterministic) {
+    cpu_fj_settings.iteration_limit = std::numeric_limits<i_t>::max();
+  } else {
+    // TODO: CHANGE
+    cpu_fj_settings.iteration_limit = 1000 * time_limit;
+  }
+
   for (auto& cpu_fj : ls_cpu_fj) {
     cpu_fj.fj_cpu = cpu_fj.fj_ptr->create_cpu_climber(
-      solution, h_weights, h_weights, h_objective_weight, fj_settings_t{}, true);
+      solution, h_weights, h_weights, h_objective_weight, cpu_fj_settings, true);
   }
 
   auto solution_copy = solution;
@@ -246,8 +266,10 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
   in_fj.solve(solution);
 
   // Stop CPU solver
-  for (auto& cpu_fj : ls_cpu_fj) {
-    cpu_fj.stop_cpu_solver();
+  if (!context.settings.deterministic) {
+    for (auto& cpu_fj : ls_cpu_fj) {
+      cpu_fj.stop_cpu_solver();
+    }
   }
 
   auto gpu_fj_end        = std::chrono::high_resolution_clock::now();
