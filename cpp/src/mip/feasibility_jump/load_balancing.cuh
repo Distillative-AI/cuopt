@@ -567,24 +567,29 @@ __launch_bounds__(TPB_loadbalance, 16) __global__
             best_score_ref{fj.jump_move_scores[var_idx]};
           auto best_score = best_score_ref.load(cuda::memory_order_relaxed);
 
+          cuda::atomic_ref<f_t, cuda::thread_scope_device> best_delta_ref{
+            fj.jump_move_delta[var_idx]};
+          auto best_delta = best_delta_ref.load(cuda::memory_order_relaxed);
+
           if (best_score < candidate.score ||
-              (best_score == candidate.score && candidate.delta < fj.jump_move_delta[var_idx])) {
+              (best_score == candidate.score && candidate.delta < best_delta)) {
             // update the best move delta
             acquire_lock(&fj.jump_locks[var_idx]);
 
             // reject this move if it would increase the target variable to a numerically unstable
             // value
-            if (!fj.move_numerically_stable(fj.incumbent_assignment[var_idx],
-                                            fj.incumbent_assignment[var_idx] + delta,
-                                            base_feas,
-                                            *fj.violation_score)) {
-              fj.jump_move_scores[var_idx] = fj_t<i_t, f_t>::move_score_t::invalid();
-            } else if (fj.jump_move_scores[var_idx] < candidate.score
-                       // determinism for ease of debugging
-                       || (fj.jump_move_scores[var_idx] == candidate.score &&
-                           candidate.delta < fj.jump_move_delta[var_idx])) {
-              fj.jump_move_delta[var_idx]  = candidate.delta;
-              fj.jump_move_scores[var_idx] = candidate.score;
+            // only skip updating, don't invalidate existing valid moves
+            if (fj.move_numerically_stable(fj.incumbent_assignment[var_idx],
+                                           fj.incumbent_assignment[var_idx] + delta,
+                                           base_feas,
+                                           *fj.violation_score)) {
+              if (fj.jump_move_scores[var_idx] < candidate.score
+                  // determinism for ease of debugging
+                  || (fj.jump_move_scores[var_idx] == candidate.score &&
+                      candidate.delta < fj.jump_move_delta[var_idx])) {
+                fj.jump_move_delta[var_idx]  = candidate.delta;
+                fj.jump_move_scores[var_idx] = candidate.score;
+              }
             }
             release_lock(&fj.jump_locks[var_idx]);
           }
