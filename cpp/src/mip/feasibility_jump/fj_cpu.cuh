@@ -120,21 +120,27 @@ struct fj_cpu_climber_t {
   i_t n_lift_moves_window{0};
   i_t n_mtm_viol_moves_window{0};
   i_t n_mtm_sat_moves_window{0};
-  i_t n_constraint_evals_window{0};
   i_t n_variable_updates_window{0};
   i_t n_local_minima_window{0};
   std::chrono::high_resolution_clock::time_point last_feature_log_time;
   f_t prev_best_objective{std::numeric_limits<f_t>::infinity()};
   i_t iterations_since_best{0};
 
+  // Cache and locality tracking
+  i_t hit_count_window_start{0};
+  i_t miss_count_window_start{0};
+  std::unordered_set<i_t> unique_cstrs_accessed_window;
+  std::unordered_set<i_t> unique_vars_accessed_window;
+
   // Precomputed static problem features
   i_t n_binary_vars{0};
   i_t n_integer_vars{0};
-  i_t n_continuous_vars{0};
   i_t max_var_degree{0};
   i_t max_cstr_degree{0};
   double avg_var_degree{0.0};
   double avg_cstr_degree{0.0};
+  double var_degree_cv{0.0};
+  double cstr_degree_cv{0.0};
   double problem_density{0.0};
 };
 

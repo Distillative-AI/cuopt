@@ -256,16 +256,13 @@ template <typename i_t, typename f_t>
 static void precompute_problem_features(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
 {
   // Count variable types - use host vectors
-  fj_cpu.n_binary_vars     = 0;
-  fj_cpu.n_integer_vars    = 0;
-  fj_cpu.n_continuous_vars = 0;
+  fj_cpu.n_binary_vars  = 0;
+  fj_cpu.n_integer_vars = 0;
   for (i_t i = 0; i < (i_t)fj_cpu.h_is_binary_variable.size(); i++) {
     if (fj_cpu.h_is_binary_variable[i]) {
       fj_cpu.n_binary_vars++;
     } else if (fj_cpu.h_var_types[i] == var_t::INTEGER) {
       fj_cpu.n_integer_vars++;
-    } else {
-      fj_cpu.n_continuous_vars++;
     }
   }
 
@@ -275,21 +272,46 @@ static void precompute_problem_features(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
 
   fj_cpu.avg_var_degree = (double)total_nnz / n_vars;
 
-  // Compute max variable degree
+  // Compute variable degree statistics (max, cv)
   fj_cpu.max_var_degree = 0;
+  std::vector<i_t> var_degrees(n_vars);
   for (i_t i = 0; i < n_vars; i++) {
     i_t degree            = fj_cpu.h_reverse_offsets[i + 1] - fj_cpu.h_reverse_offsets[i];
+    var_degrees[i]        = degree;
     fj_cpu.max_var_degree = std::max(fj_cpu.max_var_degree, degree);
   }
 
+  // Compute variable degree coefficient of variation
+  double var_deg_variance = 0.0;
+  for (i_t i = 0; i < n_vars; i++) {
+    double diff = var_degrees[i] - fj_cpu.avg_var_degree;
+    var_deg_variance += diff * diff;
+  }
+  var_deg_variance /= n_vars;
+  double var_degree_std = std::sqrt(var_deg_variance);
+  fj_cpu.var_degree_cv  = fj_cpu.avg_var_degree > 0 ? var_degree_std / fj_cpu.avg_var_degree : 0.0;
+
   fj_cpu.avg_cstr_degree = (double)total_nnz / n_cstrs;
 
-  // Compute max constraint degree
+  // Compute constraint degree statistics (max, cv)
   fj_cpu.max_cstr_degree = 0;
+  std::vector<i_t> cstr_degrees(n_cstrs);
   for (i_t i = 0; i < n_cstrs; i++) {
     i_t degree             = fj_cpu.h_offsets[i + 1] - fj_cpu.h_offsets[i];
+    cstr_degrees[i]        = degree;
     fj_cpu.max_cstr_degree = std::max(fj_cpu.max_cstr_degree, degree);
   }
+
+  // Compute constraint degree coefficient of variation
+  double cstr_deg_variance = 0.0;
+  for (i_t i = 0; i < n_cstrs; i++) {
+    double diff = cstr_degrees[i] - fj_cpu.avg_cstr_degree;
+    cstr_deg_variance += diff * diff;
+  }
+  cstr_deg_variance /= n_cstrs;
+  double cstr_degree_std = std::sqrt(cstr_deg_variance);
+  fj_cpu.cstr_degree_cv =
+    fj_cpu.avg_cstr_degree > 0 ? cstr_degree_std / fj_cpu.avg_cstr_degree : 0.0;
 
   fj_cpu.problem_density = (double)total_nnz / ((double)n_vars * n_cstrs);
 }
@@ -299,25 +321,12 @@ static void log_regression_features(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
                                     double time_window_ms,
                                     double total_time_ms)
 {
-#ifdef __linux__
-  pid_t tid = syscall(SYS_gettid);
-#else
-  int tid = 0;
-#endif
-
   i_t total_nnz = fj_cpu.h_reverse_offsets.back();
   i_t n_vars    = fj_cpu.h_reverse_offsets.size() - 1;
   i_t n_cstrs   = fj_cpu.h_offsets.size() - 1;
 
   // Dynamic runtime features
-  i_t n_violated        = fj_cpu.violated_constraints.size();
-  double violated_ratio = (double)n_violated / n_cstrs;
-
-  // Compute improvement velocity
-  double improvement_velocity = 0.0;
-  if (fj_cpu.iterations > 0) {
-    improvement_velocity = (fj_cpu.prev_best_objective - fj_cpu.h_best_objective) / 1000.0;
-  }
+  double violated_ratio = (double)fj_cpu.violated_constraints.size() / n_cstrs;
 
   // Compute per-iteration metrics
   double nnz_per_move = 0.0;
@@ -325,12 +334,37 @@ static void log_regression_features(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
     fj_cpu.n_lift_moves_window + fj_cpu.n_mtm_viol_moves_window + fj_cpu.n_mtm_sat_moves_window;
   if (total_moves > 0) { nnz_per_move = (double)fj_cpu.nnz_processed_window / total_moves; }
 
-  double eval_intensity = (double)fj_cpu.n_constraint_evals_window / n_cstrs;
+  double eval_intensity = (double)fj_cpu.nnz_processed_window / 1000.0;
+
+  // Cache and locality metrics
+  i_t cache_hits_window    = fj_cpu.hit_count - fj_cpu.hit_count_window_start;
+  i_t cache_misses_window  = fj_cpu.miss_count - fj_cpu.miss_count_window_start;
+  i_t total_cache_accesses = cache_hits_window + cache_misses_window;
+  double cache_hit_rate =
+    total_cache_accesses > 0 ? (double)cache_hits_window / total_cache_accesses : 0.0;
+
+  i_t unique_cstrs = fj_cpu.unique_cstrs_accessed_window.size();
+  i_t unique_vars  = fj_cpu.unique_vars_accessed_window.size();
+
+  // Reuse ratios: how many times each constraint/variable was accessed on average
+  double cstr_reuse_ratio =
+    unique_cstrs > 0 ? (double)fj_cpu.nnz_processed_window / unique_cstrs : 0.0;
+  double var_reuse_ratio =
+    unique_vars > 0 ? (double)fj_cpu.n_variable_updates_window / unique_vars : 0.0;
+
+  // Working set size estimation (KB)
+  // Each constraint: lhs (f_t) + 2 bounds (f_t) + sumcomp (f_t) = 4 * sizeof(f_t)
+  // Each variable: assignment (f_t) = 1 * sizeof(f_t)
+  i_t working_set_bytes = unique_cstrs * 4 * sizeof(f_t) + unique_vars * sizeof(f_t);
+  double working_set_kb = working_set_bytes / 1024.0;
+
+  // Coverage: what fraction of problem is actively touched
+  double cstr_coverage = (double)unique_cstrs / n_cstrs;
+  double var_coverage  = (double)unique_vars / n_vars;
 
   double loads_per_iter  = 0.0;
   double stores_per_iter = 0.0;
   double l1_miss         = -1.0;
-  double l2_miss         = -1.0;
   double l3_miss         = -1.0;
 
 #ifdef __linux__
@@ -349,9 +383,6 @@ static void log_regression_features(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
       if (all_values[0] > 0 && all_values[1] != -1) {
         l1_miss = (double)all_values[1] / all_values[0] * 100.0;
       }
-      if (all_values[2] > 0 && all_values[3] != -1) {
-        l2_miss = (double)all_values[3] / all_values[2] * 100.0;
-      }
       if (all_values[4] > 0 && all_values[5] != -1) {
         l3_miss = (double)all_values[5] / all_values[4] * 100.0;
       }
@@ -365,52 +396,58 @@ static void log_regression_features(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
 
   // Print everything on a single line using precomputed features
   CUOPT_LOG_DEBUG(
-    "%sCPUFJ_FEATURES iter=%d tid=%d time_window=%.2f "
-    "n_vars=%d n_cstrs=%d n_bin=%d n_int=%d n_cont=%d total_nnz=%d "
-    "avg_var_deg=%.2f max_var_deg=%d avg_cstr_deg=%.2f max_cstr_deg=%d density=%.6f "
-    "n_viol=%d total_viol=%.4f curr_obj=%.4f best_obj=%.4f obj_weight=%.4f max_weight=%.4f "
-    "n_locmin=%d is_feas=%d iter_since_best=%d feas_found=%d "
-    "nnz_proc=%d n_lift=%d n_mtm_viol=%d n_mtm_sat=%d n_cstr_eval=%d n_var_updates=%d "
-    "L1_miss=%.2f L2_miss=%.2f L3_miss=%.2f loads_per_iter=%.0f stores_per_iter=%.0f "
-    "viol_ratio=%.4f improv_vel=%.6f nnz_per_move=%.2f eval_intensity=%.2f",
+    "%sCPUFJ_FEATURES iter=%d time_window=%.2f "
+    "n_vars=%d n_cstrs=%d n_bin=%d n_int=%d total_nnz=%d "
+    "avg_var_deg=%.2f max_var_deg=%d var_deg_cv=%.4f "
+    "avg_cstr_deg=%.2f max_cstr_deg=%d cstr_deg_cv=%.4f "
+    "density=%.6f "
+    "total_viol=%.4f obj_weight=%.4f max_weight=%.4f "
+    "n_locmin=%d iter_since_best=%d feas_found=%d "
+    "nnz_proc=%d n_lift=%d n_mtm_viol=%d n_mtm_sat=%d n_var_updates=%d "
+    "cache_hit_rate=%.4f unique_cstrs=%d unique_vars=%d "
+    "cstr_reuse=%.2f var_reuse=%.2f working_set_kb=%.1f "
+    "cstr_coverage=%.4f var_coverage=%.4f "
+    "L1_miss=%.2f L3_miss=%.2f loads_per_iter=%.0f stores_per_iter=%.0f "
+    "viol_ratio=%.4f nnz_per_move=%.2f eval_intensity=%.2f",
     fj_cpu.log_prefix.c_str(),
     fj_cpu.iterations,
-    tid,
     time_window_ms,
     n_vars,
     n_cstrs,
     fj_cpu.n_binary_vars,
     fj_cpu.n_integer_vars,
-    fj_cpu.n_continuous_vars,
     total_nnz,
     fj_cpu.avg_var_degree,
     fj_cpu.max_var_degree,
+    fj_cpu.var_degree_cv,
     fj_cpu.avg_cstr_degree,
     fj_cpu.max_cstr_degree,
+    fj_cpu.cstr_degree_cv,
     fj_cpu.problem_density,
-    n_violated,
     fj_cpu.total_violations,
-    fj_cpu.h_incumbent_objective,
-    fj_cpu.h_best_objective,
     fj_cpu.h_objective_weight,
     fj_cpu.max_weight,
     fj_cpu.n_local_minima_window,
-    fj_cpu.feasible_found ? 1 : 0,
     fj_cpu.iterations_since_best,
     fj_cpu.feasible_found ? 1 : 0,
     fj_cpu.nnz_processed_window,
     fj_cpu.n_lift_moves_window,
     fj_cpu.n_mtm_viol_moves_window,
     fj_cpu.n_mtm_sat_moves_window,
-    fj_cpu.n_constraint_evals_window,
     fj_cpu.n_variable_updates_window,
+    cache_hit_rate,
+    unique_cstrs,
+    unique_vars,
+    cstr_reuse_ratio,
+    var_reuse_ratio,
+    working_set_kb,
+    cstr_coverage,
+    var_coverage,
     l1_miss,
-    l2_miss,
     l3_miss,
     loads_per_iter,
     stores_per_iter,
     violated_ratio,
-    improvement_velocity,
     nnz_per_move,
     eval_intensity);
 
@@ -419,10 +456,15 @@ static void log_regression_features(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
   fj_cpu.n_lift_moves_window       = 0;
   fj_cpu.n_mtm_viol_moves_window   = 0;
   fj_cpu.n_mtm_sat_moves_window    = 0;
-  fj_cpu.n_constraint_evals_window = 0;
   fj_cpu.n_variable_updates_window = 0;
   fj_cpu.n_local_minima_window     = 0;
   fj_cpu.prev_best_objective       = fj_cpu.h_best_objective;
+
+  // Reset cache and locality tracking
+  fj_cpu.hit_count_window_start  = fj_cpu.hit_count;
+  fj_cpu.miss_count_window_start = fj_cpu.miss_count;
+  fj_cpu.unique_cstrs_accessed_window.clear();
+  fj_cpu.unique_vars_accessed_window.clear();
 }
 
 template <typename i_t, typename f_t>
@@ -473,10 +515,11 @@ static inline std::pair<fj_staged_score_t, f_t> compute_score(fj_cpu_climber_t<i
   f_t bonus_robust_sum = 0;
 
   auto [offset_begin, offset_end] = fj_cpu.view.pb.reverse_range_for_var(var_idx);
-  fj_cpu.n_constraint_evals_window += (offset_end - offset_begin);
+  fj_cpu.nnz_processed_window += (offset_end - offset_begin);
 
   for (i_t i = offset_begin; i < offset_end; i++) {
-    auto cstr_idx     = fj_cpu.h_reverse_constraints[i];
+    auto cstr_idx = fj_cpu.h_reverse_constraints[i];
+    fj_cpu.unique_cstrs_accessed_window.insert(cstr_idx);
     auto cstr_coeff   = fj_cpu.h_reverse_coefficients[i];
     auto [c_lb, c_ub] = fj_cpu.cached_cstr_bounds[i];
 
@@ -601,6 +644,7 @@ static void apply_move(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
   // Track work metrics for regression model
   fj_cpu.nnz_processed_window += (offset_end - offset_begin);
   fj_cpu.n_variable_updates_window++;
+  fj_cpu.unique_vars_accessed_window.insert(var_idx);
 
   i_t previous_viol = fj_cpu.violated_constraints.size();
 
@@ -608,7 +652,8 @@ static void apply_move(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
     cuopt_assert(i < (i_t)fj_cpu.h_reverse_constraints.size(), "");
     auto [c_lb, c_ub] = fj_cpu.cached_cstr_bounds[i];
 
-    auto cstr_idx   = fj_cpu.h_reverse_constraints[i];
+    auto cstr_idx = fj_cpu.h_reverse_constraints[i];
+    fj_cpu.unique_cstrs_accessed_window.insert(cstr_idx);
     auto cstr_coeff = fj_cpu.h_reverse_coefficients[i];
 
     f_t old_lhs = fj_cpu.h_lhs[cstr_idx];
