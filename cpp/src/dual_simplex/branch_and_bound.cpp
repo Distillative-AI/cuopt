@@ -19,6 +19,8 @@
 #include <dual_simplex/tic_toc.hpp>
 #include <dual_simplex/user_problem.hpp>
 
+#include <raft/common/nvtx.hpp>
+
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -376,6 +378,7 @@ bool branch_and_bound_t<i_t, f_t>::repair_solution(const std::vector<f_t>& edge_
 template <typename i_t, typename f_t>
 void branch_and_bound_t<i_t, f_t>::repair_heuristic_solutions()
 {
+  raft::common::nvtx::range scope("BB::repair_heuristics");
   // Check if there are any solutions to repair
   std::vector<std::vector<f_t>> to_repair;
   mutex_repair_.lock();
@@ -550,6 +553,7 @@ node_status_t branch_and_bound_t<i_t, f_t>::solve_node(search_tree_t<i_t, f_t>& 
                                                        logger_t& log,
                                                        char thread_type)
 {
+  raft::common::nvtx::range scope("BB::solve_node");
   f_t abs_fathom_tol = settings_.absolute_mip_gap_tol / 10;
 
   lp_solution_t<i_t, f_t> leaf_solution(leaf_problem.num_rows, leaf_problem.num_cols);
@@ -570,8 +574,12 @@ node_status_t branch_and_bound_t<i_t, f_t>::solve_node(search_tree_t<i_t, f_t>& 
 
   // in B&B we only have equality constraints, leave it empty for default
   std::vector<char> row_sense;
-  bool feasible =
-    bound_strengthening(row_sense, lp_settings, leaf_problem, Arow, var_types_, bounds_changed);
+  bool feasible;
+  {
+    raft::common::nvtx::range scope_bs("BB::bound_strengthening");
+    feasible =
+      bound_strengthening(row_sense, lp_settings, leaf_problem, Arow, var_types_, bounds_changed);
+  }
 
   dual::status_t lp_status = dual::status_t::DUAL_UNBOUNDED;
 
@@ -580,15 +588,18 @@ node_status_t branch_and_bound_t<i_t, f_t>::solve_node(search_tree_t<i_t, f_t>& 
     f_t lp_start_time                = tic();
     std::vector<f_t> leaf_edge_norms = edge_norms_;  // = node.steepest_edge_norms;
 
-    lp_status = dual_phase2(2,
-                            0,
-                            lp_start_time,
-                            leaf_problem,
-                            lp_settings,
-                            leaf_vstatus,
-                            leaf_solution,
-                            node_iter,
-                            leaf_edge_norms);
+    {
+      raft::common::nvtx::range scope_lp("BB::node_lp_solve");
+      lp_status = dual_phase2(2,
+                              0,
+                              lp_start_time,
+                              leaf_problem,
+                              lp_settings,
+                              leaf_vstatus,
+                              leaf_solution,
+                              node_iter,
+                              leaf_edge_norms);
+    }
 
     if (lp_status == dual::status_t::NUMERICAL) {
       log.printf("Numerical issue node %d. Resolving from scratch.\n", node_ptr->node_id);
@@ -774,6 +785,7 @@ void branch_and_bound_t<i_t, f_t>::explore_subtree(i_t task_id,
                                                    lp_problem_t<i_t, f_t>& leaf_problem,
                                                    const csc_matrix_t<i_t, f_t>& Arow)
 {
+  raft::common::nvtx::range scope("BB::explore_subtree");
   std::deque<mip_node_t<i_t, f_t>*> stack;
   stack.push_front(start_node);
 
@@ -888,6 +900,7 @@ void branch_and_bound_t<i_t, f_t>::best_first_thread(i_t id,
                                                      lp_problem_t<i_t, f_t>& leaf_problem,
                                                      const csc_matrix_t<i_t, f_t>& Arow)
 {
+  raft::common::nvtx::range scope("BB::best_first_thread");
   f_t lower_bound = -inf;
   f_t upper_bound = inf;
   f_t abs_gap     = inf;
@@ -943,6 +956,7 @@ template <typename i_t, typename f_t>
 void branch_and_bound_t<i_t, f_t>::diving_thread(lp_problem_t<i_t, f_t>& leaf_problem,
                                                  const csc_matrix_t<i_t, f_t>& Arow)
 {
+  raft::common::nvtx::range scope("BB::diving_thread");
   logger_t log;
   log.log = false;
 
@@ -1010,6 +1024,8 @@ void branch_and_bound_t<i_t, f_t>::diving_thread(lp_problem_t<i_t, f_t>& leaf_pr
 template <typename i_t, typename f_t>
 mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solution)
 {
+  raft::common::nvtx::range scope("BB::solve");
+
   logger_t log;
   log.log                 = false;
   status_                 = mip_exploration_status_t::UNSET;
@@ -1017,6 +1033,7 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
   stats_.nodes_explored   = 0;
 
   if (guess_.size() != 0) {
+    raft::common::nvtx::range scope_guess("BB::check_initial_guess");
     std::vector<f_t> crushed_guess;
     crush_primal_solution(original_problem_, original_lp_, guess_, new_slacks_, crushed_guess);
     f_t primal_err;
@@ -1036,10 +1053,14 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
   root_relax_soln_.resize(original_lp_.num_rows, original_lp_.num_cols);
 
   settings_.log.printf("Solving LP root relaxation\n");
-  simplex_solver_settings_t lp_settings = settings_;
-  lp_settings.inside_mip                = 1;
-  lp_status_t root_status               = solve_linear_program_advanced(
-    original_lp_, stats_.start_time, lp_settings, root_relax_soln_, root_vstatus_, edge_norms_);
+  lp_status_t root_status;
+  {
+    raft::common::nvtx::range scope_root("BB::root_relaxation");
+    simplex_solver_settings_t lp_settings = settings_;
+    lp_settings.inside_mip                = 1;
+    root_status                           = solve_linear_program_advanced(
+      original_lp_, stats_.start_time, lp_settings, root_relax_soln_, root_vstatus_, edge_norms_);
+  }
   stats_.total_lp_iters      = root_relax_soln_.iterations;
   stats_.total_lp_solve_time = toc(stats_.start_time);
   if (root_status == lp_status_t::INFEASIBLE) {
@@ -1115,16 +1136,19 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
   }
 
   pc_.resize(original_lp_.num_cols);
-  strong_branching<i_t, f_t>(original_lp_,
-                             settings_,
-                             stats_.start_time,
-                             var_types_,
-                             root_relax_soln_.x,
-                             fractional,
-                             root_objective_,
-                             root_vstatus_,
-                             edge_norms_,
-                             pc_);
+  {
+    raft::common::nvtx::range scope_sb("BB::strong_branching");
+    strong_branching<i_t, f_t>(original_lp_,
+                               settings_,
+                               stats_.start_time,
+                               var_types_,
+                               root_relax_soln_.x,
+                               fractional,
+                               root_objective_,
+                               root_vstatus_,
+                               edge_norms_,
+                               pc_);
+  }
 
   if (toc(stats_.start_time) > settings_.time_limit) {
     status_ = mip_exploration_status_t::TIME_LIMIT;
@@ -1167,6 +1191,7 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
 
 #pragma omp parallel num_threads(settings_.num_threads)
   {
+    raft::common::nvtx::range scope_tree("BB::tree_exploration");
     // Make a copy of the original LP. We will modify its bounds at each leaf
     lp_problem_t leaf_problem = original_lp_;
 

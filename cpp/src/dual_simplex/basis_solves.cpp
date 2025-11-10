@@ -13,6 +13,8 @@
 #include <dual_simplex/tic_toc.hpp>
 #include <dual_simplex/triangle_solve.hpp>
 
+#include <raft/common/nvtx.hpp>
+
 namespace cuopt::linear_programming::dual_simplex {
 
 template <typename i_t>
@@ -165,6 +167,7 @@ i_t factorize_basis(const csc_matrix_t<i_t, f_t>& A,
                     std::vector<i_t>& deficient,
                     std::vector<i_t>& slacks_needed)
 {
+  raft::common::nvtx::range scope("LU::factorize_basis");
   const i_t m              = basic_list.size();
   constexpr f_t medium_tol = 1e-12;
 

@@ -12,6 +12,8 @@
 #include <dual_simplex/solve.hpp>
 #include <dual_simplex/tic_toc.hpp>
 
+#include <raft/common/nvtx.hpp>
+
 #include <cmath>
 #include <iostream>
 #include <numeric>
@@ -67,6 +69,7 @@ bool bound_strengthening(const std::vector<char>& row_sense,
                          const std::vector<variable_type_t>& var_types,
                          const std::vector<bool>& bounds_changed)
 {
+  raft::common::nvtx::range scope("BB::bound_strengthening_full");
   const i_t m = problem.num_rows;
   const i_t n = problem.num_cols;
 

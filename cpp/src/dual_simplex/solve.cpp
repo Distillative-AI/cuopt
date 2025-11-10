@@ -23,6 +23,8 @@
 #include <dual_simplex/types.hpp>
 #include <dual_simplex/user_problem.hpp>
 
+#include <raft/common/nvtx.hpp>
+
 #include <cstdio>
 #include <cstdlib>
 #include <queue>
@@ -107,6 +109,7 @@ lp_status_t solve_linear_program_advanced(const lp_problem_t<i_t, f_t>& original
                                           std::vector<variable_status_t>& vstatus,
                                           std::vector<f_t>& edge_norms)
 {
+  raft::common::nvtx::range scope("DualSimplex::solve_lp");
   const i_t m = original_lp.num_rows;
   const i_t n = original_lp.num_cols;
   assert(m <= n);
@@ -139,7 +142,11 @@ lp_status_t solve_linear_program_with_advanced_basis(
   lp_status_t lp_status = lp_status_t::UNSET;
   lp_problem_t<i_t, f_t> presolved_lp(original_lp.handle_ptr, 1, 1, 1);
   presolve_info_t<i_t, f_t> presolve_info;
-  const i_t ok = presolve(original_lp, settings, presolved_lp, presolve_info);
+  i_t ok;
+  {
+    raft::common::nvtx::range scope_presolve("DualSimplex::presolve");
+    ok = presolve(original_lp, settings, presolved_lp, presolve_info);
+  }
   if (ok == -1) { return lp_status_t::INFEASIBLE; }
 
   constexpr bool write_out_matlab = false;
@@ -154,7 +161,10 @@ lp_status_t solve_linear_program_with_advanced_basis(
                             presolved_lp.num_cols,
                             presolved_lp.A.col_start[presolved_lp.num_cols]);
   std::vector<f_t> column_scales;
-  column_scaling(presolved_lp, settings, lp, column_scales);
+  {
+    raft::common::nvtx::range scope_scaling("DualSimplex::scaling");
+    column_scaling(presolved_lp, settings, lp, column_scales);
+  }
   assert(presolved_lp.num_cols == lp.num_cols);
   lp_problem_t<i_t, f_t> phase1_problem(original_lp.handle_ptr, 1, 1, 1);
   std::vector<variable_status_t> phase1_vstatus;
@@ -180,8 +190,19 @@ lp_status_t solve_linear_program_with_advanced_basis(
   i_t iter = 0;
   lp_solution_t<i_t, f_t> phase1_solution(phase1_problem.num_rows, phase1_problem.num_cols);
   edge_norms.clear();
-  dual::status_t phase1_status = dual_phase2(
-    1, 1, start_time, phase1_problem, settings, phase1_vstatus, phase1_solution, iter, edge_norms);
+  dual::status_t phase1_status;
+  {
+    raft::common::nvtx::range scope_phase1("DualSimplex::phase1");
+    phase1_status = dual_phase2(1,
+                                1,
+                                start_time,
+                                phase1_problem,
+                                settings,
+                                phase1_vstatus,
+                                phase1_solution,
+                                iter,
+                                edge_norms);
+  }
   if (phase1_status == dual::status_t::NUMERICAL ||
       phase1_status == dual::status_t::DUAL_UNBOUNDED) {
     settings.log.printf("Failed in Phase 1\n");

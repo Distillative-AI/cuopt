@@ -11,6 +11,8 @@
 #include <dual_simplex/solve.hpp>
 #include <dual_simplex/tic_toc.hpp>
 
+#include <raft/common/nvtx.hpp>
+
 #include <omp.h>
 
 namespace cuopt::linear_programming::dual_simplex {
@@ -31,6 +33,7 @@ void strong_branch_helper(i_t start,
                           const std::vector<f_t>& edge_norms,
                           pseudo_costs_t<i_t, f_t>& pc)
 {
+  raft::common::nvtx::range scope("BB::strong_branch_helper");
   lp_problem_t child_problem = original_lp;
 
   constexpr bool verbose = false;

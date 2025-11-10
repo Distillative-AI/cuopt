@@ -8,6 +8,8 @@
 #include <dual_simplex/right_looking_lu.hpp>
 #include <dual_simplex/tic_toc.hpp>
 
+#include <raft/common/nvtx.hpp>
+
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -577,6 +579,7 @@ i_t right_looking_lu(const csc_matrix_t<i_t, f_t>& A,
                      csc_matrix_t<i_t, f_t>& U,
                      std::vector<i_t>& pinv)
 {
+  raft::common::nvtx::range scope("LU::right_looking_lu");
   const i_t n = column_list.size();
   const i_t m = A.m;
 

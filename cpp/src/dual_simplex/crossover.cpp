@@ -15,6 +15,8 @@
 #include <dual_simplex/solve.hpp>
 #include <dual_simplex/tic_toc.hpp>
 
+#include <raft/common/nvtx.hpp>
+
 #include <array>
 
 namespace cuopt::linear_programming::dual_simplex {
@@ -1045,6 +1047,7 @@ crossover_status_t crossover(const lp_problem_t<i_t, f_t>& lp,
                              lp_solution_t<i_t, f_t>& solution,
                              std::vector<variable_status_t>& vstatus)
 {
+  raft::common::nvtx::range scope("Barrier::crossover");
   const i_t m         = lp.num_rows;
   const i_t n         = lp.num_cols;
   f_t crossover_start = tic();

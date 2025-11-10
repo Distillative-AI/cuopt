@@ -16,6 +16,8 @@
 #include <dual_simplex/sparse_matrix.hpp>
 #include <dual_simplex/tic_toc.hpp>
 
+#include <raft/common/nvtx.hpp>
+
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -2171,6 +2173,7 @@ dual::status_t dual_phase2(i_t phase,
                            i_t& iter,
                            std::vector<f_t>& delta_y_steepest_edge)
 {
+  raft::common::nvtx::range scope("DualSimplex::phase2");
   const i_t m = lp.num_rows;
   const i_t n = lp.num_cols;
   std::vector<i_t> basic_list(m);
@@ -2208,6 +2211,7 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
                                                i_t& iter,
                                                std::vector<f_t>& delta_y_steepest_edge)
 {
+  raft::common::nvtx::range scope("DualSimplex::phase2_advanced");
   const i_t m = lp.num_rows;
   const i_t n = lp.num_cols;
   assert(m <= n);
@@ -2379,21 +2383,24 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     i_t leaving_index       = -1;
     f_t max_val;
     timers.start_timer();
-    if (settings.use_steepest_edge_pricing) {
-      leaving_index = phase2::steepest_edge_pricing_with_infeasibilities(lp,
-                                                                         settings,
-                                                                         x,
-                                                                         delta_y_steepest_edge,
-                                                                         basic_mark,
-                                                                         squared_infeasibilities,
-                                                                         infeasibility_indices,
-                                                                         direction,
-                                                                         basic_leaving_index,
-                                                                         max_val);
-    } else {
-      // Max infeasibility pricing
-      leaving_index = phase2::phase2_pricing(
-        lp, settings, x, basic_list, direction, basic_leaving_index, primal_infeasibility);
+    {
+      raft::common::nvtx::range scope_pricing("DualSimplex::pricing");
+      if (settings.use_steepest_edge_pricing) {
+        leaving_index = phase2::steepest_edge_pricing_with_infeasibilities(lp,
+                                                                           settings,
+                                                                           x,
+                                                                           delta_y_steepest_edge,
+                                                                           basic_mark,
+                                                                           squared_infeasibilities,
+                                                                           infeasibility_indices,
+                                                                           direction,
+                                                                           basic_leaving_index,
+                                                                           max_val);
+      } else {
+        // Max infeasibility pricing
+        leaving_index = phase2::phase2_pricing(
+          lp, settings, x, basic_list, direction, basic_leaving_index, primal_infeasibility);
+      }
     }
     timers.pricing_time += timers.stop_timer();
     if (leaving_index == -1) {
@@ -2421,7 +2428,10 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     timers.start_timer();
     sparse_vector_t<i_t, f_t> delta_y_sparse(m, 0);
     sparse_vector_t<i_t, f_t> UTsol_sparse(m, 0);
-    phase2::compute_delta_y(ft, basic_leaving_index, direction, delta_y_sparse, UTsol_sparse);
+    {
+      raft::common::nvtx::range scope_btran("DualSimplex::btran");
+      phase2::compute_delta_y(ft, basic_leaving_index, direction, delta_y_sparse, UTsol_sparse);
+    }
     timers.btran_time += timers.stop_timer();
 
     const f_t steepest_edge_norm_check = delta_y_sparse.norm2_squared();
@@ -2490,43 +2500,46 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     i_t nonbasic_entering_index = -1;
     const bool harris_ratio     = settings.use_harris_ratio;
     const bool bound_flip_ratio = settings.use_bound_flip_ratio;
-    if (harris_ratio) {
-      f_t max_step_length = phase2::first_stage_harris(lp, vstatus, nonbasic_list, z, delta_z);
-      entering_index      = phase2::second_stage_harris(lp,
+    {
+      raft::common::nvtx::range scope_ratio("DualSimplex::ratio_test");
+      if (harris_ratio) {
+        f_t max_step_length = phase2::first_stage_harris(lp, vstatus, nonbasic_list, z, delta_z);
+        entering_index      = phase2::second_stage_harris(lp,
+                                                     vstatus,
+                                                     nonbasic_list,
+                                                     z,
+                                                     delta_z,
+                                                     max_step_length,
+                                                     step_length,
+                                                     nonbasic_entering_index);
+      } else if (bound_flip_ratio) {
+        timers.start_timer();
+        f_t slope = direction == 1 ? (lp.lower[leaving_index] - x[leaving_index])
+                                   : (x[leaving_index] - lp.upper[leaving_index]);
+        bound_flipping_ratio_test_t<i_t, f_t> bfrt(settings,
+                                                   start_time,
+                                                   m,
+                                                   n,
+                                                   slope,
+                                                   lp.lower,
+                                                   lp.upper,
+                                                   bounded_variables,
                                                    vstatus,
                                                    nonbasic_list,
                                                    z,
                                                    delta_z,
-                                                   max_step_length,
-                                                   step_length,
-                                                   nonbasic_entering_index);
-    } else if (bound_flip_ratio) {
-      timers.start_timer();
-      f_t slope = direction == 1 ? (lp.lower[leaving_index] - x[leaving_index])
-                                 : (x[leaving_index] - lp.upper[leaving_index]);
-      bound_flipping_ratio_test_t<i_t, f_t> bfrt(settings,
-                                                 start_time,
-                                                 m,
-                                                 n,
-                                                 slope,
-                                                 lp.lower,
-                                                 lp.upper,
-                                                 bounded_variables,
-                                                 vstatus,
-                                                 nonbasic_list,
-                                                 z,
-                                                 delta_z,
-                                                 delta_z_indices,
-                                                 nonbasic_mark);
-      entering_index = bfrt.compute_step_length(step_length, nonbasic_entering_index);
-      if (entering_index == -4) {
-        settings.log.printf("Numerical issues encountered in ratio test.\n");
-        return dual::status_t::NUMERICAL;
+                                                   delta_z_indices,
+                                                   nonbasic_mark);
+        entering_index = bfrt.compute_step_length(step_length, nonbasic_entering_index);
+        if (entering_index == -4) {
+          settings.log.printf("Numerical issues encountered in ratio test.\n");
+          return dual::status_t::NUMERICAL;
+        }
+        timers.bfrt_time += timers.stop_timer();
+      } else {
+        entering_index = phase2::phase2_ratio_test(
+          lp, settings, vstatus, nonbasic_list, z, delta_z, step_length, nonbasic_entering_index);
       }
-      timers.bfrt_time += timers.stop_timer();
-    } else {
-      entering_index = phase2::phase2_ratio_test(
-        lp, settings, vstatus, nonbasic_list, z, delta_z, step_length, nonbasic_entering_index);
     }
     if (entering_index == -2) { return dual::status_t::TIME_LIMIT; }
     if (entering_index == -3) { return dual::status_t::CONCURRENT_LIMIT; }
@@ -2725,21 +2738,24 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     sparse_vector_t<i_t, f_t> utilde_sparse(m, 0);
     sparse_vector_t<i_t, f_t> scaled_delta_xB_sparse(m, 0);
     sparse_vector_t<i_t, f_t> rhs_sparse(lp.A, entering_index);
-    if (phase2::compute_delta_x(lp,
-                                ft,
-                                entering_index,
-                                leaving_index,
-                                basic_leaving_index,
-                                direction,
-                                basic_list,
-                                delta_x_flip,
-                                rhs_sparse,
-                                x,
-                                utilde_sparse,
-                                scaled_delta_xB_sparse,
-                                delta_x) == -1) {
-      settings.log.printf("Failed to compute delta_x. Iter %d\n", iter);
-      return dual::status_t::NUMERICAL;
+    {
+      raft::common::nvtx::range scope_ftran("DualSimplex::ftran");
+      if (phase2::compute_delta_x(lp,
+                                  ft,
+                                  entering_index,
+                                  leaving_index,
+                                  basic_leaving_index,
+                                  direction,
+                                  basic_list,
+                                  delta_x_flip,
+                                  rhs_sparse,
+                                  x,
+                                  utilde_sparse,
+                                  scaled_delta_xB_sparse,
+                                  delta_x) == -1) {
+        settings.log.printf("Failed to compute delta_x. Iter %d\n", iter);
+        return dual::status_t::NUMERICAL;
+      }
     }
 
     timers.ftran_time += timers.stop_timer();
@@ -2867,55 +2883,59 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
 
     timers.start_timer();
     // Refactor or update the basis factorization
-    bool should_refactor = ft.num_updates() > settings.refactor_frequency;
-    if (!should_refactor) {
-      i_t recommend_refactor = ft.update(utilde_sparse, UTsol_sparse, basic_leaving_index);
+    {
+      raft::common::nvtx::range scope_update("DualSimplex::basis_update");
+      bool should_refactor = ft.num_updates() > settings.refactor_frequency;
+      if (!should_refactor) {
+        i_t recommend_refactor = ft.update(utilde_sparse, UTsol_sparse, basic_leaving_index);
 #ifdef CHECK_UPDATE
-      phase2::check_update(lp, settings, ft, basic_list, basic_leaving_index);
+        phase2::check_update(lp, settings, ft, basic_list, basic_leaving_index);
 #endif
-      should_refactor = recommend_refactor == 1;
-    }
+        should_refactor = recommend_refactor == 1;
+      }
 
 #ifdef CHECK_BASIC_INFEASIBILITIES
-    phase2::check_basic_infeasibilities(basic_list, basic_mark, infeasibility_indices, 6);
+      phase2::check_basic_infeasibilities(basic_list, basic_mark, infeasibility_indices, 6);
 #endif
-    if (should_refactor) {
-      bool should_recompute_x = false;
-      if (ft.refactor_basis(lp.A, settings, basic_list, nonbasic_list, vstatus) > 0) {
-        should_recompute_x = true;
-        settings.log.printf("Failed to factorize basis. Iteration %d\n", iter);
-        if (toc(start_time) > settings.time_limit) { return dual::status_t::TIME_LIMIT; }
-        i_t count = 0;
-        i_t deficient_size;
-        while ((deficient_size =
-                  ft.refactor_basis(lp.A, settings, basic_list, nonbasic_list, vstatus)) > 0) {
-          settings.log.printf("Failed to repair basis. Iteration %d. %d deficient columns.\n",
-                              iter,
-                              static_cast<int>(deficient_size));
-
+      if (should_refactor) {
+        raft::common::nvtx::range scope_refactor("DualSimplex::refactorization");
+        bool should_recompute_x = false;
+        if (ft.refactor_basis(lp.A, settings, basic_list, nonbasic_list, vstatus) > 0) {
+          should_recompute_x = true;
+          settings.log.printf("Failed to factorize basis. Iteration %d\n", iter);
           if (toc(start_time) > settings.time_limit) { return dual::status_t::TIME_LIMIT; }
-          settings.threshold_partial_pivoting_tol = 1.0;
+          i_t count = 0;
+          i_t deficient_size;
+          while ((deficient_size =
+                    ft.refactor_basis(lp.A, settings, basic_list, nonbasic_list, vstatus)) > 0) {
+            settings.log.printf("Failed to repair basis. Iteration %d. %d deficient columns.\n",
+                                iter,
+                                static_cast<int>(deficient_size));
 
-          count++;
-          if (count > 10) { return dual::status_t::NUMERICAL; }
+            if (toc(start_time) > settings.time_limit) { return dual::status_t::TIME_LIMIT; }
+            settings.threshold_partial_pivoting_tol = 1.0;
+
+            count++;
+            if (count > 10) { return dual::status_t::NUMERICAL; }
+          }
+
+          settings.log.printf("Successfully repaired basis. Iteration %d\n", iter);
         }
 
-        settings.log.printf("Successfully repaired basis. Iteration %d\n", iter);
+        phase2::reset_basis_mark(basic_list, nonbasic_list, basic_mark, nonbasic_mark);
+        if (should_recompute_x) {
+          std::vector<f_t> unperturbed_x(n);
+          phase2::compute_primal_solution_from_basis(
+            lp, ft, basic_list, nonbasic_list, vstatus, unperturbed_x);
+          x = unperturbed_x;
+        }
+        phase2::compute_initial_primal_infeasibilities(
+          lp, settings, basic_list, x, squared_infeasibilities, infeasibility_indices);
       }
-
-      phase2::reset_basis_mark(basic_list, nonbasic_list, basic_mark, nonbasic_mark);
-      if (should_recompute_x) {
-        std::vector<f_t> unperturbed_x(n);
-        phase2::compute_primal_solution_from_basis(
-          lp, ft, basic_list, nonbasic_list, vstatus, unperturbed_x);
-        x = unperturbed_x;
-      }
-      phase2::compute_initial_primal_infeasibilities(
-        lp, settings, basic_list, x, squared_infeasibilities, infeasibility_indices);
-    }
 #ifdef CHECK_BASIC_INFEASIBILITIES
-    phase2::check_basic_infeasibilities(basic_list, basic_mark, infeasibility_indices, 7);
+      phase2::check_basic_infeasibilities(basic_list, basic_mark, infeasibility_indices, 7);
 #endif
+    }
     timers.lu_update_time += timers.stop_timer();
 
     timers.start_timer();
