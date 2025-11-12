@@ -572,6 +572,12 @@ void csr_matrix_t<i_t, f_t>::check_matrix() const
   }
 }
 
+template <typename i_t, typename f_t>
+std::pair<i_t, i_t> csr_matrix_t<i_t, f_t>::get_constraint_range(i_t cstr_idx) const
+{
+  return std::make_pair(this->row_start[cstr_idx], this->row_start[cstr_idx + 1]);
+}
+
 // x <- x + alpha * A(:, j)
 template <typename i_t, typename f_t>
 void scatter_dense(const csc_matrix_t<i_t, f_t>& A, i_t j, f_t alpha, std::vector<f_t>& x)

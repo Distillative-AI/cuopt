@@ -456,6 +456,12 @@ endif()
 option(BUILD_MIP_BENCHMARKS "Build MIP benchmarks" OFF)
 if(BUILD_MIP_BENCHMARKS AND NOT BUILD_LP_ONLY)
   add_executable(solve_MIP ../benchmarks/linear_programming/cuopt/run_mip.cpp)
+  target_include_directories(solve_MIP
+    PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+  )
   target_compile_options(solve_MIP
     PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${CUOPT_CXX_FLAGS}>"
     "$<$<COMPILE_LANGUAGE:CUDA>:${CUOPT_CUDA_FLAGS}>"

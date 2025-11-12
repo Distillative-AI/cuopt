@@ -17,36 +17,44 @@
 
 #pragma once
 
+#include <dual_simplex/user_problem.hpp>
+
+#include <vector>
+
 namespace cuopt::linear_programming::detail {
 
 template <typename i_t, typename f_t>
-struct gub_node_t {
-  i_t var_idx;
+struct entry_t {
+  i_t col;
+  f_t val;
+  bool operator<(const entry_t& other) const { return val < other.val; }
+  bool operator<(double other) const { return val < other; }
+};
+
+template <typename i_t, typename f_t>
+struct knapsack_constraint_t {
+  std::vector<entry_t<i_t, f_t>> entries;
+  f_t rhs;
   i_t cstr_idx;
 };
 
-// this is the GUB constraint implementation from Conflict graphs in solving integer programming
-// problems (Atamturk et.al.) this is a four-way linked list, vertical direction keeps the GUB
-// constraint that a variable takes part horizontal direction keeps all the vars in the current GUB
-// constraint the directions are sorted by the index to make the search easier
 template <typename i_t, typename f_t>
-struct gub_linked_list_t {
-  view_t view() { return view_t{nodes.data(), right.data(), left.data(), up.data(), down.data()}; }
-
-  struct view_t {
-    raft::device_span<gub_node_t<i_t, f_t>> nodes;
-    raft::device_span<i_t> right;
-    raft::device_span<i_t> left;
-    raft::device_span<i_t> up;
-    raft::device_span<i_t> down;
-  };
-  rmm::device_uvector<gub_node_t<i_t, f_t>> nodes;
-  // the vectors keep the indices to the nodes above
-  rmm::device_uvector<i_t> right;
-  rmm::device_uvector<i_t> left;
-  rmm::device_uvector<i_t> up;
-  rmm::device_uvector<i_t> down;
+struct addtl_clique_t {
+  i_t vertex_idx;
+  i_t clique_idx;
+  i_t start_pos_on_clique;
 };
+
+template <typename i_t, typename f_t>
+struct clique_table_t {
+  // keeps the large cliques in each constraint
+  std::vector<std::vector<i_t>> first;
+  // keeps the additional cliques
+  std::vector<addtl_clique_t<i_t, f_t>> addtl_cliques;
+};
+
+template <typename i_t, typename f_t>
+void find_initial_cliques(const dual_simplex::user_problem_t<i_t, f_t>& problem);
 
 }  // namespace cuopt::linear_programming::detail
 

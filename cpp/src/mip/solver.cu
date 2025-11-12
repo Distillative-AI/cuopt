@@ -15,12 +15,11 @@
  * limitations under the License.
  */
 
-#include "feasibility_jump/feasibility_jump.cuh"
-
 #include <mip/mip_constants.hpp>
 #include "diversity/diversity_manager.cuh"
 #include "local_search/local_search.cuh"
 #include "local_search/rounding/simple_rounding.cuh"
+#include "presolve/conflict_graph/clique_table.cuh"
 #include "solver.cuh"
 
 #include <linear_programming/pdlp.cuh>
@@ -162,6 +161,7 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
   if (!context.settings.heuristics_only) {
     // Convert the presolved problem to dual_simplex::user_problem_t
     op_problem_.get_host_user_problem(branch_and_bound_problem);
+    find_initial_cliques(branch_and_bound_problem);
     // Resize the solution now that we know the number of columns/variables
     branch_and_bound_solution.resize(branch_and_bound_problem.num_cols);
 
