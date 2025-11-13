@@ -17,11 +17,18 @@
 
 #pragma once
 
+#include <cuopt/linear_programming/mip/solver_settings.hpp>
 #include <dual_simplex/user_problem.hpp>
 
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace cuopt::linear_programming::detail {
+
+struct clique_config_t {
+  int min_clique_size = 3;
+};
 
 template <typename i_t, typename f_t>
 struct entry_t {
@@ -47,18 +54,36 @@ struct addtl_clique_t {
 
 template <typename i_t, typename f_t>
 struct clique_table_t {
+  clique_table_t(i_t n_vertices, i_t min_clique_size_)
+    : min_clique_size(min_clique_size_),
+      var_clique_map_first(n_vertices),
+      var_clique_map_addtl(n_vertices),
+      adj_list_small_cliques(n_vertices)
+  {
+  }
   // keeps the large cliques in each constraint
   std::vector<std::vector<i_t>> first;
   // keeps the additional cliques
   std::vector<addtl_clique_t<i_t, f_t>> addtl_cliques;
+  // keeps the indices of original(first) cliques that contain variable x
+  std::vector<std::vector<i_t>> var_clique_map_first;
+  // keeps the indices of additional cliques that contain variable x
+  std::vector<std::vector<i_t>> var_clique_map_addtl;
+  // adjacency list to keep small cliques, this basically keeps the vars share a small clique
+  // constraint
+  std::unordered_map<i_t, std::unordered_set<i_t>> adj_list_small_cliques;
+
+  const i_t min_clique_size;
+  typename mip_solver_settings_t<i_t, f_t>::tolerances_t tolerances;
 };
 
 template <typename i_t, typename f_t>
-void find_initial_cliques(const dual_simplex::user_problem_t<i_t, f_t>& problem);
+void find_initial_cliques(const dual_simplex::user_problem_t<i_t, f_t>& problem,
+                          typename mip_solver_settings_t<i_t, f_t>::tolerances_t tolerances);
 
 }  // namespace cuopt::linear_programming::detail
 
-// Rounding Procedure:
+// Possible application to rounding procedure, keeping it as reference
 
 // fix set of variables x_1, x_2, x_3,... in a bulk. Consider sorting according largest size GUB
 // constraint(or some other criteria).

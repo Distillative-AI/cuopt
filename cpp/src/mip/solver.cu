@@ -161,7 +161,7 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
   if (!context.settings.heuristics_only) {
     // Convert the presolved problem to dual_simplex::user_problem_t
     op_problem_.get_host_user_problem(branch_and_bound_problem);
-    find_initial_cliques(branch_and_bound_problem);
+    find_initial_cliques(branch_and_bound_problem, context.settings.tolerances);
     // Resize the solution now that we know the number of columns/variables
     branch_and_bound_solution.resize(branch_and_bound_problem.num_cols);
 

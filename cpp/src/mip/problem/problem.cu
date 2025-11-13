@@ -1561,7 +1561,6 @@ void problem_t<i_t, f_t>::get_host_user_problem(
   csr_A.row_start = cuopt::host_copy(offsets);
 
   csr_A.to_compressed_col(user_problem.A);
-
   user_problem.rhs.resize(m);
   user_problem.row_sense.resize(m);
   user_problem.range_rows.clear();
