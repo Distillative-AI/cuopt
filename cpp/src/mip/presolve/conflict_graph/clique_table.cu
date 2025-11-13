@@ -184,14 +184,15 @@ void remove_small_cliques(clique_table_t<i_t, f_t>& clique_table)
           clique_table.adj_list_small_cliques[clique[i]].insert(clique[j]);
         }
       }
-      clique_table.first.erase(clique_table.first.begin() + clique_idx);
       num_removed_first++;
       to_delete[clique_idx] = true;
     }
   }
   for (size_t addtl_c = 0; addtl_c < clique_table.addtl_cliques.size(); addtl_c++) {
     const auto& addtl_clique = clique_table.addtl_cliques[addtl_c];
-    if (clique_table.first[addtl_clique.clique_idx].size() < (size_t)clique_table.min_clique_size) {
+    i_t size_of_clique =
+      clique_table.first[addtl_clique.clique_idx].size() - addtl_clique.start_pos_on_clique + 1;
+    if (size_of_clique < clique_table.min_clique_size) {
       // the items from first clique are already added to the adjlist
       // only add the items that are coming from the new var in the additional clique
       for (size_t i = addtl_clique.start_pos_on_clique;
@@ -204,17 +205,40 @@ void remove_small_cliques(clique_table_t<i_t, f_t>& clique_table)
           clique_table.first[addtl_clique.clique_idx][i]);
       }
       clique_table.addtl_cliques.erase(clique_table.addtl_cliques.begin() + addtl_c);
+      addtl_c--;
       num_removed_addtl++;
     }
   }
   CUOPT_LOG_DEBUG("Number of removed cliques from first: %d, additional: %d",
                   num_removed_first,
                   num_removed_addtl);
-  size_t i = 0;
+  size_t i       = 0;
+  size_t old_idx = 0;
+  std::vector<i_t> index_mapping(clique_table.first.size(), -1);
   auto it = std::remove_if(clique_table.first.begin(), clique_table.first.end(), [&](auto& clique) {
-    return to_delete[i++];
+    bool res = false;
+    if (to_delete[old_idx]) {
+      res = true;
+    } else {
+      index_mapping[old_idx] = i++;
+    }
+    old_idx++;
+    return res;
   });
   clique_table.first.erase(it, clique_table.first.end());
+  // renumber the reference indices in the additional cliques, since we removed some cliques
+  for (size_t addtl_c = 0; addtl_c < clique_table.addtl_cliques.size(); addtl_c++) {
+    i_t new_clique_idx = index_mapping[clique_table.addtl_cliques[addtl_c].clique_idx];
+    CUOPT_LOG_DEBUG("New clique index: %d original: %d",
+                    new_clique_idx,
+                    clique_table.addtl_cliques[addtl_c].clique_idx);
+    cuopt_assert(new_clique_idx != -1, "New clique index is -1");
+    clique_table.addtl_cliques[addtl_c].clique_idx = new_clique_idx;
+    cuopt_assert(clique_table.first[new_clique_idx].size() -
+                     clique_table.addtl_cliques[addtl_c].start_pos_on_clique + 1 >=
+                   (size_t)clique_table.min_clique_size,
+                 "A small clique remained after removing small cliques");
+  }
 }
 
 template <typename i_t, typename f_t>
@@ -270,6 +294,9 @@ void find_initial_cliques(const dual_simplex::user_problem_t<i_t, f_t>& problem,
   for (const auto& knapsack_constraint : knapsack_constraints) {
     find_cliques_from_constraint(knapsack_constraint, clique_table);
   }
+  CUOPT_LOG_DEBUG("Number of cliques: %d, additional cliques: %d",
+                  clique_table.first.size(),
+                  clique_table.addtl_cliques.size());
   // print_clique_table(clique_table);
   // remove small cliques and add them to adj_list
   remove_small_cliques(clique_table);
