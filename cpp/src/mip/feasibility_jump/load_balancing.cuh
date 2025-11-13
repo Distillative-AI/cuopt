@@ -336,8 +336,17 @@ __global__ void load_balancing_compute_scores_binary(
       auto c_lb = fj.constraint_lower_bounds_csr[csr_offset];
       auto c_ub = fj.constraint_upper_bounds_csr[csr_offset];
 
-      auto [cstr_base_feas, cstr_bonus_robust] = feas_score_constraint<i_t, f_t>(
-        fj, var_idx, delta, cstr_idx, cstr_coeff, c_lb, c_ub, fj.incumbent_lhs[cstr_idx]);
+      auto [cstr_base_feas, cstr_bonus_robust] =
+        feas_score_constraint<i_t, f_t>(fj,
+                                        var_idx,
+                                        delta,
+                                        cstr_idx,
+                                        cstr_coeff,
+                                        c_lb,
+                                        c_ub,
+                                        fj.incumbent_lhs[cstr_idx],
+                                        fj.cstr_left_weights[cstr_idx],
+                                        fj.cstr_right_weights[cstr_idx]);
 
       base_feas += cstr_base_feas;
       bonus_robust += cstr_bonus_robust;
@@ -537,8 +546,17 @@ __launch_bounds__(TPB_loadbalance, 16) __global__
         cuopt_assert(c_lb == fj.pb.constraint_lower_bounds[cstr_idx], "bound sanity check failed");
         cuopt_assert(c_ub == fj.pb.constraint_upper_bounds[cstr_idx], "bound sanity check failed");
 
-        auto [cstr_base_feas, cstr_bonus_robust] = feas_score_constraint<i_t, f_t>(
-          fj, var_idx, delta, cstr_idx, cstr_coeff, c_lb, c_ub, fj.incumbent_lhs[cstr_idx]);
+        auto [cstr_base_feas, cstr_bonus_robust] =
+          feas_score_constraint<i_t, f_t>(fj,
+                                          var_idx,
+                                          delta,
+                                          cstr_idx,
+                                          cstr_coeff,
+                                          c_lb,
+                                          c_ub,
+                                          fj.incumbent_lhs[cstr_idx],
+                                          fj.cstr_left_weights[cstr_idx],
+                                          fj.cstr_right_weights[cstr_idx]);
 
         base_feas += cstr_base_feas;
         bonus_robust += cstr_bonus_robust;

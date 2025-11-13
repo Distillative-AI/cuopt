@@ -24,6 +24,7 @@
 #include <mip/logger.hpp>
 #include <stdexcept>
 
+#include "models/cpufj_predictor/header.h"
 #include "models/fj_predictor/header.h"
 
 namespace cuopt {
@@ -81,5 +82,6 @@ float work_unit_predictor_t<model_t>::predict_scalar(
 }
 
 template class work_unit_predictor_t<fj_predictor>;
+template class work_unit_predictor_t<cpufj_predictor>;
 
 }  // namespace cuopt

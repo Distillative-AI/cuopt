@@ -28,33 +28,38 @@ template <typename i_t, typename f_t>
 struct fj_cpu_climber_t {
   fj_cpu_climber_t()
   {
+#define ADD_INSTRUMENTED(var) \
+  std::make_pair(#var, std::ref(static_cast<memory_instrumentation_base_t&>(var)))
+
     // Initialize memory manifold with all ins_vector members
-    memory_manifold = instrumentation_manifold_t{h_reverse_coefficients,
-                                                 h_reverse_constraints,
-                                                 h_reverse_offsets,
-                                                 h_coefficients,
-                                                 h_offsets,
-                                                 h_variables,
-                                                 h_obj_coeffs,
-                                                 h_var_bounds,
-                                                 h_cstr_lb,
-                                                 h_cstr_ub,
-                                                 h_var_types,
-                                                 h_is_binary_variable,
-                                                 h_objective_vars,
-                                                 h_binary_indices,
-                                                 h_tabu_nodec_until,
-                                                 h_tabu_noinc_until,
-                                                 h_tabu_lastdec,
-                                                 h_tabu_lastinc,
-                                                 h_lhs,
-                                                 h_lhs_sumcomp,
-                                                 h_cstr_left_weights,
-                                                 h_cstr_right_weights,
-                                                 h_assignment,
-                                                 h_best_assignment,
-                                                 cached_cstr_bounds,
-                                                 iter_mtm_vars};
+    memory_manifold = instrumentation_manifold_t{ADD_INSTRUMENTED(h_reverse_coefficients),
+                                                 ADD_INSTRUMENTED(h_reverse_constraints),
+                                                 ADD_INSTRUMENTED(h_reverse_offsets),
+                                                 ADD_INSTRUMENTED(h_coefficients),
+                                                 ADD_INSTRUMENTED(h_offsets),
+                                                 ADD_INSTRUMENTED(h_variables),
+                                                 ADD_INSTRUMENTED(h_obj_coeffs),
+                                                 ADD_INSTRUMENTED(h_var_bounds),
+                                                 ADD_INSTRUMENTED(h_cstr_lb),
+                                                 ADD_INSTRUMENTED(h_cstr_ub),
+                                                 ADD_INSTRUMENTED(h_var_types),
+                                                 ADD_INSTRUMENTED(h_is_binary_variable),
+                                                 ADD_INSTRUMENTED(h_objective_vars),
+                                                 ADD_INSTRUMENTED(h_binary_indices),
+                                                 ADD_INSTRUMENTED(h_tabu_nodec_until),
+                                                 ADD_INSTRUMENTED(h_tabu_noinc_until),
+                                                 ADD_INSTRUMENTED(h_tabu_lastdec),
+                                                 ADD_INSTRUMENTED(h_tabu_lastinc),
+                                                 ADD_INSTRUMENTED(h_lhs),
+                                                 ADD_INSTRUMENTED(h_lhs_sumcomp),
+                                                 ADD_INSTRUMENTED(h_cstr_left_weights),
+                                                 ADD_INSTRUMENTED(h_cstr_right_weights),
+                                                 ADD_INSTRUMENTED(h_assignment),
+                                                 ADD_INSTRUMENTED(h_best_assignment),
+                                                 ADD_INSTRUMENTED(cached_cstr_bounds),
+                                                 ADD_INSTRUMENTED(iter_mtm_vars)};
+
+#undef ADD_INSTRUMENTED
   }
   fj_cpu_climber_t(const fj_cpu_climber_t<i_t, f_t>& other)                      = delete;
   fj_cpu_climber_t<i_t, f_t>& operator=(const fj_cpu_climber_t<i_t, f_t>& other) = delete;

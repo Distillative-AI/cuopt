@@ -207,6 +207,7 @@ int run_single_file(std::string file_path,
   settings.tolerances.absolute_tolerance = 1e-6;
   settings.presolve                      = true;
 
+  settings.presolve = false;
   // settings.heuristics_only = true;
 
   cuopt::linear_programming::benchmark_info_t benchmark_info;

@@ -206,8 +206,17 @@ DI typename fj_t<i_t, f_t>::move_score_info_t compute_new_score(
     f_t c_lb = fj.pb.constraint_lower_bounds[cstr_idx];
     f_t c_ub = fj.pb.constraint_upper_bounds[cstr_idx];
 
-    auto [cstr_base_feas, cstr_bonus_robust] = feas_score_constraint<i_t, f_t>(
-      fj, var_idx, delta, cstr_idx, cstr_coeff, c_lb, c_ub, fj.incumbent_lhs[cstr_idx]);
+    auto [cstr_base_feas, cstr_bonus_robust] =
+      feas_score_constraint<i_t, f_t>(fj,
+                                      var_idx,
+                                      delta,
+                                      cstr_idx,
+                                      cstr_coeff,
+                                      c_lb,
+                                      c_ub,
+                                      fj.incumbent_lhs[cstr_idx],
+                                      fj.cstr_left_weights[cstr_idx],
+                                      fj.cstr_right_weights[cstr_idx]);
 
     base_feas += cstr_base_feas;
     bonus_robust += cstr_bonus_robust;

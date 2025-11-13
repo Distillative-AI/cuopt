@@ -36,8 +36,10 @@
 #include <utilities/seed_generator.cuh>
 
 #include <chrono>
+#include <iomanip>
 #include <mutex>
 #include <random>
+#include <sstream>
 #include <thread>
 #include <unordered_set>
 #include <vector>
@@ -54,10 +56,10 @@ namespace cuopt::linear_programming::detail {
 
 static constexpr double BIGVAL_THRESHOLD = 1e20;
 
-#ifdef __linux__
-// Global mutex to protect PAPI metric printing across multiple threads
-static std::mutex papi_print_mutex;
-#endif
+// #ifdef __linux__
+// // Global mutex to protect PAPI metric printing across multiple threads
+// static std::mutex papi_print_mutex;
+// #endif
 
 template <typename i_t, typename f_t>
 class timing_raii_t {
@@ -204,64 +206,64 @@ static void initialize_papi(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
   CUOPT_LOG_TRACE("%sPAPI initialized successfully", fj_cpu.log_prefix.c_str());
 }
 
-template <typename i_t, typename f_t>
-static void collect_and_print_papi_metrics(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
-{
-  if (!fj_cpu.papi_initialized) return;
+// template <typename i_t, typename f_t>
+// static void collect_and_print_papi_metrics(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
+// {
+//   if (!fj_cpu.papi_initialized) return;
 
-  std::vector<long long> values(fj_cpu.papi_events.size(), 0);
-  int retval = PAPI_read(fj_cpu.papi_event_set, values.data());
-  if (retval != PAPI_OK) {
-    CUOPT_LOG_TRACE("%sPAPI read failed", fj_cpu.log_prefix.c_str());
-    return;
-  }
+//   std::vector<long long> values(fj_cpu.papi_events.size(), 0);
+//   int retval = PAPI_read(fj_cpu.papi_event_set, values.data());
+//   if (retval != PAPI_OK) {
+//     CUOPT_LOG_TRACE("%sPAPI read failed", fj_cpu.log_prefix.c_str());
+//     return;
+//   }
 
-  // Get thread ID
-  pid_t tid = syscall(SYS_gettid);
+//   // Get thread ID
+//   pid_t tid = syscall(SYS_gettid);
 
-  // Build map of actual values indexed by event position
-  std::vector<long long> all_values(8, -1);
-  int value_idx = 0;
-  for (size_t i = 0; i < fj_cpu.papi_events.size(); i++) {
-    if (fj_cpu.papi_events[i] != -1) { all_values[i] = values[value_idx++]; }
-  }
+//   // Build map of actual values indexed by event position
+//   std::vector<long long> all_values(8, -1);
+//   int value_idx = 0;
+//   for (size_t i = 0; i < fj_cpu.papi_events.size(); i++) {
+//     if (fj_cpu.papi_events[i] != -1) { all_values[i] = values[value_idx++]; }
+//   }
 
-  // Compute derived metrics
-  double l1_miss_rate = -1.0;
-  if (all_values[0] > 0 && all_values[1] != -1) {
-    l1_miss_rate = (double)all_values[1] / all_values[0] * 100.0;
-  }
+//   // Compute derived metrics
+//   double l1_miss_rate = -1.0;
+//   if (all_values[0] > 0 && all_values[1] != -1) {
+//     l1_miss_rate = (double)all_values[1] / all_values[0] * 100.0;
+//   }
 
-  double l2_miss_rate = -1.0;
-  if (all_values[2] > 0 && all_values[3] != -1) {
-    l2_miss_rate = (double)all_values[3] / all_values[2] * 100.0;
-  }
+//   double l2_miss_rate = -1.0;
+//   if (all_values[2] > 0 && all_values[3] != -1) {
+//     l2_miss_rate = (double)all_values[3] / all_values[2] * 100.0;
+//   }
 
-  // Lock to ensure thread-safe printing
-  std::lock_guard<std::mutex> lock(papi_print_mutex);
+//   // Lock to ensure thread-safe printing
+//   std::lock_guard<std::mutex> lock(papi_print_mutex);
 
-  // Print everything on a single compact line
-  CUOPT_LOG_DEBUG(
-    "%sPAPI iter=%d tid=%d L1_DCA=%lld L1_DCM=%lld L2_DCA=%lld L2_DCM=%lld L3_TCA=%lld "
-    "L3_TCM=%lld LD_INS=%lld SR_INS=%lld L1_miss=%.2f%% L2_miss=%.2f%%",
-    fj_cpu.log_prefix.c_str(),
-    fj_cpu.iterations,
-    tid,
-    all_values[0],
-    all_values[1],
-    all_values[2],
-    all_values[3],
-    all_values[4],
-    all_values[5],
-    all_values[6],
-    all_values[7],
-    l1_miss_rate,
-    l2_miss_rate);
+//   // Print everything on a single compact line
+//   CUOPT_LOG_DEBUG(
+//     "%sPAPI iter=%d tid=%d L1_DCA=%lld L1_DCM=%lld L2_DCA=%lld L2_DCM=%lld L3_TCA=%lld "
+//     "L3_TCM=%lld LD_INS=%lld SR_INS=%lld L1_miss=%.2f%% L2_miss=%.2f%%",
+//     fj_cpu.log_prefix.c_str(),
+//     fj_cpu.iterations,
+//     tid,
+//     all_values[0],
+//     all_values[1],
+//     all_values[2],
+//     all_values[3],
+//     all_values[4],
+//     all_values[5],
+//     all_values[6],
+//     all_values[7],
+//     l1_miss_rate,
+//     l2_miss_rate);
 
-  // Reset counters for the next 1000 iterations
-  retval = PAPI_reset(fj_cpu.papi_event_set);
-  if (retval != PAPI_OK) { CUOPT_LOG_TRACE("%sPAPI reset failed", fj_cpu.log_prefix.c_str()); }
-}
+//   // Reset counters for the next 1000 iterations
+//   retval = PAPI_reset(fj_cpu.papi_event_set);
+//   if (retval != PAPI_OK) { CUOPT_LOG_TRACE("%sPAPI reset failed", fj_cpu.log_prefix.c_str()); }
+// }
 
 template <typename i_t, typename f_t>
 static void cleanup_papi(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
@@ -442,6 +444,15 @@ static void log_regression_features(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
   double mem_total_mb             = (mem_loads_bytes + mem_stores_bytes) / 1e6;
   double mem_bandwidth_gb_per_sec = (mem_total_mb / 1000.0) / (time_window_ms / 1000.0);
 
+  // Build per-wrapper memory statistics string
+  std::stringstream wrapper_stats;
+  auto per_wrapper_stats = fj_cpu.memory_manifold.collect_per_wrapper();
+  for (const auto& [name, loads, stores] : per_wrapper_stats) {
+    wrapper_stats << " " << name << "_loads=" << loads << " " << name << "_stores=" << stores;
+  }
+
+  fj_cpu.memory_manifold.flush();
+
   // Print everything on a single line using precomputed features
   CUOPT_LOG_DEBUG(
     "%sCPUFJ_FEATURES iter=%d time_window=%.2f "
@@ -457,7 +468,7 @@ static void log_regression_features(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
     "cstr_coverage=%.4f var_coverage=%.4f "
     "L1_miss=%.2f L3_miss=%.2f loads_per_iter=%.0f stores_per_iter=%.0f "
     "viol_ratio=%.4f nnz_per_move=%.2f eval_intensity=%.2f "
-    "mem_loads_mb=%.3f mem_stores_mb=%.3f mem_total_mb=%.3f mem_bandwidth_gb_s=%.3f",
+    "mem_loads_mb=%.3f mem_stores_mb=%.3f mem_total_mb=%.3f mem_bandwidth_gb_s=%.3f%s",
     fj_cpu.log_prefix.c_str(),
     fj_cpu.iterations,
     time_window_ms,
@@ -502,7 +513,8 @@ static void log_regression_features(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
     mem_loads_mb,
     mem_stores_mb,
     mem_total_mb,
-    mem_bandwidth_gb_per_sec);
+    mem_bandwidth_gb_per_sec,
+    wrapper_stats.str().c_str());
 
   // Reset window counters
   fj_cpu.nnz_processed_window      = 0;
@@ -518,6 +530,40 @@ static void log_regression_features(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
   fj_cpu.miss_count_window_start = fj_cpu.miss_count;
   fj_cpu.unique_cstrs_accessed_window.clear();
   fj_cpu.unique_vars_accessed_window.clear();
+}
+
+// Local implementations that use instrumented vectors
+template <typename i_t, typename f_t>
+static inline std::pair<i_t, i_t> reverse_range_for_var(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
+                                                        i_t var_idx)
+{
+  cuopt_assert(var_idx >= 0 && var_idx < fj_cpu.view.pb.n_variables,
+               "Variable should be within the range");
+  return std::make_pair(fj_cpu.h_reverse_offsets[var_idx], fj_cpu.h_reverse_offsets[var_idx + 1]);
+}
+
+template <typename i_t, typename f_t>
+static inline std::pair<i_t, i_t> range_for_constraint(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
+                                                       i_t cstr_idx)
+{
+  return std::make_pair(fj_cpu.h_offsets[cstr_idx], fj_cpu.h_offsets[cstr_idx + 1]);
+}
+
+template <typename i_t, typename f_t>
+static inline bool check_variable_within_bounds(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
+                                                i_t var_idx,
+                                                f_t val)
+{
+  const f_t int_tol  = fj_cpu.view.pb.tolerances.integrality_tolerance;
+  auto bounds        = fj_cpu.h_var_bounds[var_idx].get();
+  bool within_bounds = val <= (get_upper(bounds) + int_tol) && val >= (get_lower(bounds) - int_tol);
+  return within_bounds;
+}
+
+template <typename i_t, typename f_t>
+static inline bool is_integer_var(fj_cpu_climber_t<i_t, f_t>& fj_cpu, i_t var_idx)
+{
+  return var_t::INTEGER == fj_cpu.h_var_types[var_idx];
 }
 
 template <typename i_t, typename f_t>
@@ -536,15 +582,15 @@ static inline bool tabu_check(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
 }
 
 template <typename i_t, typename f_t>
-static bool check_variable_feasibility(const fj_cpu_climber_t<i_t, f_t>& fj_cpu,
+static bool check_variable_feasibility(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
                                        bool check_integer = true)
 {
   for (i_t var_idx = 0; var_idx < fj_cpu.view.pb.n_variables; var_idx += 1) {
     auto val      = fj_cpu.h_assignment[var_idx];
-    bool feasible = fj_cpu.view.pb.check_variable_within_bounds(var_idx, val);
+    bool feasible = check_variable_within_bounds<i_t, f_t>(fj_cpu, var_idx, val);
 
     if (!feasible) return false;
-    if (check_integer && fj_cpu.view.pb.is_integer_var(var_idx) &&
+    if (check_integer && is_integer_var<i_t, f_t>(fj_cpu, var_idx) &&
         !fj_cpu.view.pb.is_integer(fj_cpu.h_assignment[var_idx]))
       return false;
   }
@@ -568,7 +614,7 @@ static inline std::pair<fj_staged_score_t, f_t> compute_score(fj_cpu_climber_t<i
   f_t base_feas_sum    = 0;
   f_t bonus_robust_sum = 0;
 
-  auto [offset_begin, offset_end] = fj_cpu.view.pb.reverse_range_for_var(var_idx);
+  auto [offset_begin, offset_end] = reverse_range_for_var<i_t, f_t>(fj_cpu, var_idx);
   fj_cpu.nnz_processed_window += (offset_end - offset_begin);
 
   // MEMORY OPS: Loop over all constraints involving this variable (avg_var_degree iterations)
@@ -587,8 +633,17 @@ static inline std::pair<fj_staged_score_t, f_t> compute_score(fj_cpu_climber_t<i
     // ARRAY READ: h_lhs[cstr_idx] - 1 read per iteration (indirect indexing)
     // feas_score_constraint also reads from h_cstr_left_weights[cstr_idx] and
     // h_cstr_right_weights[cstr_idx]
-    auto [cstr_base_feas, cstr_bonus_robust] = feas_score_constraint<i_t, f_t>(
-      fj_cpu.view, var_idx, delta, cstr_idx, cstr_coeff, c_lb, c_ub, fj_cpu.h_lhs[cstr_idx]);
+    auto [cstr_base_feas, cstr_bonus_robust] =
+      feas_score_constraint<i_t, f_t>(fj_cpu.view,
+                                      var_idx,
+                                      delta,
+                                      cstr_idx,
+                                      cstr_coeff,
+                                      c_lb,
+                                      c_ub,
+                                      fj_cpu.h_lhs[cstr_idx],
+                                      fj_cpu.h_cstr_left_weights[cstr_idx],
+                                      fj_cpu.h_cstr_right_weights[cstr_idx]);
 
     base_feas_sum += cstr_base_feas;
     bonus_robust_sum += cstr_bonus_robust;
@@ -696,7 +751,8 @@ static void update_weights(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
     }
 
     // Invalidate related cached move scores
-    auto [relvar_offset_begin, relvar_offset_end] = fj_cpu.view.pb.range_for_constraint(cstr_idx);
+    auto [relvar_offset_begin, relvar_offset_end] =
+      range_for_constraint<i_t, f_t>(fj_cpu, cstr_idx);
     // MEMORY OPS: Inner loop over variables in this constraint (avg_cstr_degree iterations per
     // outer iteration)
     for (auto i = relvar_offset_begin; i < relvar_offset_end; i++) {
@@ -722,7 +778,7 @@ static void apply_move(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
 
   cuopt_assert(var_idx < fj_cpu.view.pb.n_variables, "variable index out of bounds");
   // Update the LHSs of all involved constraints.
-  auto [offset_begin, offset_end] = fj_cpu.view.pb.reverse_range_for_var(var_idx);
+  auto [offset_begin, offset_end] = reverse_range_for_var<i_t, f_t>(fj_cpu, var_idx);
 
   // Track work metrics for regression model
   fj_cpu.nnz_processed_window += (offset_end - offset_begin);
@@ -780,7 +836,8 @@ static void apply_move(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
     cuopt_assert(isfinite(fj_cpu.h_lhs[cstr_idx]), "assignment should be finite");
 
     // Invalidate related cached move scores
-    auto [relvar_offset_begin, relvar_offset_end] = fj_cpu.view.pb.range_for_constraint(cstr_idx);
+    auto [relvar_offset_begin, relvar_offset_end] =
+      range_for_constraint<i_t, f_t>(fj_cpu, cstr_idx);
     // MEMORY OPS: Inner loop over variables in this constraint (avg_cstr_degree iterations per
     // outer iteration)
     for (auto i = relvar_offset_begin; i < relvar_offset_end; i++) {
@@ -798,14 +855,14 @@ static void apply_move(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
   // update the assignment and objective proper
   // ARRAY READ: h_assignment[var_idx] - 1 read
   f_t new_val = fj_cpu.h_assignment[var_idx] + delta;
-  if (fj_cpu.view.pb.is_integer_var(var_idx)) {
+  if (is_integer_var<i_t, f_t>(fj_cpu, var_idx)) {
     cuopt_assert(fj_cpu.view.pb.integer_equal(new_val, round(new_val)), "new_val is not integer");
     new_val = round(new_val);
   }
   // ARRAY WRITE: h_assignment[var_idx] - 1 write
   fj_cpu.h_assignment[var_idx] = new_val;
 
-  cuopt_assert(fj_cpu.view.pb.check_variable_within_bounds(var_idx, new_val),
+  cuopt_assert((check_variable_within_bounds<i_t, f_t>(fj_cpu, var_idx, new_val)),
                "assignment not within bounds");
   cuopt_assert(isfinite(new_val), "assignment is not finite");
 
@@ -874,7 +931,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move(
   // collect all the variables that are involved in the target constraints
   // MEMORY OPS: Outer loop over target constraints (sample_size iterations, typically 15-100)
   for (size_t cstr_idx : target_cstrs) {
-    auto [offset_begin, offset_end] = fj_cpu.view.pb.range_for_constraint(cstr_idx);
+    auto [offset_begin, offset_end] = range_for_constraint<i_t, f_t>(fj_cpu, cstr_idx);
     // MEMORY OPS: Inner loop over variables in each constraint (avg_cstr_degree per outer
     // iteration)
     for (auto i = offset_begin; i < offset_end; i++) {
@@ -891,7 +948,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move(
   // estimate the amount of nnzs to consider
   i_t nnz_sum = 0;
   for (auto var_idx : fj_cpu.iter_mtm_vars) {
-    auto [offset_begin, offset_end] = fj_cpu.view.pb.reverse_range_for_var(var_idx);
+    auto [offset_begin, offset_end] = reverse_range_for_var<i_t, f_t>(fj_cpu, var_idx);
     nnz_sum += offset_end - offset_begin;
   }
 
@@ -904,7 +961,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move(
     f_t cstr_tol      = fj_cpu.view.get_corrected_tolerance(cstr_idx, c_lb, c_ub);
 
     cuopt_assert(cstr_idx < fj_cpu.h_cstr_lb.size(), "cstr_idx is out of bounds");
-    auto [offset_begin, offset_end] = fj_cpu.view.pb.range_for_constraint(cstr_idx);
+    auto [offset_begin, offset_end] = range_for_constraint<i_t, f_t>(fj_cpu, cstr_idx);
     // MEMORY OPS: Inner loop over variables (avg_cstr_degree per outer iteration)
     for (auto i = offset_begin; i < offset_end; i++) {
       // early cached check
@@ -914,12 +971,12 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move(
           // ARRAY READ: h_variables[i] - 1 read per iteration (cache hit)
           auto var_idx = fj_cpu.h_variables[i];
           // ARRAY READ: h_assignment[var_idx] - 1 read per iteration (cache hit)
-          if (fj_cpu.view.pb.check_variable_within_bounds(
-                var_idx, fj_cpu.h_assignment[var_idx] + cached_move.first)) {
+          if (check_variable_within_bounds<i_t, f_t>(
+                fj_cpu, var_idx, fj_cpu.h_assignment[var_idx] + cached_move.first)) {
             best_score = cached_move.second;
             best_move  = fj_move_t{var_idx, cached_move.first};
           }
-          // cuopt_assert(fj_cpu.view.pb.check_variable_within_bounds(var_idx,
+          // cuopt_assert(check_variable_within_bounds<i_t, f_t>(fj_cpu, var_idx,
           // fj_cpu.h_assignment[var_idx] + cached_move.first), "best move not within bounds");
         }
         fj_cpu.hit_count++;
@@ -964,7 +1021,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move(
                                                       c_ub,
                                                       fj_cpu.h_assignment,
                                                       fj_cpu.h_lhs);
-        if (fj_cpu.view.pb.is_integer_var(var_idx)) {
+        if (is_integer_var<i_t, f_t>(fj_cpu, var_idx)) {
           new_val = cstr_coeff * sign > 0
                       ? floor(val + delta + fj_cpu.view.pb.tolerances.integrality_tolerance)
                       : ceil(val + delta - fj_cpu.view.pb.tolerances.integrality_tolerance);
@@ -980,7 +1037,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move(
         }
       }
       if (!isfinite(new_val)) continue;
-      cuopt_assert(fj_cpu.view.pb.check_variable_within_bounds(var_idx, new_val),
+      cuopt_assert((check_variable_within_bounds<i_t, f_t>(fj_cpu, var_idx, new_val)),
                    "new_val is not within bounds");
       delta = new_val - val;
       // more permissive tabu in the case of local minima
@@ -1034,7 +1091,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move(
       // CRITICAL: compute_score() does ~6-7 array reads per constraint involved
       auto [score, infeasibility] = compute_score<i_t, f_t>(fj_cpu, var_idx, delta);
 
-      cuopt_assert(fj_cpu.view.pb.check_variable_within_bounds(var_idx, new_val), "");
+      cuopt_assert((check_variable_within_bounds<i_t, f_t>(fj_cpu, var_idx, new_val)), "");
       cuopt_assert(isfinite(delta), "");
 
       if (fj_cpu.view.move_numerically_stable(
@@ -1096,7 +1153,7 @@ static void recompute_lhs(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
   // MEMORY OPS: CRITICAL LOOP - Loop over all constraints (n_cstrs iterations)
   // This is called periodically to recompute all LHS values from scratch
   for (i_t cstr_idx = 0; cstr_idx < fj_cpu.view.pb.n_constraints; ++cstr_idx) {
-    auto [offset_begin, offset_end] = fj_cpu.view.pb.range_for_constraint(cstr_idx);
+    auto [offset_begin, offset_end] = range_for_constraint<i_t, f_t>(fj_cpu, cstr_idx);
     auto [c_lb, c_ub]               = fj_cpu.cached_cstr_bounds[cstr_idx].get();
     // MEMORY OPS: For each constraint, reads avg_cstr_degree elements from:
     // - h_coefficients[offset_begin:offset_end] - avg_cstr_degree reads
@@ -1167,7 +1224,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_lift_move(
       // ARRAY READ: h_var_bounds[var_idx] - 1 read per iteration (non-binary)
       f_t lfd_lb                      = get_lower(fj_cpu.h_var_bounds[var_idx].get()) - val;
       f_t lfd_ub                      = get_upper(fj_cpu.h_var_bounds[var_idx].get()) - val;
-      auto [offset_begin, offset_end] = fj_cpu.view.pb.reverse_range_for_var(var_idx);
+      auto [offset_begin, offset_end] = reverse_range_for_var<i_t, f_t>(fj_cpu, var_idx);
       // MEMORY OPS: Inner loop over constraints involving this variable (avg_var_degree iterations
       // per outer iteration)
       for (i_t j = offset_begin; j < offset_end; j += 1) {
@@ -1198,9 +1255,9 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_lift_move(
                                                             fj_cpu.h_lhs);
 
           if (cstr_coeff * sign < 0) {
-            if (fj_cpu.view.pb.is_integer_var(var_idx)) delta = ceil(delta);
+            if (is_integer_var<i_t, f_t>(fj_cpu, var_idx)) delta = ceil(delta);
           } else {
-            if (fj_cpu.view.pb.is_integer_var(var_idx)) delta = floor(delta);
+            if (is_integer_var<i_t, f_t>(fj_cpu, var_idx)) delta = floor(delta);
           }
 
           // skip this variable if there is no slack
@@ -1210,7 +1267,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_lift_move(
             } else {
               lfd_lb = 0;
             }
-          } else if (!fj_cpu.view.pb.check_variable_within_bounds(var_idx, val + delta)) {
+          } else if (!check_variable_within_bounds<i_t, f_t>(fj_cpu, var_idx, val + delta)) {
             continue;
           } else {
             if (cstr_coeff * sign < 0) {
@@ -1228,8 +1285,8 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_lift_move(
       // invalid crossing bounds
       if (lfd_lb >= lfd_ub) { lfd_lb = lfd_ub = 0; }
 
-      if (!fj_cpu.view.pb.check_variable_within_bounds(var_idx, val + lfd_lb)) { lfd_lb = 0; }
-      if (!fj_cpu.view.pb.check_variable_within_bounds(var_idx, val + lfd_ub)) { lfd_ub = 0; }
+      if (!check_variable_within_bounds<i_t, f_t>(fj_cpu, var_idx, val + lfd_lb)) { lfd_lb = 0; }
+      if (!check_variable_within_bounds<i_t, f_t>(fj_cpu, var_idx, val + lfd_ub)) { lfd_ub = 0; }
 
       // Now that the life move domain is computed, compute the correct lift move
       cuopt_assert(isfinite(val), "invalid assignment value");
@@ -1276,12 +1333,12 @@ static void perturb(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
     f_t lb  = ceil(std::max(get_lower(fj_cpu.h_var_bounds[var_idx].get()), -1e7));
     f_t ub  = floor(std::min(get_upper(fj_cpu.h_var_bounds[var_idx].get()), 1e7));
     f_t val = lb + (ub - lb) * rng.next_double();
-    if (fj_cpu.view.pb.is_integer_var(var_idx)) {
+    if (is_integer_var<i_t, f_t>(fj_cpu, var_idx)) {
       val = std::round(val);
       val = std::min(std::max(val, lb), ub);
     }
 
-    cuopt_assert(fj_cpu.view.pb.check_variable_within_bounds(var_idx, val),
+    cuopt_assert((check_variable_within_bounds<i_t, f_t>(fj_cpu, var_idx, val)),
                  "value is out of bounds");
     // ARRAY WRITE: h_assignment[var_idx] - 1 write per iteration
     fj_cpu.h_assignment[var_idx] = val;
@@ -1408,7 +1465,7 @@ static void init_fj_cpu(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
   fj_cpu.cached_cstr_bounds.resize(fj_cpu.h_reverse_coefficients.size());
   // MEMORY OPS: INITIALIZATION - Loop over all variables (n_vars iterations)
   for (i_t var_idx = 0; var_idx < (i_t)fj_cpu.view.pb.n_variables; ++var_idx) {
-    auto [offset_begin, offset_end] = fj_cpu.view.pb.reverse_range_for_var(var_idx);
+    auto [offset_begin, offset_end] = reverse_range_for_var<i_t, f_t>(fj_cpu, var_idx);
     // MEMORY OPS: Inner loop over constraints per variable (avg_var_degree iterations per outer
     // iteration)
     for (i_t i = offset_begin; i < offset_end; ++i) {
@@ -1651,17 +1708,29 @@ bool fj_t<i_t, f_t>::cpu_solve(fj_cpu_climber_t<i_t, f_t>& fj_cpu, f_t in_time_l
         std::chrono::duration_cast<std::chrono::duration<double>>(now - loop_start).count() *
         1000.0;
 
-#ifdef __linux__
-      collect_and_print_papi_metrics(fj_cpu);
-#endif
+      // #ifdef __linux__
+      //       collect_and_print_papi_metrics(fj_cpu);
+      // #endif
 
       // Collect memory statistics
-      auto [loads, stores] = fj_cpu.memory_manifold.collect_and_flush();
+      auto [loads, stores] = fj_cpu.memory_manifold.collect();
 
       // Log all features including memory statistics
       log_regression_features(fj_cpu, time_window_ms, total_time_ms, loads, stores);
 
       fj_cpu.last_feature_log_time = now;
+
+      std::map<std::string, float> features_map;
+      features_map["n_vars"]       = (float)fj_cpu.h_reverse_offsets.size() - 1;
+      features_map["n_cstrs"]      = (float)fj_cpu.h_offsets.size() - 1;
+      features_map["total_nnz"]    = (float)fj_cpu.h_reverse_offsets.back();
+      features_map["mem_total_mb"] = (float)(loads + stores) / 1e6;
+      float time_prediction        = std::max(
+        (f_t)0.0,
+        (f_t)ceil(context.work_unit_predictors.cpufj_predictor.predict_scalar(features_map)));
+      CUOPT_LOG_DEBUG("FJ determ: Estimated time for 1000 iters: %f, error %f",
+                      time_prediction,
+                      time_prediction - time_window_ms);
     }
 
     cuopt_func_call(sanity_checks(fj_cpu));

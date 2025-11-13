@@ -133,13 +133,13 @@ FEATURES_TO_INCLUDE_ONLY = [
     # Example usage (uncomment to use only specific features):
     # 'n_variables',
     # 'n_constraints',
-    # 'sparsity',
-    # "n_vars",
-    # "n_cstrs",
-    # "total_nnz",
-    # "mem_total_mb",
-    # "mem_store_mb",
-    # "mem_load_mb",
+    #'sparsity',
+    "n_vars",
+    "n_cstrs",
+    "total_nnz",
+    "mem_total_mb",
+    # "mem_stores_mb",
+    # "mem_loads_mb",
 ]
 # ============================================================================
 

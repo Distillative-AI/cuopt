@@ -28,7 +28,9 @@
 
 #include <functional>
 #include <iterator>
+#include <tuple>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -90,33 +92,67 @@ class instrumentation_manifold_t {
  public:
   instrumentation_manifold_t() = default;
 
-  // Construct with initializer list of instrumented objects
+  // Construct with initializer list of (description, instrumented object) pairs
   instrumentation_manifold_t(
-    std::initializer_list<std::reference_wrapper<memory_instrumentation_base_t>> instrumented)
-    : instrumented_(instrumented)
+    std::initializer_list<
+      std::pair<std::string, std::reference_wrapper<memory_instrumentation_base_t>>> instrumented)
   {
+    for (const auto& [name, instr] : instrumented) {
+      instrumented_.insert_or_assign(name, instr);
+    }
   }
 
-  // Add an instrumented object to track
-  void add(memory_instrumentation_base_t& instrumented) { instrumented_.push_back(instrumented); }
+  // Add an instrumented object to track with a description
+  void add(const std::string& description, memory_instrumentation_base_t& instrumented)
+  {
+    instrumented_.insert_or_assign(description, std::ref(instrumented));
+  }
 
-  // Collect total loads and stores from all instrumented objects, then flush all counters
-  std::pair<size_t, size_t> collect_and_flush()
+  // Collect total loads and stores across all instrumented objects
+  std::pair<size_t, size_t> collect()
   {
     size_t total_loads  = 0;
     size_t total_stores = 0;
 
-    for (auto& instr : instrumented_) {
+    for (auto& [name, instr] : instrumented_) {
       total_loads += instr.get().byte_loads;
       total_stores += instr.get().byte_stores;
-      instr.get().reset_counters();
     }
 
     return {total_loads, total_stores};
   }
 
+  // Collect per-wrapper statistics
+  std::vector<std::tuple<std::string, size_t, size_t>> collect_per_wrapper()
+  {
+    std::vector<std::tuple<std::string, size_t, size_t>> results;
+    results.reserve(instrumented_.size());
+
+    for (auto& [name, instr] : instrumented_) {
+      results.emplace_back(name, instr.get().byte_loads, instr.get().byte_stores);
+    }
+
+    return results;
+  }
+
+  // Collect total loads and stores, then flush counters
+  std::pair<size_t, size_t> collect_and_flush()
+  {
+    auto result = collect();
+    flush();
+    return result;
+  }
+
+  void flush()
+  {
+    for (auto& [name, instr] : instrumented_) {
+      instr.get().reset_counters();
+    }
+  }
+
  private:
-  std::vector<std::reference_wrapper<memory_instrumentation_base_t>> instrumented_;
+  std::unordered_map<std::string, std::reference_wrapper<memory_instrumentation_base_t>>
+    instrumented_;
 };
 
 #else
@@ -126,11 +162,15 @@ class instrumentation_manifold_t {
  public:
   instrumentation_manifold_t() = default;
   instrumentation_manifold_t(
-    std::initializer_list<std::reference_wrapper<memory_instrumentation_base_t>>)
+    std::initializer_list<
+      std::pair<std::string, std::reference_wrapper<memory_instrumentation_base_t>>>)
   {
   }
-  void add(memory_instrumentation_base_t&) {}
+  void add(const std::string&, memory_instrumentation_base_t&) {}
+  std::pair<size_t, size_t> collect() { return {0, 0}; }
+  std::vector<std::tuple<std::string, size_t, size_t>> collect_per_wrapper() { return {}; }
   std::pair<size_t, size_t> collect_and_flush() { return {0, 0}; }
+  void flush() {}
 };
 
 #endif  // CUOPT_ENABLE_MEMORY_INSTRUMENTATION
@@ -262,15 +302,15 @@ struct memop_instrumentation_wrapper_t : public memory_instrumentation_base_t {
       return ref_;
     }
 
-    // Allow implicit conversion to reference for functions expecting references
-    operator value_type&() { return ref_; }
+    // // Allow implicit conversion to reference for functions expecting references
+    // operator value_type&() { return ref_; }
 
-    operator const value_type&() const { return ref_; }
+    // operator const value_type&() const { return ref_; }
 
-    // Member access operator for structured types (e.g., type_2<f_t>)
-    value_type* operator->() { return &ref_; }
+    // // Member access operator for structured types (e.g., type_2<f_t>)
+    // value_type* operator->() { return &ref_; }
 
-    const value_type* operator->() const { return &ref_; }
+    // const value_type* operator->() const { return &ref_; }
 
     // Get underlying element reference (records a load)
     value_type& get()
