@@ -360,7 +360,7 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
 #if 1
     ls.start_cpufj_scratch_threads(population);
     // 30'000 iters
-    ls.ls_cpu_fj[0].wait_for_cpu_solver();
+    ls.scratch_cpu_fj[0].wait_for_cpu_solver();
     // std::this_thread::sleep_for(std::chrono::seconds(30));
     ls.stop_cpufj_scratch_threads();
     exit(0);
