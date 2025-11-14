@@ -65,7 +65,7 @@ void local_search_t<i_t, f_t>::start_cpufj_scratch_threads(population_t<i_t, f_t
 
   fj_settings_t cpu_fj_settings{};
   cpu_fj_settings.time_limit      = std::numeric_limits<f_t>::infinity();
-  cpu_fj_settings.iteration_limit = 30000;  // would like 10 samples per instance
+  cpu_fj_settings.iteration_limit = 10000;  // would like 10 samples per instance
 
   solution_t<i_t, f_t> solution(*context.problem_ptr);
   thrust::fill(solution.handle_ptr->get_thrust_policy(),
