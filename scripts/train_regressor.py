@@ -27,7 +27,7 @@ import argparse
 import pickle
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split, cross_val_score, KFold
 from sklearn.preprocessing import StandardScaler, PolynomialFeatures
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
@@ -125,6 +125,22 @@ FEATURES_TO_EXCLUDE = [
     "max_cstr_deg",
     "viol_ratio",
     "nnz_per_move",
+    "h_cstr_right_weights_loads",
+    "h_cstr_left_weights_loads",
+    "h_cstr_right_weights_stores",
+    "h_cstr_left_weights_stores",
+    "total_viol",
+    "feas_found",
+    "obj_weight",
+    "h_tabu_nodec_until_stores",
+    "h_tabu_nodec_until_loads",
+    "h_tabu_noinc_until_stores",
+    "h_tabu_noinc_until_loads",
+    "h_tabu_lastdec_stores",
+    "h_tabu_lastdec_loads",
+    "h_tabu_lastinc_stores",
+    "h_tabu_lastinc_loads",
+    "max_weight",
 ]
 
 # Alternatively, specify ONLY the features you want to use
@@ -134,12 +150,14 @@ FEATURES_TO_INCLUDE_ONLY = [
     # 'n_variables',
     # 'n_constraints',
     #'sparsity',
-    "n_vars",
-    "n_cstrs",
-    "total_nnz",
-    "mem_total_mb",
-    # "mem_stores_mb",
-    # "mem_loads_mb",
+    # "n_vars",
+    # "n_cstrs",
+    # #"total_nnz",
+    # "mem_total_mb",
+    # #"cache_hit_rate",
+    # #"cstr_deg_cv"
+    #  "mem_stores_mb",
+    #  "mem_loads_mb",
 ]
 # ============================================================================
 
@@ -221,10 +239,33 @@ def split_by_files(
     train_df = df[df["file"].isin(train_files)].copy()
     test_df = df[df["file"].isin(test_files)].copy()
 
+    # Validate no data leakage: ensure no overlap between train and test files
+    train_files_set = set(train_files)
+    test_files_set = set(test_files)
+    overlap = train_files_set.intersection(test_files_set)
+
+    if overlap:
+        raise ValueError(
+            f"Data leakage detected! {len(overlap)} file(s) appear in both train and test sets:\n"
+            f"  {list(overlap)[:10]}{'...' if len(overlap) > 10 else ''}"
+        )
+
+    # Verify the actual dataframes have no file overlap
+    train_files_in_df = set(train_df["file"].unique())
+    test_files_in_df = set(test_df["file"].unique())
+    actual_overlap = train_files_in_df.intersection(test_files_in_df)
+
+    if actual_overlap:
+        raise ValueError(
+            f"Data leakage detected in dataframes! {len(actual_overlap)} file(s) appear in both:\n"
+            f"  {list(actual_overlap)[:10]}{'...' if len(actual_overlap) > 10 else ''}"
+        )
+
     print("\nData Split:")
     print(f"  Total entries: {len(df)}")
     print(f"  Train entries: {len(train_df)} ({len(train_files)} files)")
     print(f"  Test entries: {len(test_df)} ({len(test_files)} files)")
+    print("  ✓ Verified: Zero file overlap between train and test sets")
 
     # Check distribution similarity (use stratify_by column if provided, otherwise first numeric column)
     target_col = (
@@ -568,7 +609,7 @@ def create_regressor(
             )
 
         model = xgb.XGBRegressor(**params)
-        needs_scaling = False
+        needs_scaling = True
 
     elif regressor_type == "lightgbm":
         try:
@@ -581,8 +622,8 @@ def create_regressor(
         params = {
             "objective": "regression",
             "random_state": random_state,
-            "n_estimators": 100,
-            "max_depth": 4,
+            "n_estimators": 150,
+            "max_depth": 6,
             "learning_rate": 0.1,
             "verbosity": 1 if verbose else -1,
             # Regularization to prevent overfitting
@@ -611,7 +652,7 @@ def create_regressor(
             )
 
         model = lgb.LGBMRegressor(**params)
-        needs_scaling = False
+        needs_scaling = True
 
     elif regressor_type == "random_forest":
         params = {
@@ -730,6 +771,9 @@ def evaluate_model(
     skip_cv: bool = False,
     X_test_original: pd.DataFrame = None,
     test_df: pd.DataFrame = None,
+    log_transform: bool = False,
+    y_train_original: pd.Series = None,
+    y_test_original: pd.Series = None,
 ) -> Tuple[float, float]:
     """Evaluate model and print metrics. Returns (train_r2, test_r2).
 
@@ -737,12 +781,16 @@ def evaluate_model(
     ----
         X_test_original: Unscaled X_test for displaying feature values
         test_df: Original test dataframe with 'file' column
+        log_transform: If True, predictions are in log-space and need inverse transform
+        y_train_original: Original (non-log) training targets (if log_transform=True)
+        y_test_original: Original (non-log) test targets (if log_transform=True)
     """
     # Cross-validation on training set (skip if using early stopping)
     if not skip_cv:
         print(f"\nCross-Validation on Training Set ({cv_folds}-fold):")
         try:
-            cv_scores = cross_val_score(
+            # Compute RMSE and R² in log-space
+            cv_scores_mse = cross_val_score(
                 model,
                 X_train,
                 y_train,
@@ -751,8 +799,97 @@ def evaluate_model(
                 n_jobs=-1,
                 verbose=verbose,
             )
-            cv_rmse = np.sqrt(-cv_scores)
-            print(f"  CV RMSE: {cv_rmse.mean():.4f} (+/- {cv_rmse.std():.4f})")
+            cv_scores_r2 = cross_val_score(
+                model,
+                X_train,
+                y_train,
+                cv=cv_folds,
+                scoring="r2",
+                n_jobs=-1,
+                verbose=verbose,
+            )
+            cv_rmse = np.sqrt(-cv_scores_mse)
+
+            if log_transform:
+                print("  Log-space metrics:")
+                print(
+                    f"    CV RMSE: {cv_rmse.mean():.4f} (+/- {cv_rmse.std():.4f})"
+                )
+                print(
+                    f"    CV R²:   {cv_scores_r2.mean():.4f} (+/- {cv_scores_r2.std():.4f})"
+                )
+
+                # Also compute metrics in original space
+                kfold = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
+
+                cv_mape_scores = []
+                cv_r2_original_scores = []
+
+                for train_idx, val_idx in kfold.split(X_train):
+                    X_train_fold = (
+                        X_train.iloc[train_idx]
+                        if hasattr(X_train, "iloc")
+                        else X_train[train_idx]
+                    )
+                    y_train_fold = (
+                        y_train.iloc[train_idx]
+                        if hasattr(y_train, "iloc")
+                        else y_train[train_idx]
+                    )
+                    X_val_fold = (
+                        X_train.iloc[val_idx]
+                        if hasattr(X_train, "iloc")
+                        else X_train[val_idx]
+                    )
+                    y_val_original_fold = (
+                        y_train_original.iloc[val_idx]
+                        if hasattr(y_train_original, "iloc")
+                        else y_train_original[val_idx]
+                    )
+
+                    # Train on fold
+                    model_fold = type(model)(**model.get_params())
+                    model_fold.fit(X_train_fold, y_train_fold)
+
+                    # Predict and transform back
+                    y_pred_log = model_fold.predict(X_val_fold)
+                    y_pred_original = np.exp(y_pred_log)
+
+                    # Compute metrics in original space
+                    mape = (
+                        np.mean(
+                            np.abs(
+                                (y_val_original_fold - y_pred_original)
+                                / y_val_original_fold
+                            )
+                        )
+                        * 100
+                    )
+                    r2_original = r2_score(
+                        y_val_original_fold, y_pred_original
+                    )
+
+                    cv_mape_scores.append(mape)
+                    cv_r2_original_scores.append(r2_original)
+
+                cv_mape = np.array(cv_mape_scores)
+                cv_r2_original = np.array(cv_r2_original_scores)
+
+                print("  Original-space metrics:")
+                print(
+                    f"    CV MAPE: {cv_mape.mean():.2f}% (+/- {cv_mape.std():.2f}%)"
+                )
+                print(
+                    f"    CV R²:   {cv_r2_original.mean():.4f} (+/- {cv_r2_original.std():.4f})"
+                )
+            else:
+                print(
+                    f"  CV RMSE: {cv_rmse.mean():.4f} (+/- {cv_rmse.std():.4f})"
+                )
+                print(
+                    f"  CV R²:   {cv_scores_r2.mean():.4f} (+/- {cv_scores_r2.std():.4f})"
+                )
+
         except Exception as e:
             print(
                 f"  CV failed (likely due to early stopping): {str(e)[:100]}"
@@ -763,29 +900,119 @@ def evaluate_model(
 
     # Training set metrics
     y_train_pred = model.predict(X_train)
-    train_mse = mean_squared_error(y_train, y_train_pred)
-    train_rmse = np.sqrt(train_mse)
-    train_mae = mean_absolute_error(y_train, y_train_pred)
-    train_r2 = r2_score(y_train, y_train_pred)
 
-    print("\nTraining Set Metrics:")
-    print(f"  MSE:  {train_mse:.4f}")
-    print(f"  RMSE: {train_rmse:.4f}")
-    print(f"  MAE:  {train_mae:.4f}")
-    print(f"  R²:   {train_r2:.4f}")
+    # If log-transformed, also compute metrics in original space
+    if log_transform:
+        # Inverse transform predictions
+        y_train_pred_original = np.exp(y_train_pred)
+        y_test_pred_log = model.predict(X_test)
+        y_test_pred_original = np.exp(y_test_pred_log)
+
+        # Metrics in log-space
+        train_mse_log = mean_squared_error(y_train, y_train_pred)
+        train_rmse_log = np.sqrt(train_mse_log)
+        train_r2_log = r2_score(y_train, y_train_pred)
+
+        # Metrics in original space
+        train_mse = mean_squared_error(y_train_original, y_train_pred_original)
+        train_rmse = np.sqrt(train_mse)
+        train_mae = mean_absolute_error(
+            y_train_original, y_train_pred_original
+        )
+        train_r2 = r2_score(y_train_original, y_train_pred_original)
+        train_mape = (
+            np.mean(
+                np.abs(
+                    (y_train_original - y_train_pred_original)
+                    / y_train_original
+                )
+            )
+            * 100
+        )
+
+        print("\nTraining Set Metrics (Original Space):")
+        print(f"  MSE:   {train_mse:.4f}")
+        print(f"  RMSE:  {train_rmse:.4f}")
+        print(f"  MAE:   {train_mae:.4f}")
+        print(f"  MAPE:  {train_mape:.2f}%  (optimized metric)")
+        print(f"  R²:    {train_r2:.4f}")
+        print("\nTraining Set Metrics (Log Space):")
+        print(f"  RMSE:  {train_rmse_log:.4f}")
+        print(f"  R²:    {train_r2_log:.4f}")
+    else:
+        train_mse = mean_squared_error(y_train, y_train_pred)
+        train_rmse = np.sqrt(train_mse)
+        train_mae = mean_absolute_error(y_train, y_train_pred)
+        train_r2 = r2_score(y_train, y_train_pred)
+
+        print("\nTraining Set Metrics:")
+        print(f"  MSE:  {train_mse:.4f}")
+        print(f"  RMSE: {train_rmse:.4f}")
+        print(f"  MAE:  {train_mae:.4f}")
+        print(f"  R²:   {train_r2:.4f}")
 
     # Test set metrics
-    y_test_pred = model.predict(X_test)
-    test_mse = mean_squared_error(y_test, y_test_pred)
-    test_rmse = np.sqrt(test_mse)
-    test_mae = mean_absolute_error(y_test, y_test_pred)
-    test_r2 = r2_score(y_test, y_test_pred)
+    if log_transform:
+        # Already computed above
+        test_mse_log = mean_squared_error(y_test, y_test_pred_log)
+        test_rmse_log = np.sqrt(test_mse_log)
+        test_r2_log = r2_score(y_test, y_test_pred_log)
 
-    print("\nTest Set Metrics:")
-    print(f"  MSE:  {test_mse:.4f}")
-    print(f"  RMSE: {test_rmse:.4f}")
-    print(f"  MAE:  {test_mae:.4f}")
-    print(f"  R²:   {test_r2:.4f}")
+        # Metrics in original space
+        test_mse = mean_squared_error(y_test_original, y_test_pred_original)
+        test_rmse = np.sqrt(test_mse)
+        test_mae = mean_absolute_error(y_test_original, y_test_pred_original)
+        test_r2 = r2_score(y_test_original, y_test_pred_original)
+        test_mape = (
+            np.mean(
+                np.abs(
+                    (y_test_original - y_test_pred_original) / y_test_original
+                )
+            )
+            * 100
+        )
+
+        print("\nTest Set Metrics (Original Space):")
+        print(f"  MSE:   {test_mse:.4f}")
+        print(f"  RMSE:  {test_rmse:.4f}")
+        print(f"  MAE:   {test_mae:.4f}")
+        print(f"  MAPE:  {test_mape:.2f}%  (optimized metric)")
+        print(f"  R²:    {test_r2:.4f}")
+        print("\nTest Set Metrics (Log Space):")
+        print(f"  RMSE:  {test_rmse_log:.4f}")
+        print(f"  R²:    {test_r2_log:.4f}")
+
+        # Use original space predictions for sample display
+        y_test_pred = y_test_pred_original
+        y_test = y_test_original
+    else:
+        y_test_pred = model.predict(X_test)
+        test_mse = mean_squared_error(y_test, y_test_pred)
+        test_rmse = np.sqrt(test_mse)
+        test_mae = mean_absolute_error(y_test, y_test_pred)
+        test_r2 = r2_score(y_test, y_test_pred)
+
+        print("\nTest Set Metrics:")
+        print(f"  MSE:  {test_mse:.4f}")
+        print(f"  RMSE: {test_rmse:.4f}")
+        print(f"  MAE:  {test_mae:.4f}")
+        print(f"  R²:   {test_r2:.4f}")
+
+    # If R² is negative, show baseline comparison for debugging
+    if test_r2 < 0:
+        y_test_mean = np.mean(y_test)
+        baseline_pred = np.full_like(y_test_pred, y_test_mean)
+        baseline_mse = mean_squared_error(y_test, baseline_pred)
+        baseline_rmse = np.sqrt(baseline_mse)
+        print("\n  WARNING: Negative R² detected!")
+        print(
+            f"  This means the model is worse than predicting the mean: {y_test_mean:.4f}"
+        )
+        print(f"  Baseline (mean) RMSE: {baseline_rmse:.4f}")
+        print(f"  Model RMSE:           {test_rmse:.4f}")
+        print(
+            f"  Model is {test_rmse / baseline_rmse:.2f}x worse than baseline"
+        )
 
     # Feature importance
     get_feature_importance(model, feature_names, regressor_type)
@@ -868,6 +1095,7 @@ def compile_model_treelite(
     quantize: bool = False,
     feature_names: List[str] = None,
     model_name: str = None,
+    log_transform: bool = False,
 ) -> None:
     """Compile XGBoost/LightGBM model to C source files using TL2cgen.
 
@@ -882,6 +1110,7 @@ def compile_model_treelite(
         quantize: Whether to use quantization in code generation
         feature_names: List of feature names in expected order (optional)
         model_name: Name prefix for functions (optional, derived from training file)
+        log_transform: Whether model predicts in log-space (will add exp() wrapper)
     """
     if regressor_type not in ["xgboost", "lightgbm"]:
         print(
@@ -1083,12 +1312,55 @@ def compile_model_treelite(
                     r"!\(data\[\d+\]\.missing != -1\)", "false", content
                 )
 
+                # If log_transform is used, wrap return values with exp()
+                if log_transform:
+                    # Add <cmath> include if not present
+                    if (
+                        "#include <cmath>" not in content
+                        and "#include<cmath>" not in content
+                    ):
+                        # Find the last #include and add after it
+                        include_match = None
+                        for match in re.finditer(
+                            r'#include\s*[<"].*?[>"]', content
+                        ):
+                            include_match = match
+                        if include_match:
+                            insert_pos = include_match.end()
+                            content = (
+                                content[:insert_pos]
+                                + "\n#include <cmath>"
+                                + content[insert_pos:]
+                            )
+
+                    # Replace "return sum;" with "return std::exp(sum);"
+                    # Match various return patterns in the predict function
+                    content = re.sub(
+                        r"(\s+)return\s+(sum|result|pred)\s*;",
+                        r"\1return std::exp(\2);",
+                        content,
+                    )
+
+                    # Also handle single-line returns like "return value;"
+                    content = re.sub(
+                        r"(\s+)return\s+([\w\.]+)\s*;",
+                        lambda m: f"{m.group(1)}return std::exp({m.group(2)});"
+                        if m.group(2) not in ["true", "false", "0", "1"]
+                        else m.group(0),
+                        content,
+                    )
+
+                    print(
+                        "  Added exp() transformation to convert log-space predictions to original space"
+                    )
+
                 if content != original_content:
                     with open(main_path, "w") as f:
                         f.write(content)
-                    print(
-                        "  Optimized main.cpp by removing unnecessary missing data checks"
-                    )
+                    if not log_transform:
+                        print(
+                            "  Optimized main.cpp by removing unnecessary missing data checks"
+                        )
             except Exception as e:
                 print(f"  Warning: Failed to optimize main.cpp: {e}")
 
@@ -1293,6 +1565,7 @@ def save_model(
     regressor_type: str,
     output_dir: str,
     feature_names: List[str],
+    log_transform: bool = False,
 ) -> None:
     """Save trained model and preprocessing components to disk."""
     os.makedirs(output_dir, exist_ok=True)
@@ -1302,6 +1575,7 @@ def save_model(
         "regressor_type": regressor_type,
         "feature_names": feature_names,
         "has_scaler": scaler is not None,
+        "log_transform": log_transform,
     }
 
     metadata_path = os.path.join(output_dir, f"{regressor_type}_metadata.pkl")
@@ -1369,6 +1643,15 @@ Examples:
   # Train with automatic removal of invalid rows
   python train_regressor.py data.feather --regressor xgboost --drop-invalid-rows --seed 42
 
+  # Stratify train/test split by target column (ensures balanced distribution)
+  python train_regressor.py data.feather --regressor xgboost --stratify-split --seed 42
+
+  # Stratify split by a specific column (e.g., time_ms)
+  python train_regressor.py data.feather --regressor xgboost --stratify-split time_ms --seed 42
+
+  # Optimize for relative error (recommended for targets spanning multiple orders of magnitude)
+  python train_regressor.py data.feather --regressor xgboost --log-transform --seed 42
+
   # Legacy pickle format
   python train_regressor.py data.pkl --regressor xgboost --seed 42
         """,
@@ -1426,8 +1709,12 @@ Examples:
     )
     parser.add_argument(
         "--stratify-split",
-        action="store_true",
-        help="Stratify train/test split by target distribution (ensures balanced iter values)",
+        type=str,
+        nargs="?",
+        const="__target__",
+        default=None,
+        metavar="COLUMN",
+        help="Stratify train/test split by specified column distribution. If no column specified, uses target column. Example: --stratify-split time_ms or just --stratify-split for target column",
     )
     parser.add_argument(
         "--early-stopping",
@@ -1458,6 +1745,11 @@ Examples:
         type=str,
         default="iter",
         help="Target column to predict (default: iter). Examples: iter, time_ms, iterations",
+    )
+    parser.add_argument(
+        "--log-transform",
+        action="store_true",
+        help="Use log-transform on target variable to optimize for relative error instead of absolute error. Recommended when target values span multiple orders of magnitude.",
     )
 
     args = parser.parse_args()
@@ -1561,7 +1853,22 @@ Examples:
         return
 
     # Split data by files
-    stratify_by = args.target if args.stratify_split else None
+    # Handle stratify-split argument
+    if args.stratify_split is None:
+        stratify_by = None
+    elif args.stratify_split == "__target__":
+        stratify_by = args.target
+        print(f"Stratifying split by target column: '{args.target}'")
+    else:
+        stratify_by = args.stratify_split
+        if stratify_by not in df.columns:
+            print(
+                f"\n❌ Error: Stratify column '{stratify_by}' not found in dataset"
+            )
+            print(f"Available columns: {list(df.columns)}")
+            return 1
+        print(f"Stratifying split by column: '{stratify_by}'")
+
     train_df, test_df = split_by_files(
         df,
         test_size=args.test_size,
@@ -1578,6 +1885,130 @@ Examples:
     print(f"\nFeatures: {len(feature_names)}")
     print(f"Target: {args.target} (prediction target)")
 
+    # Apply log transform if requested (for relative error optimization)
+    if args.log_transform:
+        # Check for non-positive values before log transform
+        if np.any(y_train <= 0) or np.any(y_test <= 0):
+            n_nonpositive_train = np.sum(y_train <= 0)
+            n_nonpositive_test = np.sum(y_test <= 0)
+            print(
+                "\n❌ Error: Cannot apply log-transform with non-positive target values!"
+            )
+            print(f"   Train set: {n_nonpositive_train} non-positive values")
+            print(f"   Test set:  {n_nonpositive_test} non-positive values")
+            print(
+                f"   Target range: [{np.min(y_train):.2f}, {np.max(y_train):.2f}]"
+            )
+            print(
+                "\nSuggestion: Add a small constant (e.g., +1) to all target values before log"
+            )
+            return 1
+
+        print(
+            "\nApplying log-transform to target variable (optimizes for relative error)"
+        )
+        y_train_original = y_train.copy()
+        y_test_original = y_test.copy()
+
+        y_train = np.log(y_train)
+        y_test = np.log(y_test)
+
+        print(
+            f"  Original target range: [{np.min(y_train_original):.2f}, {np.max(y_train_original):.2f}]"
+        )
+        print(
+            f"  Log-space target range: [{np.min(y_train):.4f}, {np.max(y_train):.4f}]"
+        )
+    else:
+        y_train_original = None
+        y_test_original = None
+
+    # Enhanced diagnostics for XGBoost compatibility (only show if problems found)
+    X_train_array = X_train.values if hasattr(X_train, "values") else X_train
+
+    # XGBoost internal limits (approximate)
+    xgb_max_safe = 1e38  # XGBoost uses float32 internally
+
+    problematic_features = []
+    problem_details = []
+
+    for i, col_name in enumerate(feature_names):
+        col_data = X_train_array[:, i]
+
+        n_nan = np.sum(np.isnan(col_data))
+        n_inf = np.sum(np.isinf(col_data))
+        n_posinf = np.sum(np.isposinf(col_data))
+        n_neginf = np.sum(np.isneginf(col_data))
+
+        # Get statistics on finite values
+        finite_mask = np.isfinite(col_data)
+        if np.any(finite_mask):
+            finite_data = col_data[finite_mask]
+            col_min = np.min(finite_data)
+            col_max = np.max(finite_data)
+            col_mean = np.mean(finite_data)
+            col_std = np.std(finite_data)
+            abs_max = max(abs(col_min), abs(col_max))
+        else:
+            col_min = col_max = col_mean = col_std = abs_max = np.nan
+
+        # Check if values are too large for XGBoost
+        is_problematic = (
+            n_nan > 0
+            or n_inf > 0
+            or (not np.isnan(abs_max) and abs_max > xgb_max_safe)
+        )
+
+        if is_problematic:
+            problematic_features.append(col_name)
+            detail = f"\n⚠️  '{col_name}':"
+            if n_nan > 0:
+                detail += f"\n    NaN:       {n_nan:8d} ({100 * n_nan / len(col_data):6.2f}%)"
+            if n_posinf > 0:
+                detail += f"\n    +Inf:      {n_posinf:8d} ({100 * n_posinf / len(col_data):6.2f}%)"
+            if n_neginf > 0:
+                detail += f"\n    -Inf:      {n_neginf:8d} ({100 * n_neginf / len(col_data):6.2f}%)"
+            if not np.isnan(abs_max):
+                detail += f"\n    Range:     [{col_min:.6e}, {col_max:.6e}]"
+                detail += f"\n    Max abs:   {abs_max:.6e}"
+                if abs_max > xgb_max_safe:
+                    detail += f"\n    ❌ TOO LARGE! Exceeds XGBoost safe limit (~{xgb_max_safe:.2e})"
+                detail += f"\n    Mean:      {col_mean:.6e}"
+                detail += f"\n    Std:       {col_std:.6e}"
+            problem_details.append(detail)
+
+    # Check target variable
+    n_nan_target = np.sum(np.isnan(y_train))
+    n_inf_target = np.sum(np.isinf(y_train))
+    if n_nan_target > 0 or n_inf_target > 0:
+        problematic_features.append(f"TARGET[{args.target}]")
+        detail = f"\n⚠️  Target '{args.target}':"
+        if n_nan_target > 0:
+            detail += f"\n    NaN:  {n_nan_target} ({100 * n_nan_target / len(y_train):.2f}%)"
+        if n_inf_target > 0:
+            detail += f"\n    Inf:  {n_inf_target} ({100 * n_inf_target / len(y_train):.2f}%)"
+        problem_details.append(detail)
+
+    # Only print if problems found
+    if len(problematic_features) > 0:
+        print("\n" + "=" * 70)
+        print("⚠️  FEATURE VALUE PROBLEMS DETECTED")
+        print("=" * 70)
+        for detail in problem_details:
+            print(detail)
+        print("\n" + "=" * 70)
+        print(f"❌ Found {len(problematic_features)} problematic feature(s):")
+        for feat in problematic_features:
+            print(f"   - {feat}")
+        print("\nTo fix:")
+        print(
+            "  1. Add these features to FEATURES_TO_EXCLUDE at top of script"
+        )
+        print(
+            "  2. Or investigate why these features have extreme/invalid values"
+        )
+        print("=" * 70 + "\n")
+
     # Create model
     print(f"\nTraining {args.regressor} regressor...")
     model, needs_scaling = create_regressor(
@@ -1589,12 +2020,24 @@ Examples:
 
     # Apply scaling if needed
     scaler = None
+    needs_scaling = False
     X_test_original = X_test.copy()  # Keep unscaled version for display
     if needs_scaling:
         print("  Applying StandardScaler to features...")
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test)
+
+        # Sanity check: verify scaling worked correctly
+        print(
+            f"    Scaled features - mean: {np.mean(X_train_scaled):.6f}, std: {np.std(X_train_scaled):.6f}"
+        )
+        if np.any(np.isnan(X_train_scaled)) or np.any(
+            np.isinf(X_train_scaled)
+        ):
+            print("    WARNING: NaN or Inf detected in scaled training data!")
+        if np.any(np.isnan(X_test_scaled)) or np.any(np.isinf(X_test_scaled)):
+            print("    WARNING: NaN or Inf detected in scaled test data!")
     else:
         X_train_scaled = X_train
         X_test_scaled = X_test
@@ -1688,15 +2131,25 @@ Examples:
         skip_cv=skip_cv,
         X_test_original=X_test_original,
         test_df=test_df,
+        log_transform=args.log_transform,
+        y_train_original=y_train_original,
+        y_test_original=y_test_original,
     )
 
     # Save model
-    save_model(model, scaler, args.regressor, args.output_dir, feature_names)
+    save_model(
+        model,
+        scaler,
+        args.regressor,
+        args.output_dir,
+        feature_names,
+        log_transform=args.log_transform,
+    )
 
     # Compile with TL2cgen if requested (with optimizations enabled by default)
     if args.treelite_compile is not None:
-        # Use unscaled training data for branch annotation
-        # Only tree-based models (XGBoost, LightGBM) don't need scaling
+        # Use unscaled training data for branch annotation when scaling is not applied
+        # Note: All models now use scaling for consistency
         X_train_for_annotation = X_train if not needs_scaling else None
 
         compile_model_treelite(
@@ -1709,6 +2162,7 @@ Examples:
             quantize=True,  # Always enable quantization
             feature_names=feature_names,
             model_name=model_name,
+            log_transform=args.log_transform,
         )
 
     print("\n" + "=" * 70)
