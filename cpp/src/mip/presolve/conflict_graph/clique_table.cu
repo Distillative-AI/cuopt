@@ -121,10 +121,9 @@ void make_coeff_positive_knapsack_constraint(
 // if a binary variable has a negative coefficient, put its negation in the constraint
 template <typename i_t, typename f_t>
 void fill_knapsack_constraints(const dual_simplex::user_problem_t<i_t, f_t>& problem,
-                               std::vector<knapsack_constraint_t<i_t, f_t>>& knapsack_constraints)
+                               std::vector<knapsack_constraint_t<i_t, f_t>>& knapsack_constraints,
+                               dual_simplex::csr_matrix_t<i_t, f_t>& A)
 {
-  dual_simplex::csr_matrix_t<i_t, f_t> A(0, 0, 0);
-  problem.A.to_compressed_row(A);
   // we might add additional constraints for the equality constraints
   i_t added_constraints = 0;
   for (i_t i = 0; i < A.m; i++) {
@@ -284,8 +283,41 @@ bool clique_table_t<i_t, f_t>::check_adjacency(i_t var_idx1, i_t var_idx2)
          adj_list_small_cliques[var_idx1].count(var_idx2) > 0;
 }
 
+// this function should only be called within extend clique
+// if this is called outside extend clique, csr matrix should be converted into csc and copied into
+// problem because the problem is partly modified
 template <typename i_t, typename f_t>
-void extend_clique(const std::vector<i_t>& clique, clique_table_t<i_t, f_t>& clique_table)
+void insert_clique_into_problem(const std::vector<i_t>& clique,
+                                dual_simplex::user_problem_t<i_t, f_t>& problem,
+                                dual_simplex::csr_matrix_t<i_t, f_t>& A)
+{
+  // convert vertices into original vars
+  f_t rhs_offset = 0.;
+  std::vector<i_t> new_vars;
+  std::vector<f_t> new_coeffs;
+  for (size_t i = 0; i < clique.size(); i++) {
+    f_t coeff   = 1.;
+    i_t var_idx = clique[i];
+    if (var_idx >= problem.num_cols) {
+      coeff   = -1.;
+      var_idx = var_idx - problem.num_cols;
+      rhs_offset -= coeff;
+    }
+    new_vars.push_back(var_idx);
+    new_coeffs.push_back(coeff);
+  }
+  f_t rhs = 1 + rhs_offset;
+  // insert the new clique into the problem as a new constraint
+  A.insert_row(new_vars, new_coeffs);
+  problem.row_sense.push_back('L');
+  problem.rhs.push_back(rhs);
+}
+
+template <typename i_t, typename f_t>
+void extend_clique(const std::vector<i_t>& clique,
+                   clique_table_t<i_t, f_t>& clique_table,
+                   dual_simplex::user_problem_t<i_t, f_t>& problem,
+                   dual_simplex::csr_matrix_t<i_t, f_t>& A)
 {
   i_t smallest_degree     = std::numeric_limits<i_t>::max();
   i_t smallest_degree_var = -1;
@@ -322,6 +354,8 @@ void extend_clique(const std::vector<i_t>& clique, clique_table_t<i_t, f_t>& cli
   if (new_clique.size() > clique.size()) {
     clique_table.first.push_back(new_clique);
     CUOPT_LOG_DEBUG("Extended clique: %lu from %lu", new_clique.size(), clique.size());
+    // insert the new clique into the problem as a new constraint
+    insert_clique_into_problem(new_clique, problem, A);
   }
 }
 
@@ -330,7 +364,9 @@ void extend_clique(const std::vector<i_t>& clique, clique_table_t<i_t, f_t>& cli
 // TODO: consider a heuristic on how much of the cliques derived from knapsacks to include here
 template <typename i_t, typename f_t>
 void extend_cliques(const std::vector<knapsack_constraint_t<i_t, f_t>>& knapsack_constraints,
-                    clique_table_t<i_t, f_t>& clique_table)
+                    clique_table_t<i_t, f_t>& clique_table,
+                    dual_simplex::user_problem_t<i_t, f_t>& problem,
+                    dual_simplex::csr_matrix_t<i_t, f_t>& A)
 {
   // we try extending cliques on set packing constraints
   for (const auto& knapsack_constraint : knapsack_constraints) {
@@ -340,9 +376,11 @@ void extend_cliques(const std::vector<knapsack_constraint_t<i_t, f_t>>& knapsack
       for (const auto& entry : knapsack_constraint.entries) {
         clique.push_back(entry.col);
       }
-      extend_clique(clique, clique_table);
+      extend_clique(clique, clique_table, problem, A);
     }
   }
+  // copy modified matrix back to problem
+  A.to_compressed_col(problem.A);
 }
 
 template <typename i_t, typename f_t>
@@ -359,6 +397,11 @@ void fill_var_clique_maps(clique_table_t<i_t, f_t>& clique_table)
     const auto& addtl_clique = clique_table.addtl_cliques[addtl_c];
     clique_table.var_clique_map_addtl[addtl_clique.vertex_idx].insert(addtl_c);
   }
+}
+
+template <typename i_t, typename f_t>
+void remove_dominated_constraint(const dual_simplex::user_problem_t<i_t, f_t>& problem)
+{
 }
 
 template <typename i_t, typename f_t>
@@ -402,11 +445,13 @@ void print_clique_table(const clique_table_t<i_t, f_t>& clique_table)
 }
 
 template <typename i_t, typename f_t>
-void find_initial_cliques(const dual_simplex::user_problem_t<i_t, f_t>& problem,
+void find_initial_cliques(dual_simplex::user_problem_t<i_t, f_t>& problem,
                           typename mip_solver_settings_t<i_t, f_t>::tolerances_t tolerances)
 {
   std::vector<knapsack_constraint_t<i_t, f_t>> knapsack_constraints;
-  fill_knapsack_constraints(problem, knapsack_constraints);
+  dual_simplex::csr_matrix_t<i_t, f_t> A(problem.num_rows, problem.num_cols, 0);
+  problem.A.to_compressed_row(A);
+  fill_knapsack_constraints(problem, knapsack_constraints, A);
   make_coeff_positive_knapsack_constraint(problem, knapsack_constraints, tolerances);
   sort_csr_by_constraint_coefficients(knapsack_constraints);
   print_knapsack_constraints(knapsack_constraints);
@@ -427,13 +472,14 @@ void find_initial_cliques(const dual_simplex::user_problem_t<i_t, f_t>& problem,
   remove_small_cliques(clique_table);
   // fill var clique maps
   fill_var_clique_maps(clique_table);
-  extend_cliques(knapsack_constraints, clique_table);
+  extend_cliques(knapsack_constraints, clique_table, problem, A);
+  remove_dominated_constraint(problem);
   exit(0);
 }
 
-#define INSTANTIATE(F_TYPE)                                   \
-  template void find_initial_cliques<int, F_TYPE>(            \
-    const dual_simplex::user_problem_t<int, F_TYPE>& problem, \
+#define INSTANTIATE(F_TYPE)                              \
+  template void find_initial_cliques<int, F_TYPE>(       \
+    dual_simplex::user_problem_t<int, F_TYPE> & problem, \
     typename mip_solver_settings_t<int, F_TYPE>::tolerances_t tolerances);
 
 #if MIP_INSTANTIATE_FLOAT

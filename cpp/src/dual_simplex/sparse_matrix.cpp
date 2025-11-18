@@ -581,6 +581,18 @@ void scatter_dense(const csc_matrix_t<i_t, f_t>& A, i_t j, f_t alpha, std::vecto
   }
 }
 
+template <typename i_t, typename f_t>
+void csr_matrix_t<i_t, f_t>::insert_row(const std::vector<i_t>& vars,
+                                        const std::vector<f_t>& coeffs)
+{
+  // insert the row into the matrix
+  this->row_start.push_back(this->m);
+  this->m++;
+  this->nz_max += vars.size();
+  this->j.insert(this->j.end(), vars.begin(), vars.end());
+  this->x.insert(this->x.end(), coeffs.begin(), coeffs.end());
+}
+
 // x <- x + alpha * A(:, j)
 template <typename i_t, typename f_t>
 void scatter_dense(const csc_matrix_t<i_t, f_t>& A,
