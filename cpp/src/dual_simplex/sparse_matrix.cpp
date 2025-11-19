@@ -586,7 +586,7 @@ void csr_matrix_t<i_t, f_t>::insert_row(const std::vector<i_t>& vars,
                                         const std::vector<f_t>& coeffs)
 {
   // insert the row into the matrix
-  this->row_start.push_back(this->m);
+  this->row_start.push_back(this->row_start.back() + vars.size());
   this->m++;
   this->nz_max += vars.size();
   this->j.insert(this->j.end(), vars.begin(), vars.end());

@@ -386,6 +386,7 @@ i_t extend_cliques(const std::vector<knapsack_constraint_t<i_t, f_t>>& knapsack_
       if (extended_clique) { n_extended_cliques++; }
     }
   }
+  // problem.A.check_matrix();
   // copy modified matrix back to problem
   A.to_compressed_col(problem.A);
   return n_extended_cliques;
@@ -426,7 +427,7 @@ void remove_dominated_cliques(dual_simplex::user_problem_t<i_t, f_t>& problem,
   // TODO check if we need to add the dominance for the table itself
   i_t extended_clique_start_idx = clique_table.first.size() - n_extended_cliques;
   CUOPT_LOG_DEBUG("Number of extended cliques: %d", n_extended_cliques);
-  std::vector<i_t> constraints_to_remove;
+  std::vector<i_t> removal_marker(problem.row_sense.size(), false);
   for (i_t i = 0; i < n_extended_cliques; i++) {
     i_t clique_idx = extended_clique_start_idx + i;
     std::set<i_t> curr_clique_vars;
@@ -459,10 +460,25 @@ void remove_dominated_cliques(dual_simplex::user_problem_t<i_t, f_t>& problem,
                                               curr_cstr_vars.end());
       if (constraint_covered) {
         CUOPT_LOG_TRACE("Constraint %d is covered by clique %d", cstr_idx, clique_idx);
-        constraints_to_remove.push_back(cstr_idx);
+        removal_marker[cstr_idx] = true;
       }
     }
   }
+  dual_simplex::csr_matrix_t<i_t, f_t> A_removed(0, 0, 0);
+  A.remove_rows(removal_marker, A_removed);
+  problem.num_rows = A_removed.m;
+  // Remove problem.row_sense entries for which removal_marker is true, using remove_if
+  auto new_end =
+    std::remove_if(problem.row_sense.begin(),
+                   problem.row_sense.end(),
+                   [&removal_marker, n = i_t(0)](char) mutable { return removal_marker[n++]; });
+  problem.row_sense.erase(new_end, problem.row_sense.end());
+  // Remove problem.rhs entries for which removal_marker is true, using remove_if
+  auto new_end_rhs = std::remove_if(
+    problem.rhs.begin(), problem.rhs.end(), [&removal_marker, n = i_t(0)](f_t) mutable {
+      return removal_marker[n++];
+    });
+  problem.rhs.erase(new_end_rhs, problem.rhs.end());
 }
 
 template <typename i_t, typename f_t>
@@ -509,6 +525,10 @@ template <typename i_t, typename f_t>
 void find_initial_cliques(dual_simplex::user_problem_t<i_t, f_t>& problem,
                           typename mip_solver_settings_t<i_t, f_t>::tolerances_t tolerances)
 {
+  if (problem.num_range_rows > 0) {
+    CUOPT_LOG_ERROR("Range rows are not supported yet");
+    exit(1);
+  }
   std::vector<knapsack_constraint_t<i_t, f_t>> knapsack_constraints;
   std::unordered_set<i_t> set_packing_constraints;
   dual_simplex::csr_matrix_t<i_t, f_t> A(problem.num_rows, problem.num_cols, 0);
@@ -517,7 +537,7 @@ void find_initial_cliques(dual_simplex::user_problem_t<i_t, f_t>& problem,
   make_coeff_positive_knapsack_constraint(
     problem, knapsack_constraints, set_packing_constraints, tolerances);
   sort_csr_by_constraint_coefficients(knapsack_constraints);
-  print_knapsack_constraints(knapsack_constraints);
+  // print_knapsack_constraints(knapsack_constraints);
   // TODO think about getting min_clique_size according to some problem property
   clique_config_t clique_config;
   clique_table_t<i_t, f_t> clique_table(2 * problem.num_cols,
