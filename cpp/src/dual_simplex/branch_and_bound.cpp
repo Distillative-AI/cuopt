@@ -238,6 +238,162 @@ branch_and_bound_t<i_t, f_t>::branch_and_bound_t(
 }
 
 template <typename i_t, typename f_t>
+void branch_and_bound_t<i_t, f_t>::compute_static_features()
+{
+  const auto& A               = original_lp_.A;
+  static_features_.n_rows     = A.m;
+  static_features_.n_cols     = A.n;
+  static_features_.n_nonzeros = A.col_start[A.n];
+  static_features_.density    = (f_t)static_features_.n_nonzeros / ((f_t)A.m * A.n);
+
+  // Count variable types
+  static_features_.n_binary     = 0;
+  static_features_.n_integer    = 0;
+  static_features_.n_continuous = 0;
+  for (const auto& vt : var_types_) {
+    if (vt == variable_type_t::BINARY) {
+      static_features_.n_binary++;
+    } else if (vt == variable_type_t::INTEGER) {
+      static_features_.n_integer++;
+    } else {
+      static_features_.n_continuous++;
+    }
+  }
+  static_features_.integrality_ratio =
+    (f_t)(static_features_.n_binary + static_features_.n_integer) / A.n;
+
+  // Compute row statistics (constraint sizes)
+  std::vector<i_t> row_nnz(A.m, 0);
+  for (i_t j = 0; j < A.n; j++) {
+    for (i_t k = A.col_start[j]; k < A.col_start[j + 1]; k++) {
+      row_nnz[A.i[k]]++;
+    }
+  }
+
+  static_features_.max_row_nnz = 0;
+  f_t sum_row_nnz              = 0;
+  for (i_t i = 0; i < A.m; i++) {
+    static_features_.max_row_nnz = std::max(static_features_.max_row_nnz, row_nnz[i]);
+    sum_row_nnz += row_nnz[i];
+  }
+  static_features_.avg_row_nnz = sum_row_nnz / A.m;
+
+  // Compute row coefficient of variation
+  f_t row_variance = 0;
+  for (i_t i = 0; i < A.m; i++) {
+    f_t diff = row_nnz[i] - static_features_.avg_row_nnz;
+    row_variance += diff * diff;
+  }
+  row_variance /= A.m;
+  f_t row_std = std::sqrt(row_variance);
+  static_features_.row_nnz_cv =
+    static_features_.avg_row_nnz > 0 ? row_std / static_features_.avg_row_nnz : 0.0;
+
+  // Compute column statistics (variable degrees)
+  static_features_.max_col_nnz = 0;
+  f_t sum_col_nnz              = 0;
+  for (i_t j = 0; j < A.n; j++) {
+    i_t col_nnz                  = A.col_start[j + 1] - A.col_start[j];
+    static_features_.max_col_nnz = std::max(static_features_.max_col_nnz, col_nnz);
+    sum_col_nnz += col_nnz;
+  }
+  static_features_.avg_col_nnz = sum_col_nnz / A.n;
+
+  // Compute column coefficient of variation
+  f_t col_variance = 0;
+  for (i_t j = 0; j < A.n; j++) {
+    i_t col_nnz = A.col_start[j + 1] - A.col_start[j];
+    f_t diff    = col_nnz - static_features_.avg_col_nnz;
+    col_variance += diff * diff;
+  }
+  col_variance /= A.n;
+  f_t col_std = std::sqrt(col_variance);
+  static_features_.col_nnz_cv =
+    static_features_.avg_col_nnz > 0 ? col_std / static_features_.avg_col_nnz : 0.0;
+}
+
+template <typename i_t, typename f_t>
+void branch_and_bound_t<i_t, f_t>::flush_pending_features()
+{
+  // Must be called with mutex_feature_log_ already locked
+  if (!has_pending_features_) return;
+
+  constexpr int LINE_BUFFER_SIZE = 512;
+  char line_buffer[LINE_BUFFER_SIZE];
+
+  snprintf(line_buffer,
+           LINE_BUFFER_SIZE,
+           "BB_NODE_FEATURES "
+           "node_id=%d depth=%d time=%.6f "
+           "n_rows=%d n_cols=%d n_nnz=%d density=%.6f "
+           "n_bin=%d n_int=%d n_cont=%d int_ratio=%.4f "
+           "avg_row_nnz=%.2f max_row_nnz=%d row_nnz_cv=%.4f "
+           "avg_col_nnz=%.2f max_col_nnz=%d col_nnz_cv=%.4f "
+           "n_bounds_chg=%d cutoff_gap=%.4f basis_from_parent=%d "
+           "simplex_iters=%d n_refact=%d lp_time=%.6f bound_str_time=%.6f var_sel_time=%.6f "
+           "n_frac=%d strong_branch=%d n_sb_cand=%d sb_time=%.6f "
+           "lp_status=%d node_status=%d\n",
+           last_features_.node_id,
+           last_features_.node_depth,
+           last_features_.total_node_time,
+           last_features_.n_rows,
+           last_features_.n_cols,
+           last_features_.n_nonzeros,
+           last_features_.density,
+           last_features_.n_binary,
+           last_features_.n_integer,
+           last_features_.n_continuous,
+           last_features_.integrality_ratio,
+           last_features_.avg_row_nnz,
+           last_features_.max_row_nnz,
+           last_features_.row_nnz_cv,
+           last_features_.avg_col_nnz,
+           last_features_.max_col_nnz,
+           last_features_.col_nnz_cv,
+           last_features_.n_bounds_changed,
+           last_features_.cutoff_gap_ratio,
+           last_features_.basis_from_parent ? 1 : 0,
+           last_features_.simplex_iterations,
+           last_features_.n_refactorizations,
+           last_features_.lp_solve_time,
+           last_features_.bound_str_time,
+           last_features_.variable_sel_time,
+           last_features_.n_fractional,
+           last_features_.strong_branch_performed ? 1 : 0,
+           last_features_.n_strong_branch_candidates,
+           last_features_.strong_branch_time,
+           last_features_.lp_status,
+           last_features_.node_status);
+
+  // Single printf call
+  settings_.log.printf("%s", line_buffer);
+
+  has_pending_features_ = false;
+}
+
+template <typename i_t, typename f_t>
+void branch_and_bound_t<i_t, f_t>::log_node_features(
+  const node_solve_features_t<i_t, f_t>& features)
+{
+  mutex_feature_log_.lock();
+
+  f_t current_time        = toc(exploration_stats_.start_time);
+  f_t time_since_last_log = current_time - last_feature_log_time_;
+
+  // Always store the latest features
+  last_features_        = features;
+  has_pending_features_ = true;
+
+  // Log if enough time has passed (500ms)
+  if (time_since_last_log >= FEATURE_LOG_INTERVAL) {
+    flush_pending_features();
+    last_feature_log_time_ = current_time;
+  }
+
+  mutex_feature_log_.unlock();
+}
+
+template <typename i_t, typename f_t>
 f_t branch_and_bound_t<i_t, f_t>::get_upper_bound()
 {
   mutex_upper_.lock();
