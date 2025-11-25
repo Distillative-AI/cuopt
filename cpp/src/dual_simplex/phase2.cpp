@@ -8,6 +8,7 @@
 #include <dual_simplex/basis_solves.hpp>
 #include <dual_simplex/basis_updates.hpp>
 #include <dual_simplex/bound_flipping_ratio_test.hpp>
+#include <dual_simplex/dual_simplex_features.hpp>
 #include <dual_simplex/initial_basis.hpp>
 #include <dual_simplex/phase1.hpp>
 #include <dual_simplex/phase2.hpp>
@@ -24,6 +25,9 @@
 #include <ctime>
 
 namespace cuopt::linear_programming::dual_simplex {
+
+// Import instrumented vector type for memory tracking
+using cuopt::ins_vector;
 
 namespace phase2 {
 
@@ -271,12 +275,12 @@ template <typename i_t, typename f_t>
 void compute_reduced_cost_update(const lp_problem_t<i_t, f_t>& lp,
                                  const std::vector<i_t>& basic_list,
                                  const std::vector<i_t>& nonbasic_list,
-                                 const std::vector<f_t>& delta_y,
+                                 const ins_vector<f_t>& delta_y,
                                  i_t leaving_index,
                                  i_t direction,
-                                 std::vector<i_t>& delta_z_mark,
-                                 std::vector<i_t>& delta_z_indices,
-                                 std::vector<f_t>& delta_z)
+                                 ins_vector<i_t>& delta_z_mark,
+                                 ins_vector<i_t>& delta_z_indices,
+                                 ins_vector<f_t>& delta_z)
 {
   const i_t m = lp.num_rows;
   const i_t n = lp.num_cols;
@@ -310,10 +314,10 @@ void compute_delta_z(const csc_matrix_t<i_t, f_t>& A_transpose,
                      const sparse_vector_t<i_t, f_t>& delta_y,
                      i_t leaving_index,
                      i_t direction,
-                     std::vector<i_t>& nonbasic_mark,
-                     std::vector<i_t>& delta_z_mark,
-                     std::vector<i_t>& delta_z_indices,
-                     std::vector<f_t>& delta_z)
+                     ins_vector<i_t>& nonbasic_mark,
+                     ins_vector<i_t>& delta_z_mark,
+                     ins_vector<i_t>& delta_z_indices,
+                     ins_vector<f_t>& delta_z)
 {
   // delta_zN = - N'*delta_y
   const i_t nz_delta_y = delta_y.i.size();
@@ -436,9 +440,9 @@ void compute_primal_variables(const basis_update_mpf_t<i_t, f_t>& ft,
 template <typename i_t, typename f_t>
 void clear_delta_z(i_t entering_index,
                    i_t leaving_index,
-                   std::vector<i_t>& delta_z_mark,
-                   std::vector<i_t>& delta_z_indices,
-                   std::vector<f_t>& delta_z)
+                   ins_vector<i_t>& delta_z_mark,
+                   ins_vector<i_t>& delta_z_indices,
+                   ins_vector<f_t>& delta_z)
 {
   for (i_t k = 0; k < delta_z_indices.size(); k++) {
     const i_t j     = delta_z_indices[k];
@@ -454,7 +458,7 @@ template <typename i_t, typename f_t>
 void clear_delta_x(const std::vector<i_t>& basic_list,
                    i_t entering_index,
                    sparse_vector_t<i_t, f_t>& scaled_delta_xB_sparse,
-                   std::vector<f_t>& delta_x)
+                   ins_vector<f_t>& delta_x)
 {
   const i_t scaled_delta_xB_nz = scaled_delta_xB_sparse.i.size();
   for (i_t k = 0; k < scaled_delta_xB_nz; ++k) {
@@ -519,7 +523,7 @@ void vstatus_changes(const std::vector<variable_status_t>& vstatus,
 template <typename f_t>
 void compute_bounded_info(const std::vector<f_t>& lower,
                           const std::vector<f_t>& upper,
-                          std::vector<uint8_t>& bounded_variables)
+                          ins_vector<uint8_t>& bounded_variables)
 {
   const size_t n = lower.size();
   for (size_t j = 0; j < n; j++) {
@@ -624,8 +628,8 @@ f_t compute_initial_primal_infeasibilities(const lp_problem_t<i_t, f_t>& lp,
                                            const simplex_solver_settings_t<i_t, f_t>& settings,
                                            const std::vector<i_t>& basic_list,
                                            const std::vector<f_t>& x,
-                                           std::vector<f_t>& squared_infeasibilities,
-                                           std::vector<i_t>& infeasibility_indices)
+                                           ins_vector<f_t>& squared_infeasibilities,
+                                           ins_vector<i_t>& infeasibility_indices)
 {
   const i_t m = lp.num_rows;
   const i_t n = lp.num_cols;
@@ -653,8 +657,8 @@ void update_single_primal_infeasibility(const std::vector<f_t>& lower,
                                         const std::vector<f_t>& upper,
                                         const std::vector<f_t>& x,
                                         f_t primal_tol,
-                                        std::vector<f_t>& squared_infeasibilities,
-                                        std::vector<i_t>& infeasibility_indices,
+                                        ins_vector<f_t>& squared_infeasibilities,
+                                        ins_vector<i_t>& infeasibility_indices,
                                         i_t j,
                                         f_t& primal_inf)
 {
@@ -696,8 +700,8 @@ void update_primal_infeasibilities(const lp_problem_t<i_t, f_t>& lp,
                                    i_t entering_index,
                                    i_t leaving_index,
                                    std::vector<i_t>& basic_change_list,
-                                   std::vector<f_t>& squared_infeasibilities,
-                                   std::vector<i_t>& infeasibility_indices,
+                                   ins_vector<f_t>& squared_infeasibilities,
+                                   ins_vector<i_t>& infeasibility_indices,
                                    f_t& primal_inf)
 {
   const f_t primal_tol = settings.primal_tol;
@@ -726,8 +730,8 @@ void update_primal_infeasibilities(const lp_problem_t<i_t, f_t>& lp,
 }
 
 template <typename i_t, typename f_t>
-void clean_up_infeasibilities(std::vector<f_t>& squared_infeasibilities,
-                              std::vector<i_t>& infeasibility_indices)
+void clean_up_infeasibilities(ins_vector<f_t>& squared_infeasibilities,
+                              ins_vector<i_t>& infeasibility_indices)
 {
   bool needs_clean_up = false;
   for (i_t k = 0; k < infeasibility_indices.size(); ++k) {
@@ -756,9 +760,9 @@ i_t steepest_edge_pricing_with_infeasibilities(const lp_problem_t<i_t, f_t>& lp,
                                                const simplex_solver_settings_t<i_t, f_t>& settings,
                                                const std::vector<f_t>& x,
                                                const std::vector<f_t>& dy_steepest_edge,
-                                               const std::vector<i_t>& basic_mark,
-                                               std::vector<f_t>& squared_infeasibilities,
-                                               std::vector<i_t>& infeasibility_indices,
+                                               const ins_vector<i_t>& basic_mark,
+                                               ins_vector<f_t>& squared_infeasibilities,
+                                               ins_vector<i_t>& infeasibility_indices,
                                                i_t& direction,
                                                i_t& basic_leaving,
                                                f_t& max_val)
@@ -1029,20 +1033,21 @@ i_t phase2_ratio_test(const lp_problem_t<i_t, f_t>& lp,
 template <typename i_t, typename f_t>
 i_t flip_bounds(const lp_problem_t<i_t, f_t>& lp,
                 const simplex_solver_settings_t<i_t, f_t>& settings,
-                const std::vector<uint8_t>& bounded_variables,
+                const ins_vector<uint8_t>& bounded_variables,
                 const std::vector<f_t>& objective,
                 const std::vector<f_t>& z,
-                const std::vector<i_t>& delta_z_indices,
+                const ins_vector<i_t>& delta_z_indices,
                 const std::vector<i_t>& nonbasic_list,
                 i_t entering_index,
                 std::vector<variable_status_t>& vstatus,
-                std::vector<f_t>& delta_x,
-                std::vector<i_t>& mark,
-                std::vector<f_t>& atilde,
-                std::vector<i_t>& atilde_index)
+                ins_vector<f_t>& delta_x_flip,
+                ins_vector<i_t>& atilde_mark,
+                ins_vector<f_t>& atilde,
+                ins_vector<i_t>& atilde_index)
 {
   i_t num_flipped = 0;
-  for (i_t j : delta_z_indices) {
+  for (i_t k = 0; k < delta_z_indices.size(); ++k) {
+    const i_t j = delta_z_indices[k];
     if (j == entering_index) { continue; }
     if (!bounded_variables[j]) { continue; }
     // x_j is now a nonbasic bounded variable that will not enter the basis this
@@ -1051,8 +1056,8 @@ i_t flip_bounds(const lp_problem_t<i_t, f_t>& lp,
       settings.dual_tol;  // lower to 1e-7 or less will cause 25fv47 and d2q06c to cycle
     if (vstatus[j] == variable_status_t::NONBASIC_LOWER && z[j] < -dual_tol) {
       const f_t delta = lp.upper[j] - lp.lower[j];
-      scatter_dense(lp.A, j, -delta, atilde, mark, atilde_index);
-      delta_x[j] += delta;
+      scatter_dense(lp.A, j, -delta, atilde.array, atilde_mark.array, atilde_index.array);
+      delta_x_flip[j] += delta;
       vstatus[j] = variable_status_t::NONBASIC_UPPER;
 #ifdef BOUND_FLIP_DEBUG
       settings.log.printf(
@@ -1061,8 +1066,8 @@ i_t flip_bounds(const lp_problem_t<i_t, f_t>& lp,
       num_flipped++;
     } else if (vstatus[j] == variable_status_t::NONBASIC_UPPER && z[j] > dual_tol) {
       const f_t delta = lp.lower[j] - lp.upper[j];
-      scatter_dense(lp.A, j, -delta, atilde, mark, atilde_index);
-      delta_x[j] += delta;
+      scatter_dense(lp.A, j, -delta, atilde.array, atilde_mark.array, atilde_index.array);
+      delta_x_flip[j] += delta;
       vstatus[j] = variable_status_t::NONBASIC_LOWER;
 #ifdef BOUND_FLIP_DEBUG
       settings.log.printf(
@@ -1245,12 +1250,12 @@ i_t update_steepest_edge_norms(const simplex_solver_settings_t<i_t, f_t>& settin
                                const sparse_vector_t<i_t, f_t>& scaled_delta_xB,
                                i_t basic_leaving_index,
                                i_t entering_index,
-                               std::vector<f_t>& v,
+                               ins_vector<f_t>& v,
+                               sparse_vector_t<i_t, f_t>& v_sparse,
                                std::vector<f_t>& delta_y_steepest_edge)
 {
-  i_t m                = basic_list.size();
   const i_t delta_y_nz = delta_y_sparse.i.size();
-  sparse_vector_t<i_t, f_t> v_sparse(m, 0);
+  v_sparse.clear();
   // B^T delta_y = - direction * e_basic_leaving_index
   // We want B v =  - B^{-T} e_basic_leaving_index
   ft.b_solve(delta_y_sparse, v_sparse);
@@ -1365,7 +1370,7 @@ i_t check_steepest_edge_norms(const simplex_solver_settings_t<i_t, f_t>& setting
 template <typename i_t, typename f_t>
 i_t compute_perturbation(const lp_problem_t<i_t, f_t>& lp,
                          const simplex_solver_settings_t<i_t, f_t>& settings,
-                         const std::vector<i_t>& delta_z_indices,
+                         const ins_vector<i_t>& delta_z_indices,
                          std::vector<f_t>& z,
                          std::vector<f_t>& objective,
                          f_t& sum_perturb)
@@ -1414,8 +1419,8 @@ i_t compute_perturbation(const lp_problem_t<i_t, f_t>& lp,
 template <typename i_t>
 void reset_basis_mark(const std::vector<i_t>& basic_list,
                       const std::vector<i_t>& nonbasic_list,
-                      std::vector<i_t>& basic_mark,
-                      std::vector<i_t>& nonbasic_mark)
+                      ins_vector<i_t>& basic_mark,
+                      ins_vector<i_t>& nonbasic_mark)
 {
   const i_t m         = basic_list.size();
   const i_t n         = nonbasic_mark.size();
@@ -1483,8 +1488,8 @@ void compute_delta_y(const basis_update_mpf_t<i_t, f_t>& ft,
 
 template <typename i_t, typename f_t>
 i_t update_dual_variables(const sparse_vector_t<i_t, f_t>& delta_y_sparse,
-                          const std::vector<i_t>& delta_z_indices,
-                          const std::vector<f_t>& delta_z,
+                          const ins_vector<i_t>& delta_z_indices,
+                          const ins_vector<f_t>& delta_z,
                           f_t step_length,
                           i_t leaving_index,
                           std::vector<f_t>& y,
@@ -1510,21 +1515,23 @@ i_t update_dual_variables(const sparse_vector_t<i_t, f_t>& delta_y_sparse,
 template <typename i_t, typename f_t>
 void adjust_for_flips(const basis_update_mpf_t<i_t, f_t>& ft,
                       const std::vector<i_t>& basic_list,
-                      const std::vector<i_t>& delta_z_indices,
-                      std::vector<i_t>& atilde_index,
-                      std::vector<f_t>& atilde,
-                      std::vector<i_t>& atilde_mark,
+                      const ins_vector<i_t>& delta_z_indices,
+                      ins_vector<i_t>& atilde_index,
+                      ins_vector<f_t>& atilde,
+                      ins_vector<i_t>& atilde_mark,
+                      sparse_vector_t<i_t, f_t>& atilde_sparse,
                       sparse_vector_t<i_t, f_t>& delta_xB_0_sparse,
-                      std::vector<f_t>& delta_x_flip,
+                      ins_vector<f_t>& delta_x_flip,
                       std::vector<f_t>& x)
 {
-  const i_t m         = basic_list.size();
   const i_t atilde_nz = atilde_index.size();
   // B*delta_xB_0 = atilde
-  sparse_vector_t<i_t, f_t> atilde_sparse(m, atilde_nz);
+  atilde_sparse.clear();
+  atilde_sparse.i.reserve(atilde_nz);
+  atilde_sparse.x.reserve(atilde_nz);
   for (i_t k = 0; k < atilde_nz; ++k) {
-    atilde_sparse.i[k] = atilde_index[k];
-    atilde_sparse.x[k] = atilde[atilde_index[k]];
+    atilde_sparse.i.push_back(atilde_index[k]);
+    atilde_sparse.x.push_back(atilde[atilde_index[k]]);
   }
   ft.b_solve(atilde_sparse, delta_xB_0_sparse);
   const i_t delta_xB_0_nz = delta_xB_0_sparse.i.size();
@@ -1533,7 +1540,8 @@ void adjust_for_flips(const basis_update_mpf_t<i_t, f_t>& ft,
     x[j] += delta_xB_0_sparse.x[k];
   }
 
-  for (i_t j : delta_z_indices) {
+  for (i_t k = 0; k < delta_z_indices.size(); ++k) {
+    const i_t j = delta_z_indices[k];
     x[j] += delta_x_flip[j];
     delta_x_flip[j] = 0.0;
   }
@@ -1620,7 +1628,7 @@ i_t compute_delta_x(const lp_problem_t<i_t, f_t>& lp,
 template <typename i_t, typename f_t>
 void update_primal_variables(const sparse_vector_t<i_t, f_t>& scaled_delta_xB_sparse,
                              const std::vector<i_t>& basic_list,
-                             const std::vector<f_t>& delta_x,
+                             const ins_vector<f_t>& delta_x,
                              i_t entering_index,
                              std::vector<f_t>& x)
 {
@@ -1638,7 +1646,7 @@ template <typename i_t, typename f_t>
 void update_objective(const std::vector<i_t>& basic_list,
                       const std::vector<i_t>& changed_basic_indices,
                       const std::vector<f_t>& objective,
-                      const std::vector<f_t>& delta_x,
+                      const ins_vector<f_t>& delta_x,
                       i_t entering_index,
                       f_t& obj)
 {
@@ -1781,8 +1789,8 @@ void check_primal_infeasibilities(const lp_problem_t<i_t, f_t>& lp,
                                   const simplex_solver_settings_t<i_t, f_t>& settings,
                                   const std::vector<i_t>& basic_list,
                                   const std::vector<f_t>& x,
-                                  const std::vector<f_t>& squared_infeasibilities,
-                                  const std::vector<i_t>& infeasibility_indices)
+                                  const ins_vector<f_t>& squared_infeasibilities,
+                                  const ins_vector<i_t>& infeasibility_indices)
 {
   const i_t m = basic_list.size();
   for (i_t k = 0; k < m; ++k) {
@@ -1812,8 +1820,8 @@ void check_primal_infeasibilities(const lp_problem_t<i_t, f_t>& lp,
 
 template <typename i_t>
 void check_basic_infeasibilities(const std::vector<i_t>& basic_list,
-                                 const std::vector<i_t>& basic_mark,
-                                 const std::vector<i_t>& infeasibility_indices,
+                                 const ins_vector<i_t>& basic_mark,
+                                 const ins_vector<i_t>& infeasibility_indices,
                                  i_t info)
 {
   for (i_t k = 0; k < infeasibility_indices.size(); ++k) {
@@ -1856,8 +1864,8 @@ template <typename i_t, typename f_t>
 void check_basis_mark(const simplex_solver_settings_t<i_t, f_t>& settings,
                       const std::vector<i_t>& basic_list,
                       const std::vector<i_t>& nonbasic_list,
-                      const std::vector<i_t>& basic_mark,
-                      const std::vector<i_t>& nonbasic_mark)
+                      const ins_vector<i_t>& basic_mark,
+                      const ins_vector<i_t>& nonbasic_mark)
 {
   const i_t m = basic_list.size();
   const i_t n = basic_mark.size();
@@ -2339,26 +2347,28 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
   }
 
   const i_t iter_limit = settings.iteration_limit;
-  std::vector<f_t> delta_y(m, 0.0);
-  std::vector<f_t> delta_z(n, 0.0);
-  std::vector<f_t> delta_x(n, 0.0);
-  std::vector<f_t> delta_x_flip(n, 0.0);
-  std::vector<f_t> atilde(m, 0.0);
-  std::vector<i_t> atilde_mark(m, 0);
-  std::vector<i_t> atilde_index;
-  std::vector<i_t> nonbasic_mark(n);
-  std::vector<i_t> basic_mark(n);
-  std::vector<i_t> delta_z_mark(n, 0);
-  std::vector<i_t> delta_z_indices;
-  std::vector<f_t> v(m, 0.0);
-  std::vector<f_t> squared_infeasibilities;
-  std::vector<i_t> infeasibility_indices;
+
+  // Instrumented vectors for memory access tracking
+  ins_vector<f_t> delta_y(m, 0.0);
+  ins_vector<f_t> delta_z(n, 0.0);
+  ins_vector<f_t> delta_x(n, 0.0);
+  ins_vector<f_t> delta_x_flip(n, 0.0);
+  ins_vector<f_t> atilde(m, 0.0);
+  ins_vector<i_t> atilde_mark(m, 0);
+  ins_vector<i_t> atilde_index;
+  ins_vector<i_t> nonbasic_mark(n);
+  ins_vector<i_t> basic_mark(n);
+  ins_vector<i_t> delta_z_mark(n, 0);
+  ins_vector<i_t> delta_z_indices;
+  ins_vector<f_t> v(m, 0.0);
+  ins_vector<f_t> squared_infeasibilities;
+  ins_vector<i_t> infeasibility_indices;
 
   delta_z_indices.reserve(n);
 
   phase2::reset_basis_mark(basic_list, nonbasic_list, basic_mark, nonbasic_mark);
 
-  std::vector<uint8_t> bounded_variables(n, 0);
+  ins_vector<uint8_t> bounded_variables(n, 0);
   phase2::compute_bounded_info(lp.lower, lp.upper, bounded_variables);
 
   f_t primal_infeasibility = phase2::compute_initial_primal_infeasibilities(
@@ -2374,9 +2384,65 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
   f_t obj              = compute_objective(lp, x);
   const i_t start_iter = iter;
 
-  i_t sparse_delta_z = 0;
-  i_t dense_delta_z  = 0;
+  i_t sparse_delta_z        = 0;
+  i_t dense_delta_z         = 0;
+  i_t num_refactors         = 0;
+  i_t total_bound_flips     = 0;
+  f_t delta_y_nz_percentage = 0.0;
   phase2::phase2_timers_t<i_t, f_t> timers(false);
+
+  // Feature collection for regression training
+  dual_simplex_features_t<i_t, f_t> features;
+  features.init_from_problem(lp, settings, phase, slack_basis != 0, initialize_basis);
+  features.start_iteration = iter;
+
+  // Sparse vectors for main loop (declared outside loop for instrumentation)
+  sparse_vector_t<i_t, f_t> delta_y_sparse(m, 0);
+  sparse_vector_t<i_t, f_t> UTsol_sparse(m, 0);
+  sparse_vector_t<i_t, f_t> delta_xB_0_sparse(m, 0);
+  sparse_vector_t<i_t, f_t> utilde_sparse(m, 0);
+  sparse_vector_t<i_t, f_t> scaled_delta_xB_sparse(m, 0);
+  sparse_vector_t<i_t, f_t> rhs_sparse(m, 0);
+  sparse_vector_t<i_t, f_t> v_sparse(m, 0);       // For steepest edge norms
+  sparse_vector_t<i_t, f_t> atilde_sparse(m, 0);  // For flip adjustments
+
+  // Create instrumentation manifold
+  instrumentation_manifold_t manifold;
+  manifold.add("delta_y", delta_y);
+  manifold.add("delta_z", delta_z);
+  manifold.add("delta_x", delta_x);
+  manifold.add("delta_x_flip", delta_x_flip);
+  manifold.add("atilde", atilde);
+  manifold.add("atilde_mark", atilde_mark);
+  manifold.add("atilde_index", atilde_index);
+  manifold.add("nonbasic_mark", nonbasic_mark);
+  manifold.add("basic_mark", basic_mark);
+  manifold.add("delta_z_mark", delta_z_mark);
+  manifold.add("delta_z_indices", delta_z_indices);
+  manifold.add("v", v);
+  manifold.add("squared_infeasibilities", squared_infeasibilities);
+  manifold.add("infeasibility_indices", infeasibility_indices);
+  manifold.add("bounded_variables", bounded_variables);
+
+  // Add sparse vector internal arrays to manifold
+  manifold.add("delta_y_sparse.i", delta_y_sparse.i);
+  manifold.add("delta_y_sparse.x", delta_y_sparse.x);
+  manifold.add("UTsol_sparse.i", UTsol_sparse.i);
+  manifold.add("UTsol_sparse.x", UTsol_sparse.x);
+  manifold.add("delta_xB_0_sparse.i", delta_xB_0_sparse.i);
+  manifold.add("delta_xB_0_sparse.x", delta_xB_0_sparse.x);
+  manifold.add("utilde_sparse.i", utilde_sparse.i);
+  manifold.add("utilde_sparse.x", utilde_sparse.x);
+  manifold.add("scaled_delta_xB_sparse.i", scaled_delta_xB_sparse.i);
+  manifold.add("scaled_delta_xB_sparse.x", scaled_delta_xB_sparse.x);
+  manifold.add("rhs_sparse.i", rhs_sparse.i);
+  manifold.add("rhs_sparse.x", rhs_sparse.x);
+  manifold.add("v_sparse.i", v_sparse.i);
+  manifold.add("v_sparse.x", v_sparse.x);
+  manifold.add("atilde_sparse.i", atilde_sparse.i);
+  manifold.add("atilde_sparse.x", atilde_sparse.x);
+
+  // Note: Features are logged inline with DS_FEATURES: prefix
 
   while (iter < iter_limit) {
     // Pricing
@@ -2428,8 +2494,8 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     // BTran
     // BT*delta_y = -delta_zB = -sigma*ei
     timers.start_timer();
-    sparse_vector_t<i_t, f_t> delta_y_sparse(m, 0);
-    sparse_vector_t<i_t, f_t> UTsol_sparse(m, 0);
+    delta_y_sparse.clear();
+    UTsol_sparse.clear();
     {
       raft::common::nvtx::range scope_btran("DualSimplex::btran");
       phase2::compute_delta_y(ft, basic_leaving_index, direction, delta_y_sparse, UTsol_sparse);
@@ -2458,8 +2524,8 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     for (i_t k = 0; k < nz_delta_y; k++) {
       if (std::abs(delta_y_sparse.x[k]) > 1e-12) { delta_y_nz0++; }
     }
-    const f_t delta_y_nz_percentage = delta_y_nz0 / static_cast<f_t>(m) * 100.0;
-    const bool use_transpose        = delta_y_nz_percentage <= 30.0;
+    delta_y_nz_percentage    = delta_y_nz0 / static_cast<f_t>(m) * 100.0;
+    const bool use_transpose = delta_y_nz_percentage <= 30.0;
     if (use_transpose) {
       sparse_delta_z++;
       phase2::compute_delta_z(A_transpose,
@@ -2473,7 +2539,7 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     } else {
       dense_delta_z++;
       // delta_zB = sigma*ei
-      delta_y_sparse.to_dense(delta_y);
+      delta_y_sparse.to_dense(delta_y.array);
       phase2::compute_reduced_cost_update(lp,
                                           basic_list,
                                           nonbasic_list,
@@ -2720,8 +2786,9 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
                                                 atilde_index);
 
     timers.flip_time += timers.stop_timer();
+    total_bound_flips += num_flipped;
 
-    sparse_vector_t<i_t, f_t> delta_xB_0_sparse(m, 0);
+    delta_xB_0_sparse.clear();
     if (num_flipped > 0) {
       timers.start_timer();
       phase2::adjust_for_flips(ft,
@@ -2730,6 +2797,7 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
                                atilde_index,
                                atilde,
                                atilde_mark,
+                               atilde_sparse,
                                delta_xB_0_sparse,
                                delta_x_flip,
                                x);
@@ -2737,9 +2805,9 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     }
 
     timers.start_timer();
-    sparse_vector_t<i_t, f_t> utilde_sparse(m, 0);
-    sparse_vector_t<i_t, f_t> scaled_delta_xB_sparse(m, 0);
-    sparse_vector_t<i_t, f_t> rhs_sparse(lp.A, entering_index);
+    utilde_sparse.clear();
+    scaled_delta_xB_sparse.clear();
+    rhs_sparse.from_csc_column(lp.A, entering_index);
     {
       raft::common::nvtx::range scope_ftran("DualSimplex::ftran");
       if (phase2::compute_delta_x(lp,
@@ -2780,6 +2848,7 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
                                                                         basic_leaving_index,
                                                                         entering_index,
                                                                         v,
+                                                                        v_sparse,
                                                                         delta_y_steepest_edge);
 #ifdef STEEPEST_EDGE_DEBUG
     if (steepest_edge_status == -1) {
@@ -2901,6 +2970,7 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
 #endif
       if (should_refactor) {
         raft::common::nvtx::range scope_refactor("DualSimplex::refactorization");
+        num_refactors++;
         bool should_recompute_x = false;
         if (ft.refactor_basis(lp.A, settings, basic_list, nonbasic_list, vstatus) > 0) {
           should_recompute_x = true;
@@ -2962,6 +3032,28 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     phase2::clear_delta_z(entering_index, leaving_index, delta_z_mark, delta_z_indices, delta_z);
 
     f_t now = toc(start_time);
+
+    // Feature logging for regression training (every FEATURE_LOG_INTERVAL iterations)
+    if ((iter % FEATURE_LOG_INTERVAL) == 0) {
+      // Collect aggregated memory access statistics
+      auto [total_loads, total_stores] = manifold.collect_and_flush();
+      features.byte_loads              = total_loads;
+      features.byte_stores             = total_stores;
+
+      // Update dynamic features
+      features.iteration             = iter;
+      features.num_refactors         = num_refactors;
+      features.num_basis_updates     = ft.num_updates();
+      features.sparse_delta_z_count  = sparse_delta_z;
+      features.dense_delta_z_count   = dense_delta_z;
+      features.total_bound_flips     = total_bound_flips;
+      features.num_infeasibilities   = infeasibility_indices.size();
+      features.delta_y_nz_percentage = delta_y_nz_percentage;
+
+      // Log all features on a single line
+      features.log_features(settings);
+    }
+
     if ((iter - start_iter) < settings.first_iteration_log ||
         (iter % settings.iteration_log_frequency) == 0) {
       if (phase == 1 && iter == 1) {
