@@ -7,8 +7,6 @@
 
 #pragma once
 
-#include <cuopt/logger.hpp>
-
 #include <cstdint>
 #include <cstdio>
 #include <limits>
@@ -190,7 +188,7 @@ struct pdlp_features_t {
                                                           (interval_time_ms / 1000.0)
                                                       : 0.0;
 
-    CUOPT_LOG_INFO(
+    printf(
       "PDLP_RESULT: n_vars=%d n_cstrs=%d nnz=%ld sparsity=%.6e nnz_stddev=%.4f "
       "unbalancedness=%.4f interval_iters=%d interval_major=%d interval_restarts=%d "
       "spmv_ops=%ld total_iters=%d total_restarts=%d iters_since_restart=%d "
