@@ -8,4 +8,5 @@
 
 namespace cuopt {
 void print_version_info();
-}
+double get_cpu_max_clock_mhz();
+}  // namespace cuopt

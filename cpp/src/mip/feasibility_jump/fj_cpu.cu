@@ -1706,9 +1706,10 @@ bool fj_t<i_t, f_t>::cpu_solve(fj_cpu_climber_t<i_t, f_t>& fj_cpu, f_t in_time_l
       float time_prediction        = std::max(
         (f_t)0.0,
         (f_t)ceil(context.work_unit_predictors.cpufj_predictor.predict_scalar(features_map)));
-      CUOPT_LOG_DEBUG("FJ determ: Estimated time for 1000 iters: %f, error %f",
-                      time_prediction,
-                      time_prediction - time_window_ms);
+      // CUOPT_LOG_DEBUG("FJ determ: Estimated time for 1000 iters: %f, actual time: %f, error %f",
+      //                 time_prediction,
+      //                 time_window_ms,
+      //                 time_prediction - time_window_ms);
     }
 
     cuopt_func_call(sanity_checks(fj_cpu));

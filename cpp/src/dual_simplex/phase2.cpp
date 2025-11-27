@@ -17,12 +17,18 @@
 #include <dual_simplex/sparse_matrix.hpp>
 #include <dual_simplex/tic_toc.hpp>
 
+#include <utilities/models/dualsimplex_predictor/header.h>
+#include <utilities/work_unit_predictor.hpp>
+
+#include <utilities/version_info.hpp>
+
 #include <raft/common/nvtx.hpp>
 
 #include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <ctime>
+#include <map>
 
 namespace cuopt::linear_programming::dual_simplex {
 
@@ -2237,6 +2243,8 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
 
   dual::status_t status = dual::status_t::UNSET;
 
+  raft::common::nvtx::push_range("DualSimplex::phase2_advanced_init");
+
   // Perturbed objective
   std::vector<f_t> objective = lp.objective;
 
@@ -2381,7 +2389,10 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
   csc_matrix_t<i_t, f_t> A_transpose(1, 1, 0);
   lp.A.transpose(A_transpose);
 
-  f_t obj              = compute_objective(lp, x);
+  f_t obj = compute_objective(lp, x);
+
+  raft::common::nvtx::pop_range();
+
   const i_t start_iter = iter;
 
   i_t sparse_delta_z        = 0;
@@ -2453,6 +2464,7 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
   // Note: Features are logged inline with DS_FEATURES: prefix
 
   while (iter < iter_limit) {
+    raft::common::nvtx::range scope_main("DualSimplex::phase2_main_loop");
     // Pricing
     i_t direction           = 0;
     i_t basic_leaving_index = -1;
@@ -2534,29 +2546,32 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     }
     delta_y_nz_percentage    = delta_y_nz0 / static_cast<f_t>(m) * 100.0;
     const bool use_transpose = delta_y_nz_percentage <= 30.0;
-    if (use_transpose) {
-      sparse_delta_z++;
-      phase2::compute_delta_z(A_transpose,
-                              delta_y_sparse,
-                              leaving_index,
-                              direction,
-                              nonbasic_mark,
-                              delta_z_mark,
-                              delta_z_indices,
-                              delta_z);
-    } else {
-      dense_delta_z++;
-      // delta_zB = sigma*ei
-      delta_y_sparse.to_dense(delta_y);
-      phase2::compute_reduced_cost_update(lp,
-                                          basic_list,
-                                          nonbasic_list,
-                                          delta_y,
-                                          leaving_index,
-                                          direction,
-                                          delta_z_mark,
-                                          delta_z_indices,
-                                          delta_z);
+    {
+      raft::common::nvtx::range scope_compute_delta_z("DualSimplex::delta_z");
+      if (use_transpose) {
+        sparse_delta_z++;
+        phase2::compute_delta_z(A_transpose,
+                                delta_y_sparse,
+                                leaving_index,
+                                direction,
+                                nonbasic_mark,
+                                delta_z_mark,
+                                delta_z_indices,
+                                delta_z);
+      } else {
+        dense_delta_z++;
+        // delta_zB = sigma*ei
+        delta_y_sparse.to_dense(delta_y);
+        phase2::compute_reduced_cost_update(lp,
+                                            basic_list,
+                                            nonbasic_list,
+                                            delta_y,
+                                            leaving_index,
+                                            direction,
+                                            delta_z_mark,
+                                            delta_z_indices,
+                                            delta_z);
+      }
     }
     timers.delta_z_time += timers.stop_timer();
 
@@ -3064,6 +3079,43 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
 
       // Log all features on a single line
       features.log_features(settings);
+
+      // Populate features map for predictor
+      cuopt::work_unit_predictor_t<dualsimplex_predictor> dualsimplex_predictor{};
+      std::map<std::string, float> features_map;
+      features_map["m"]           = static_cast<float>(features.num_rows);
+      features_map["n"]           = static_cast<float>(features.num_cols);
+      features_map["nnz"]         = static_cast<float>(features.num_nonzeros);
+      features_map["density"]     = static_cast<float>(features.matrix_density);
+      features_map["avg_nnz_col"] = static_cast<float>(features.avg_nnz_per_col);
+      features_map["avg_nnz_row"] = static_cast<float>(features.avg_nnz_per_row);
+      features_map["bounded"]     = static_cast<float>(features.num_bounded_vars);
+      features_map["free"]        = static_cast<float>(features.num_free_vars);
+      features_map["refact_freq"] = static_cast<float>(features.refactor_frequency);
+      features_map["num_refacts"] = static_cast<float>(features.num_refactors);
+      features_map["num_updates"] = static_cast<float>(features.num_basis_updates);
+      features_map["sparse_dz"]   = static_cast<float>(features.sparse_delta_z_count);
+      features_map["dense_dz"]    = static_cast<float>(features.dense_delta_z_count);
+      features_map["bound_flips"] = static_cast<float>(features.total_bound_flips);
+      features_map["num_infeas"]  = static_cast<float>(features.num_infeasibilities);
+      features_map["dy_nz_pct"]   = static_cast<float>(features.delta_y_nz_percentage);
+      features_map["byte_loads"]  = static_cast<float>(features.byte_loads);
+      features_map["byte_stores"] = static_cast<float>(features.byte_stores);
+      auto time_prediction =
+        std::max((f_t)0.0, (f_t)dualsimplex_predictor.predict_scalar(features_map));
+      f_t baseline_max_clock       = 3800;  // 3.8Ghz
+      f_t max_clock                = cuopt::get_cpu_max_clock_mhz();
+      f_t scaling_factor           = baseline_max_clock / max_clock;
+      f_t adjusted_time_prediction = time_prediction * scaling_factor;
+      printf(
+        "DualSimplex determ: Estimated time for %d iters: %f, actual time: %f, error %f, CPU max "
+        "clock: %f MHz, scaling factor: %f\n",
+        FEATURE_LOG_INTERVAL,
+        adjusted_time_prediction,
+        features.interval_runtime,
+        adjusted_time_prediction - features.interval_runtime,
+        max_clock,
+        scaling_factor);
     }
 
     if ((iter - start_iter) < settings.first_iteration_log ||
@@ -3106,6 +3158,8 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
       ft.print_stats();
     }
   }
+
+  printf("Iterations: %d, time taken: %f\n", iter, toc(start_time));
   return status;
 }
 

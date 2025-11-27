@@ -818,7 +818,7 @@ optimization_problem_solution_t<i_t, f_t> solve_lp(optimization_problem_t<i_t, f
     auto lp_timer = cuopt::timer_t(settings.time_limit);
     detail::problem_t<i_t, f_t> problem(op_problem);
 
-    double presolve_time = 0.0;
+    [[maybe_unused]] double presolve_time = 0.0;
     std::unique_ptr<detail::third_party_presolve_t<i_t, f_t>> presolver;
     auto run_presolve = settings.presolve;
     run_presolve = run_presolve && settings.get_pdlp_warm_start_data().total_pdlp_iterations_ == -1;

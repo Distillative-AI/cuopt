@@ -11,7 +11,11 @@ set(UTIL_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/utilities/seed_generator.cu
                    ${CMAKE_CURRENT_SOURCE_DIR}/utilities/models/fj_predictor/main.cpp
                    ${CMAKE_CURRENT_SOURCE_DIR}/utilities/models/fj_predictor/quantize.cpp
                    ${CMAKE_CURRENT_SOURCE_DIR}/utilities/models/cpufj_predictor/main.cpp
-                   ${CMAKE_CURRENT_SOURCE_DIR}/utilities/models/cpufj_predictor/quantize.cpp)
+                   ${CMAKE_CURRENT_SOURCE_DIR}/utilities/models/cpufj_predictor/quantize.cpp
+                   ${CMAKE_CURRENT_SOURCE_DIR}/utilities/models/dualsimplex_predictor/main.cpp
+                   ${CMAKE_CURRENT_SOURCE_DIR}/utilities/models/dualsimplex_predictor/quantize.cpp
+                   ${CMAKE_CURRENT_SOURCE_DIR}/utilities/models/pdlp_predictor/main.cpp
+                   ${CMAKE_CURRENT_SOURCE_DIR}/utilities/models/pdlp_predictor/quantize.cpp)
 
 add_subdirectory(linear_programming)
 add_subdirectory(math_optimization)

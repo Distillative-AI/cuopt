@@ -163,6 +163,36 @@ static double get_available_memory_gb()
   return kb / (1024.0 * 1024.0);  // Convert KB to GB
 }
 
+double get_cpu_max_clock_mhz()
+{
+  // Try sysfs cpufreq interface first (returns frequency in KHz)
+  // FIXME: assumes all available CPUs have the same max clock as CPU0
+  std::ifstream freq_file("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq");
+  if (freq_file.is_open()) {
+    long khz = 0;
+    freq_file >> khz;
+    if (khz > 0) { return khz / 1e3; }
+  }
+
+  // Fallback: parse /proc/cpuinfo for "cpu MHz"
+  std::ifstream cpuinfo("/proc/cpuinfo");
+  if (!cpuinfo.is_open()) return 0.0;
+
+  std::string line;
+  double max_mhz = 0.0;
+  while (std::getline(cpuinfo, line)) {
+    if (line.find("cpu MHz") != std::string::npos) {
+      std::size_t colon = line.find(':');
+      if (colon != std::string::npos) {
+        double mhz = std::stod(line.substr(colon + 1));
+        if (mhz > max_mhz) { max_mhz = mhz; }
+      }
+    }
+  }
+
+  return max_mhz;
+}
+
 void print_version_info()
 {
   int device_id = 0;

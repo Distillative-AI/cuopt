@@ -22,10 +22,13 @@
 #include <cstring>
 #include <limits>
 #include <mip/logger.hpp>
+#include <raft/common/nvtx.hpp>
 #include <stdexcept>
 
 #include "models/cpufj_predictor/header.h"
+#include "models/dualsimplex_predictor/header.h"
 #include "models/fj_predictor/header.h"
+#include "models/pdlp_predictor/header.h"
 
 namespace cuopt {
 
@@ -48,6 +51,8 @@ template <typename model_t>
 float work_unit_predictor_t<model_t>::predict_scalar(
   const std::map<std::string, float>& features) const
 {
+  raft::common::nvtx::range range("work_unit_predictor_t::predict_scalar");
+
   typename model_t::Entry data[model_t::NUM_FEATURES];
   for (int i = 0; i < model_t::NUM_FEATURES; ++i) {
     if (features.find(std::string(model_t::feature_names[i])) == features.end()) {
@@ -78,10 +83,12 @@ float work_unit_predictor_t<model_t>::predict_scalar(
   std::chrono::duration<double, std::milli> elapsed = end - start;
   CUOPT_LOG_DEBUG("Prediction time: %f ms", elapsed.count());
   CUOPT_LOG_DEBUG("Result: %f", result);
-  return std::abs(result);
+  return result;
 }
 
 template class work_unit_predictor_t<fj_predictor>;
 template class work_unit_predictor_t<cpufj_predictor>;
+template class work_unit_predictor_t<dualsimplex_predictor>;
+template class work_unit_predictor_t<pdlp_predictor>;
 
 }  // namespace cuopt

@@ -112,7 +112,7 @@ struct dual_simplex_features_t {
    */
   void log_features(const simplex_solver_settings_t<i_t, f_t>& settings) const
   {
-    settings.log.printf(
+    printf(
       "DS_FEATURES: iter=%d m=%d n=%d nnz=%d density=%.6e avg_nnz_col=%.2f avg_nnz_row=%.2f "
       "bounded=%d free=%d fixed=%d phase=%d refact_freq=%d num_refacts=%d num_updates=%d "
       "sparse_dz=%d dense_dz=%d bound_flips=%d num_infeas=%d dy_nz_pct=%.2f "
