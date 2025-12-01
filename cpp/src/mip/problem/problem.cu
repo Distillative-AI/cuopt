@@ -100,11 +100,13 @@ void problem_t<i_t, f_t>::op_problem_cstr_body(const optimization_problem_t<i_t,
 template <typename i_t, typename f_t>
 problem_t<i_t, f_t>::problem_t(
   const optimization_problem_t<i_t, f_t>& problem_,
-  const typename mip_solver_settings_t<i_t, f_t>::tolerances_t tolerances_)
+  const typename mip_solver_settings_t<i_t, f_t>::tolerances_t tolerances_,
+  bool deterministic_)
   : original_problem_ptr(&problem_),
     handle_ptr(problem_.get_handle_ptr()),
     integer_fixed_variable_map(problem_.get_n_variables(), problem_.get_handle_ptr()->get_stream()),
     tolerances(tolerances_),
+    deterministic(deterministic_),
     n_variables(problem_.get_n_variables()),
     n_constraints(problem_.get_n_constraints()),
     n_binary_vars(0),
@@ -148,6 +150,7 @@ template <typename i_t, typename f_t>
 problem_t<i_t, f_t>::problem_t(const problem_t<i_t, f_t>& problem_)
   : original_problem_ptr(problem_.original_problem_ptr),
     tolerances(problem_.tolerances),
+    deterministic(problem_.deterministic),
     handle_ptr(problem_.handle_ptr),
     integer_fixed_problem(problem_.integer_fixed_problem),
     integer_fixed_variable_map(problem_.integer_fixed_variable_map, handle_ptr->get_stream()),
@@ -198,6 +201,7 @@ template <typename i_t, typename f_t>
 problem_t<i_t, f_t>::problem_t(const problem_t<i_t, f_t>& problem_, bool no_deep_copy)
   : original_problem_ptr(problem_.original_problem_ptr),
     tolerances(problem_.tolerances),
+    deterministic(problem_.deterministic),
     handle_ptr(problem_.handle_ptr),
     integer_fixed_problem(problem_.integer_fixed_problem),
     integer_fixed_variable_map(problem_.n_variables, handle_ptr->get_stream()),
@@ -859,6 +863,9 @@ void problem_t<i_t, f_t>::compute_related_variables(double time_limit)
 
   handle_ptr->sync_stream();
 
+  // CHANGE
+  if (deterministic) { time_limit = std::numeric_limits<f_t>::infinity(); }
+
   // previously used constants were based on 40GB of memory. Scale accordingly on smaller GPUs
   // We can't rely on querying free memory or allocation try/catch
   // since this would break determinism guarantees (GPU may be shared by other processes)
@@ -885,7 +892,7 @@ void problem_t<i_t, f_t>::compute_related_variables(double time_limit)
 
   i_t output_offset      = 0;
   i_t related_var_offset = 0;
-  // auto start_time        = std::chrono::high_resolution_clock::now();
+  auto start_time        = std::chrono::high_resolution_clock::now();
   for (i_t i = 0;; ++i) {
     i_t slice_size = std::min(max_slice_size, n_variables - i * max_slice_size);
     if (slice_size <= 0) break;
@@ -914,13 +921,12 @@ void problem_t<i_t, f_t>::compute_related_variables(double time_limit)
     i_t related_var_base = related_variables.size();
     related_variables.resize(related_variables.size() + array_size, handle_ptr->get_stream());
 
-    // auto current_time = std::chrono::high_resolution_clock::now();
+    auto current_time = std::chrono::high_resolution_clock::now();
     // if the related variable array would wind up being too large for available memory, abort
     // TODO this used to be 1e9
-    if (related_variables.size() > 1e9 * size_factor) {
-      //  ||
-      //     std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count() >
-      //       time_limit) {
+    if (related_variables.size() > 1e9 * size_factor ||
+        std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count() >
+          time_limit) {
       CUOPT_LOG_DEBUG(
         "Computing the related variable array would use too much memory or time, aborting\n");
       related_variables.resize(0, handle_ptr->get_stream());
@@ -1288,13 +1294,8 @@ problem_t<i_t, f_t> problem_t<i_t, f_t>::get_problem_after_fixing_vars(
   //   total_time_taken);
   // if the fixing is greater than 150, mark this as expensive.
   // this way we can avoid frequent fixings for this problem
-
-  // TODO: CHANGE
-  // constexpr double expensive_time_threshold = 150;
-  // if (time_taken > expensive_time_threshold) { expensive_to_fix_vars = true; }
-  CUOPT_LOG_DEBUG("Model fingerprint after fixing: 0x%x, expensive? %d",
-                  problem.get_fingerprint(),
-                  expensive_to_fix_vars);
+  constexpr double expensive_time_threshold = 150;
+  if (time_taken > expensive_time_threshold && !deterministic) { expensive_to_fix_vars = true; }
   return problem;
 }
 

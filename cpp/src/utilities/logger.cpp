@@ -81,6 +81,7 @@ rapids_logger::sink_ptr default_sink()
  * @return std::string The default log pattern.
  */
 inline std::string default_pattern() { return "[%Y-%m-%d %H:%M:%S:%f] [%n] [%-6l] %v"; }
+
 /**
  * @brief Returns the default log level for the global logger.
  *

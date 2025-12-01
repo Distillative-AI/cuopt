@@ -651,19 +651,15 @@ void fj_t<i_t, f_t>::run_step_device(const rmm::cuda_stream_view& climber_stream
   auto [grid_setval, blocks_setval] = setval_launch_dims;
   auto [grid_update_changed_constraints, blocks_update_changed_constraints] =
     update_changed_constraints_launch_dims;
-  auto [grid_resetmoves, blocks_resetmoves]         = resetmoves_launch_dims;
-  auto [grid_resetmoves_bin, blocks_resetmoves_bin] = resetmoves_bin_launch_dims;
-  auto [grid_update_weights, blocks_update_weights] = update_weights_launch_dims;
-  auto [grid_lift_move, blocks_lift_move]           = lift_move_launch_dims;
-
-  // use_graph = false;
+  auto [grid_resetmoves, blocks_resetmoves]                          = resetmoves_launch_dims;
+  auto [grid_resetmoves_bin, blocks_resetmoves_bin]                  = resetmoves_bin_launch_dims;
+  [[maybe_unused]] auto [grid_update_weights, blocks_update_weights] = update_weights_launch_dims;
+  [[maybe_unused]] auto [grid_lift_move, blocks_lift_move]           = lift_move_launch_dims;
 
   auto& data    = *climbers[climber_idx];
   auto v        = data.view();
   settings.seed = cuopt::seed_generator::get_seed();
-  // settings.iteration_limit = 10000;
-  // CUOPT_LOG_DEBUG("FJ: settings seed %d", settings.seed);
-  //  ensure an updated copy of the settings is used device-side
+  // ensure an updated copy of the settings is used device-side
   raft::copy(v.settings, &settings, 1, climber_stream);
 
   bool is_binary_pb = pb_ptr->n_variables == thrust::count(handle_ptr->get_thrust_policy(),
@@ -788,7 +784,6 @@ void fj_t<i_t, f_t>::run_step_device(const rmm::cuda_stream_view& climber_stream
                        0,
                        climber_stream);
 
-      (void)grid_update_weights;
       cudaLaunchCooperativeKernel((void*)handle_local_minimum_kernel<i_t, f_t>,
                                   grid_update_weights,
                                   blocks_update_weights,
@@ -802,39 +797,12 @@ void fj_t<i_t, f_t>::run_step_device(const rmm::cuda_stream_view& climber_stream
                        update_assignment_args,
                        0,
                        climber_stream);
-
-      // {
-      //   printf("Changed constraints hash: %x, size: %d\n", compute_hash(
-      //     make_span(data.constraints_changed, 0,
-      //     data.constraints_changed_count.value(climber_stream)), climber_stream),
-      //     data.constraints_changed_count.value(climber_stream));
-
-      //   printf("before update: Violated constraints hash: %x, size: %d\n", compute_hash(
-      //     make_span(data.violated_constraints.contents, 0,
-      //     data.violated_constraints.set_size.value(climber_stream)), climber_stream),
-      //     data.violated_constraints.set_size.value(climber_stream));
-      // }
-
       cudaLaunchKernel((void*)update_changed_constraints_kernel<i_t, f_t>,
                        1,
                        blocks_update_changed_constraints,
                        kernel_args,
                        0,
                        climber_stream);
-
-      // TODO: figure out why the ordering of the violated constraints is ruined
-      // data.violated_constraints.sort(climber_stream);
-      // printf("[%d] iter: Violated constraints hash: %x\n", data.iterations.value(climber_stream),
-      // compute_hash(
-      //     make_span(data.violated_constraints.contents, 0,
-      //     data.violated_constraints.set_size.value(climber_stream)), climber_stream));
-
-      // {
-      //   printf("Violated constraints hash: %x, size: %d\n", compute_hash(
-      //     make_span(data.violated_constraints.contents, 0,
-      //     data.violated_constraints.set_size.value(climber_stream)), climber_stream),
-      //     data.violated_constraints.set_size.value(climber_stream));
-      // }
     }
 
     if (use_graph) {
@@ -1315,8 +1283,6 @@ i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution)
                   detail::compute_hash(cstr_left_weights),
                   detail::compute_hash(cstr_right_weights));
 
-  // settings.load_balancing_mode = fj_load_balancing_mode_t::ALWAYS_OFF;
-
   if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
     settings.work_limit = settings.time_limit;
   }
@@ -1456,20 +1422,6 @@ i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution)
   timer.record_work(work_to_record);
 
   CUOPT_LOG_DEBUG("FJ sol hash %x", solution.get_hash());
-
-  // // Print compact feature vector summary
-  // char logbuf[4096];
-  // int offset = 0;
-  // offset += snprintf(logbuf + offset,
-  //                    sizeof(logbuf) - offset,
-  //                    "FJ: iter=%d time=%g",
-  //                    iterations,
-  //                    timer.elapsed_time());
-  // for (const auto& [name, value] : feature_vector) {
-  //   offset += snprintf(logbuf + offset, sizeof(logbuf) - offset, " %s=%g", name.c_str(), value);
-  //   if (offset >= (int)(sizeof(logbuf) - 32)) break;
-  // }
-  // CUOPT_LOG_INFO("%s", logbuf);
 
   return is_new_feasible;
 }

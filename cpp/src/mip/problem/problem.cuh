@@ -48,7 +48,8 @@ template <typename i_t, typename f_t>
 class problem_t {
  public:
   problem_t(const optimization_problem_t<i_t, f_t>& problem,
-            const typename mip_solver_settings_t<i_t, f_t>::tolerances_t tolerances_ = {});
+            const typename mip_solver_settings_t<i_t, f_t>::tolerances_t tolerances_ = {},
+            bool deterministic                                                       = false);
   problem_t() = delete;
   // copy constructor
   problem_t(const problem_t<i_t, f_t>& problem);
@@ -220,6 +221,7 @@ class problem_t {
   bool maximize{false};
   bool is_binary_pb{false};
   bool empty{false};
+  bool deterministic{false};
 
   // Auxiliary problem statistics
   double sparsity{0.0};

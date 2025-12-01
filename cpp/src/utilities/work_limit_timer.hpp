@@ -68,6 +68,8 @@ class work_limit_timer_t {
                    const char* file   = __builtin_FILE(),
                    int line           = __builtin_LINE()) const noexcept
   {
+    // TODO check against global timer
+
     if (deterministic) {
       if (!work_context) { return false; }
       // Check if global work has exceeded our budget (snapshot + limit)

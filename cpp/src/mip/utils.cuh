@@ -265,9 +265,6 @@ f_t compute_objective_from_vec(const rmm::device_uvector<f_t>& assignment,
                                            assignment.end(),
                                            objective_coefficients.begin(),
                                            0.);
-  // CUOPT_LOG_DEBUG("compute_objective_from_vec: input %x coefs %x obj %x",
-  // detail::compute_hash(assignment), detail::compute_hash(objective_coefficients),
-  // detail::compute_hash(computed_obj));
   return computed_obj;
 }
 

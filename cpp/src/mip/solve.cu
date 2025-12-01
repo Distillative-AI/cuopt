@@ -37,7 +37,6 @@
 #include <raft/core/handle.hpp>
 
 #include <cuda_profiler_api.h>
-#include <papi.h>
 
 namespace cuopt::linear_programming {
 
@@ -140,6 +139,9 @@ mip_solution_t<i_t, f_t> run_mip(detail::problem_t<i_t, f_t>& problem,
 
   auto sol = scaled_sol.get_solution(
     is_feasible_before_scaling || is_feasible_after_unscaling, solver.get_solver_stats(), false);
+
+  // TODO: RESTORE THIS
+
   // detail::print_solution(scaled_problem.handle_ptr, sol.get_solution());
   return sol;
 }
@@ -161,15 +163,6 @@ mip_solution_t<i_t, f_t> solve_mip(optimization_problem_t<i_t, f_t>& op_problem,
     // Init libraies before to not include it in solve time
     // This needs to be called before pdlp is initialized
     init_handler(op_problem.get_handle_ptr());
-
-    auto retval = PAPI_library_init(PAPI_VER_CURRENT);
-    if (retval != PAPI_VER_CURRENT && retval > 0) {
-      fprintf(stderr, "PAPI library version mismatch!\n");
-      exit(1);
-    } else if (retval < 0) {
-      fprintf(stderr, "PAPI initialization error!\n");
-      exit(1);
-    }
 
     print_version_info();
 
@@ -198,7 +191,8 @@ mip_solution_t<i_t, f_t> solve_mip(optimization_problem_t<i_t, f_t>& op_problem,
 
     double presolve_time = 0.0;
     std::unique_ptr<detail::third_party_presolve_t<i_t, f_t>> presolver;
-    detail::problem_t<i_t, f_t> problem(op_problem, settings.get_tolerances());
+    detail::problem_t<i_t, f_t> problem(
+      op_problem, settings.get_tolerances(), settings.determinism_mode == CUOPT_MODE_DETERMINISTIC);
 
     auto run_presolve = settings.presolve;
     run_presolve      = run_presolve && settings.get_mip_callbacks().empty();
@@ -211,9 +205,9 @@ mip_solution_t<i_t, f_t> solve_mip(optimization_problem_t<i_t, f_t>& op_problem,
       // allocate not more than 10% of the time limit to presolve.
       // Note that this is not the presolve time, but the time limit for presolve.
       double presolve_time_limit = std::min(0.1 * time_limit, 60.0);
-
-      // TODO FIX
-      presolve_time_limit       = std::numeric_limits<double>::infinity();
+      if (settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
+        presolve_time_limit = std::numeric_limits<double>::infinity();
+      }
       const bool dual_postsolve = false;
       presolver                 = std::make_unique<detail::third_party_presolve_t<i_t, f_t>>();
       auto result               = presolver->apply(op_problem,

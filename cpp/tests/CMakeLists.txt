@@ -30,10 +30,6 @@ endif()
 
 set(CUOPT_TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
-if (NOT TARGET CUDA::toolkit)
-  find_package(CUDAToolkit REQUIRED)
-endif()
-
 if (EXISTS "${CUDAToolkit_LIBRARY_ROOT}/extras/CUPTI/lib64")
   # NVIDIA installer layout:
   set(cuopt_cupti_root "${CUDAToolkit_LIBRARY_ROOT}/extras/CUPTI")

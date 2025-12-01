@@ -137,7 +137,7 @@ bool feasibility_pump_t<i_t, f_t>::linear_project_onto_polytope(solution_t<i_t, 
                                                                 bool longer_lp_run)
 {
   raft::common::nvtx::range fun_scope("linear_project_onto_polytope");
-  // CUOPT_LOG_DEBUG("linear projection of fp");
+  CUOPT_LOG_DEBUG("linear projection of fp");
   auto h_assignment = solution.get_host_assignment();
   auto h_variable_bounds =
     cuopt::host_copy(solution.problem_ptr->variable_bounds, solution.handle_ptr->get_stream());
@@ -151,10 +151,6 @@ bool feasibility_pump_t<i_t, f_t>::linear_project_onto_polytope(solution_t<i_t, 
   auto h_integer_indices =
     cuopt::host_copy(solution.problem_ptr->integer_indices, solution.handle_ptr->get_stream());
   f_t obj_offset = 0;
-  // CUOPT_LOG_DEBUG("FP: h_integer_indices hash 0x%x", detail::compute_hash(h_integer_indices));
-  // CUOPT_LOG_DEBUG("FP: h_assignment hash 0x%x", detail::compute_hash(h_assignment));
-  // CUOPT_LOG_DEBUG("FP: h_variable_bounds hash 0x%x", detail::compute_hash(h_variable_bounds));
-  // CUOPT_LOG_DEBUG("FP: h_last_projection hash 0x%x", detail::compute_hash(h_last_projection));
   // for each integer add the variable and the distance constraints
   for (auto i : h_integer_indices) {
     auto h_var_bounds = h_variable_bounds[i];
@@ -192,8 +188,7 @@ bool feasibility_pump_t<i_t, f_t>::linear_project_onto_polytope(solution_t<i_t, 
         constr_indices, constr_coeffs_2, h_assignment[i], (f_t)default_cont_upper);
     }
   }
-  // CUOPT_LOG_DEBUG("FP: before adjust h_assignment hash 0x%x",
-  // detail::compute_hash(h_assignment));
+
   adjust_objective_with_original(solution, obj_coefficients, longer_lp_run);
   // commit all the changes that were done by the host
   if (h_variables.size() > 0) { temp_p.insert_variables(h_variables); }
@@ -229,8 +224,6 @@ bool feasibility_pump_t<i_t, f_t>::linear_project_onto_polytope(solution_t<i_t, 
   lp_settings.check_infeasibility = false;
 
   // CHANGE
-  // CUOPT_LOG_DEBUG("FP: lp_time_limit %f", lp_settings.time_limit);
-  // CUOPT_LOG_DEBUG("FP: linproj sol hash 0x%x", solution.get_hash());
   if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
     lp_settings.time_limit = std::numeric_limits<double>::infinity();
     lp_settings.work_limit = time_limit;
@@ -343,7 +336,6 @@ bool feasibility_pump_t<i_t, f_t>::test_fj_feasible(solution_t<i_t, f_t>& soluti
   } else {
     CUOPT_LOG_DEBUG("20%% FJ run found feasible!");
   }
-  timer.record_work(fj.settings.work_limit);
   CUOPT_LOG_DEBUG("20%% FJ run finished, elapsed %fs remaining %fwu",
                   fj.settings.time_limit,
                   timer.remaining_time());
@@ -636,11 +628,6 @@ bool feasibility_pump_t<i_t, f_t>::run_single_fp_descent(solution_t<i_t, f_t>& s
         n_integers  = solution.compute_number_of_integers();
         if (is_feasible && n_integers == solution.problem_ptr->n_integer_vars) {
           CUOPT_LOG_DEBUG("Feasible solution verified with LP!");
-          f_t time_taken = start_time - timer.remaining_time();
-          // CUOPT_LOG_INFO(
-          //   "FP_RESULT: iterations=%d time_taken=%.6f termination=FEASIBLE_LP_VERIFIED",
-          //   fp_iterations,
-          //   time_taken);
           return true;
         }
       }
@@ -655,20 +642,11 @@ bool feasibility_pump_t<i_t, f_t>::run_single_fp_descent(solution_t<i_t, f_t>& s
     }
     if (timer.check_time_limit()) {
       CUOPT_LOG_DEBUG("FP time limit reached!");
-      f_t time_taken = start_time - timer.remaining_time();
-      // CUOPT_LOG_INFO("FP_RESULT: iterations=%d time_taken=%.6f
-      // termination=TIME_LIMIT_AFTER_ROUND",
-      //                fp_iterations,
-      //                time_taken);
       return false;
     }
     if (is_feasible) {
       bool res = solution.compute_feasibility();
       cuopt_assert(res, "Feasibility issue");
-      f_t time_taken = start_time - timer.remaining_time();
-      // CUOPT_LOG_INFO("FP_RESULT: iterations=%d time_taken=%.6f termination=FEASIBLE_AFTER_ROUND",
-      //                fp_iterations,
-      //                time_taken);
       return true;
     }
     // do the cycle check if alpha diff is small enough
@@ -686,10 +664,6 @@ bool feasibility_pump_t<i_t, f_t>::run_single_fp_descent(solution_t<i_t, f_t>& s
         remaining_time_end_fp,
         fp_fj_cycle_time_begin,
         total_fp_time_until_cycle);
-      f_t time_taken = start_time - timer.remaining_time();
-      // CUOPT_LOG_INFO("FP_RESULT: iterations=%d time_taken=%.6f termination=ASSIGNMENT_CYCLE",
-      //                fp_iterations,
-      //                time_taken);
       return false;
     }
     cycle_queue.n_iterations_without_cycle++;

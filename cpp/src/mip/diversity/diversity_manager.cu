@@ -427,23 +427,6 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
     clamp_within_var_bounds(lp_optimal_solution, problem_ptr, problem_ptr->handle_ptr);
   }
 
-  // Run this 100 times with varying iteration limits
-  // for (int i = 0; i < 100; i++) {
-  //   relaxed_lp_settings_t lp_settings;
-  //   lp_settings.time_limit            = lp_time_limit;
-  //   lp_settings.tolerance             = context.settings.tolerances.absolute_tolerance;
-  //   lp_settings.return_first_feasible = false;
-  //   lp_settings.save_state            = true;
-  //   lp_settings.concurrent_halt       = &global_concurrent_halt;
-  //   lp_settings.has_initial_primal    = false;
-  //   lp_settings.iteration_limit       = 100 + i * 100;
-  //   rmm::device_uvector<f_t> lp_optimal_solution_copy(lp_optimal_solution.size(),
-  //                                                     problem_ptr->handle_ptr->get_stream());
-  //   auto lp_result =
-  //     get_relaxed_lp_solution(*problem_ptr, lp_optimal_solution_copy, lp_state, lp_settings);
-  // }
-  // exit(0);
-
   if (ls.lp_optimal_exists) {
     solution_t<i_t, f_t> lp_rounded_sol(*problem_ptr);
     lp_rounded_sol.copy_new_assignment(lp_optimal_solution);
@@ -473,7 +456,6 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
   if (context.settings.determinism_mode == CUOPT_MODE_OPPORTUNISTIC) { rins.enable(); }
 
   generate_solution(timer.remaining_time(), false);
-  printf("=======================================================\n");
   if (diversity_config.initial_solution_only) { return population.best_feasible(); }
   if (work_limit_reached()) {
     population.add_external_solutions_to_population();

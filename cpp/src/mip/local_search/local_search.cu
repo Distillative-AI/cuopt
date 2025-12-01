@@ -63,10 +63,6 @@ void local_search_t<i_t, f_t>::start_cpufj_scratch_threads(population_t<i_t, f_t
 
   std::vector<f_t> default_weights(context.problem_ptr->n_constraints, 1.);
 
-  fj_settings_t cpu_fj_settings{};
-  cpu_fj_settings.time_limit      = std::numeric_limits<f_t>::infinity();
-  cpu_fj_settings.iteration_limit = 10000;  // would like 10 samples per instance
-
   solution_t<i_t, f_t> solution(*context.problem_ptr);
   thrust::fill(solution.handle_ptr->get_thrust_policy(),
                solution.assignment.begin(),
@@ -80,24 +76,22 @@ void local_search_t<i_t, f_t>::start_cpufj_scratch_threads(population_t<i_t, f_t
                                                       default_weights,
                                                       default_weights,
                                                       0.,
-                                                      cpu_fj_settings,
+                                                      fj_settings_t{},
                                                       /*randomize=*/counter > 0);
 
-    cpu_fj.fj_cpu->log_prefix = "******* scratch " + std::to_string(counter) + ": ";
-    // if (!context.settings.deterministic) {
-    //   cpu_fj.fj_cpu->improvement_callback = [this, &population, &cpu_fj](
-    //                                           f_t obj, const std::vector<f_t>& h_vec) {
-    //     population.add_external_solution(h_vec, obj, solution_origin_t::CPUFJ);
-    //     if (obj < local_search_best_obj) {
-    //       CUOPT_LOG_TRACE("******* New local search best obj %g, best overall %g",
-    //                       context.problem_ptr->get_user_obj_from_solver_obj(obj),
-    //                       context.problem_ptr->get_user_obj_from_solver_obj(
-    //                         population.is_feasible() ? population.best_feasible().get_objective()
-    //                                                  : std::numeric_limits<f_t>::max()));
-    //       local_search_best_obj = obj;
-    //     }
-    //   };
-    // }
+    cpu_fj.fj_cpu->log_prefix           = "******* scratch " + std::to_string(counter) + ": ";
+    cpu_fj.fj_cpu->improvement_callback = [this, &population, &cpu_fj](
+                                            f_t obj, const std::vector<f_t>& h_vec) {
+      population.add_external_solution(h_vec, obj, solution_origin_t::CPUFJ);
+      if (obj < local_search_best_obj) {
+        CUOPT_LOG_TRACE("******* New local search best obj %g, best overall %g",
+                        context.problem_ptr->get_user_obj_from_solver_obj(obj),
+                        context.problem_ptr->get_user_obj_from_solver_obj(
+                          population.is_feasible() ? population.best_feasible().get_objective()
+                                                   : std::numeric_limits<f_t>::max()));
+        local_search_best_obj = obj;
+      }
+    };
     counter++;
   };
 
@@ -114,29 +108,24 @@ void local_search_t<i_t, f_t>::start_cpufj_lptopt_scratch_threads(
 
   std::vector<f_t> default_weights(context.problem_ptr->n_constraints, 1.);
 
-  fj_settings_t cpu_fj_settings{};
-  cpu_fj_settings.time_limit = std::numeric_limits<f_t>::infinity();
-
   solution_t<i_t, f_t> solution_lp(*context.problem_ptr);
   solution_lp.copy_new_assignment(host_copy(lp_optimal_solution));
   solution_lp.round_random_nearest(500);
   scratch_cpu_fj_on_lp_opt.fj_cpu =
-    fj.create_cpu_climber(solution_lp, default_weights, default_weights, 0., cpu_fj_settings, true);
+    fj.create_cpu_climber(solution_lp, default_weights, default_weights, 0.);
   scratch_cpu_fj_on_lp_opt.fj_cpu->log_prefix = "******* scratch on LP optimal: ";
-  if (context.settings.determinism_mode == CUOPT_MODE_OPPORTUNISTIC) {
-    scratch_cpu_fj_on_lp_opt.fj_cpu->improvement_callback =
-      [this, &population](f_t obj, const std::vector<f_t>& h_vec) {
-        population.add_external_solution(h_vec, obj, solution_origin_t::CPUFJ);
-        if (obj < local_search_best_obj) {
-          CUOPT_LOG_DEBUG("******* New local search best obj %g, best overall %g",
-                          context.problem_ptr->get_user_obj_from_solver_obj(obj),
-                          context.problem_ptr->get_user_obj_from_solver_obj(
-                            population.is_feasible() ? population.best_feasible().get_objective()
-                                                     : std::numeric_limits<f_t>::max()));
-          local_search_best_obj = obj;
-        }
-      };
-  }
+  scratch_cpu_fj_on_lp_opt.fj_cpu->improvement_callback =
+    [this, &population](f_t obj, const std::vector<f_t>& h_vec) {
+      population.add_external_solution(h_vec, obj, solution_origin_t::CPUFJ);
+      if (obj < local_search_best_obj) {
+        CUOPT_LOG_DEBUG("******* New local search best obj %g, best overall %g",
+                        context.problem_ptr->get_user_obj_from_solver_obj(obj),
+                        context.problem_ptr->get_user_obj_from_solver_obj(
+                          population.is_feasible() ? population.best_feasible().get_objective()
+                                                   : std::numeric_limits<f_t>::max()));
+        local_search_best_obj = obj;
+      }
+    };
 
   // default weights
   cudaDeviceSynchronize();
@@ -182,8 +171,10 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
   auto solution_copy = solution;
 
   // Start CPU solver in background thread
-  for (auto& cpu_fj : ls_cpu_fj) {
-    cpu_fj.start_cpu_solver();
+  if (context.settings.determinism_mode == CUOPT_MODE_OPPORTUNISTIC) {
+    for (auto& cpu_fj : ls_cpu_fj) {
+      cpu_fj.start_cpu_solver();
+    }
   }
 
   // Run GPU solver and measure execution time
@@ -220,6 +211,9 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
 
   bool gpu_feasible = solution.get_feasible();
   bool cpu_feasible = cpu_sol_found && solution_cpu.get_feasible();
+  if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
+    cpu_feasible = false;  // ignore CPUFJ in deterministic mode
+  }
 
   static std::unordered_map<std::string, int> total_calls;
   static std::unordered_map<std::string, int> cpu_better;
@@ -441,12 +435,7 @@ bool local_search_t<i_t, f_t>::check_fj_on_lp_optimal(solution_t<i_t, f_t>& solu
   fj.settings.n_of_minimums_for_exit = 20000;
   fj.settings.update_weights         = true;
   fj.settings.feasibility_run        = false;
-  f_t fj_time_limit                  = 30.;
-  if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
-    fj_time_limit               = std::numeric_limits<f_t>::infinity();
-    fj.settings.iteration_limit = 100'000;
-  }
-  f_t time_limit = std::min(fj_time_limit, timer.remaining_time());
+  f_t time_limit                     = std::min(30., timer.remaining_time());
   do_fj_solve(solution, fj, time_limit, "on_lp_optimal");
   return solution.get_feasible();
 }
@@ -700,7 +689,6 @@ bool local_search_t<i_t, f_t>::run_fp(solution_t<i_t, f_t>& solution,
       is_feasible = false;
       break;
     }
-    printf("------------------------------------------------------------------------\n");
     CUOPT_LOG_DEBUG("fp_loop it %d last_improved_iteration %d", i, last_improved_iteration);
     population_ptr->add_external_solutions_to_population();
     if (population_ptr->preempt_heuristic_solver_.load()) {

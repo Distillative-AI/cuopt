@@ -228,13 +228,6 @@ class bound_prop_recombiner_t : public recombiner_t<i_t, f_t> {
       constraint_prop.single_rounding_only = false;
       offspring.compute_feasibility();
       bool feasible_after_bounds_prop = offspring.get_feasible();
-      cuopt_func_call(f_t excess_before = offspring.get_total_excess());
-      CUOPT_LOG_ERROR("Excess before: %g, %g, %g, %g, feas %d",
-                      offspring.get_total_excess(),
-                      offspring.compute_max_constraint_violation(),
-                      offspring.compute_max_int_violation(),
-                      offspring.compute_max_variable_violation(),
-                      feasible_after_bounds_prop);
       offspring.handle_ptr->sync_stream();
       offspring.problem_ptr = a.problem_ptr;
       fixed_assignment      = std::move(offspring.assignment);

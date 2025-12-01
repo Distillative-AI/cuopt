@@ -198,7 +198,6 @@ rapids_cpm_rapids_logger(BUILD_EXPORT_SET cuopt-exports INSTALL_EXPORT_SET cuopt
 create_logger_macros(CUOPT "cuopt::default_logger()" include/cuopt)
 
 find_package(CUDSS REQUIRED)
-find_package(xgboost REQUIRED)
 
 if(BUILD_TESTS)
   include(cmake/thirdparty/get_gtest.cmake)
@@ -316,23 +315,22 @@ target_link_libraries(cuopt
   rapids_logger::rapids_logger
   CCCL::CCCL
   raft::raft
-  xgboost::xgboost
   cuopt::mps_parser
   ${CUDSS_LIB_FILE}
   PRIVATE
   ${CUOPT_PRIVATE_CUDA_LIBS}
   )
 
-find_path(PAPI_INCLUDE_DIR papi.h)
-find_library(PAPI_LIBRARY papi)
+# find_path(PAPI_INCLUDE_DIR papi.h)
+# find_library(PAPI_LIBRARY papi)
 
-if (PAPI_INCLUDE_DIR AND PAPI_LIBRARY)
-    message(STATUS "Found PAPI in ${PAPI_INCLUDE_DIR}")
-    target_include_directories(cuopt PRIVATE ${PAPI_INCLUDE_DIR})
-    target_link_libraries(cuopt PRIVATE ${PAPI_LIBRARY})
-else()
-    message(FATAL_ERROR "Could not find PAPI")
-endif()
+# if (PAPI_INCLUDE_DIR AND PAPI_LIBRARY)
+#     message(STATUS "Found PAPI in ${PAPI_INCLUDE_DIR}")
+#     target_include_directories(cuopt PRIVATE ${PAPI_INCLUDE_DIR})
+#     target_link_libraries(cuopt PRIVATE ${PAPI_LIBRARY})
+# else()
+#     message(FATAL_ERROR "Could not find PAPI")
+# endif()
 
 
 # ##################################################################################################

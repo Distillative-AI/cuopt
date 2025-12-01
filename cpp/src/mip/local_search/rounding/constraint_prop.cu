@@ -218,12 +218,10 @@ void constraint_prop_t<i_t, f_t>::sort_by_interval_and_frac(solution_t<i_t, f_t>
         return bounds_interval_1 < bounds_interval_2;
       }
     });
-
-  // CUOPT_LOG_DEBUG("hash vars 0x%x", detail::compute_hash(vars));
-  //  now do the suffling, for that we need to assign some random values to rnd array
-  //  we will sort this rnd array and the vars in subsections, so that each subsection will be
-  //  shuffled in total we will have 3(binary, ternary and rest) x 7 intervals = 21 subsections.
-  //  first extract these subsections from the data
+  // now do the suffling, for that we need to assign some random values to rnd array
+  // we will sort this rnd array and the vars in subsections, so that each subsection will be
+  // shuffled in total we will have 3(binary, ternary and rest) x 7 intervals = 21 subsections.
+  // first extract these subsections from the data
   rmm::device_uvector<i_t> subsection_offsets(size_of_subsections, sol.handle_ptr->get_stream());
   thrust::fill(
     sol.handle_ptr->get_thrust_policy(), subsection_offsets.begin(), subsection_offsets.end(), -1);
@@ -273,10 +271,7 @@ void constraint_prop_t<i_t, f_t>::sort_by_interval_and_frac(solution_t<i_t, f_t>
                        }
                      }
                    });
-
-  // CUOPT_LOG_DEBUG("hash subsection_offsets 0x%x", detail::compute_hash(subsection_offsets));
   auto random_vector = get_random_uniform_vector<i_t, f_t>((i_t)vars.size(), rng);
-  // CUOPT_LOG_DEBUG("hash random_vector 0x%x", detail::compute_hash(random_vector));
   rmm::device_uvector<f_t> device_random_vector(random_vector.size(), sol.handle_ptr->get_stream());
   raft::copy(device_random_vector.data(),
              random_vector.data(),
@@ -422,7 +417,6 @@ void constraint_prop_t<i_t, f_t>::collapse_crossing_bounds(problem_t<i_t, f_t>& 
 template <typename i_t, typename f_t>
 void constraint_prop_t<i_t, f_t>::set_bounds_on_fixed_vars(solution_t<i_t, f_t>& sol)
 {
-  CUOPT_LOG_DEBUG("Bound hash before 0x%x", detail::compute_hash(sol.problem_ptr->variable_bounds));
   auto assgn      = make_span(sol.assignment);
   auto var_bounds = make_span(sol.problem_ptr->variable_bounds);
   thrust::for_each(sol.handle_ptr->get_thrust_policy(),
@@ -434,7 +428,6 @@ void constraint_prop_t<i_t, f_t>::set_bounds_on_fixed_vars(solution_t<i_t, f_t>&
                        var_bounds[idx] = typename type_2<f_t>::type{var_val, var_val};
                      }
                    });
-  CUOPT_LOG_DEBUG("Bound hash after 0x%x", detail::compute_hash(sol.problem_ptr->variable_bounds));
 }
 
 template <typename i_t, typename f_t, typename f_t2>
@@ -944,15 +937,9 @@ bool constraint_prop_t<i_t, f_t>::find_integer(
   }
   // do the sort if the problem is not ii. crossing bounds might cause some issues on the sort order
   else {
-    // CUOPT_LOG_DEBUG("hash unset_integer_vars 0x%x, sol 0x%x before sort\n",
-    //                 detail::compute_hash(unset_integer_vars),
-    //                 sol.get_hash());
     // this is a sort to have initial shuffling, so that stable sort within will keep the order and
     // some randomness will be achieved
     sort_by_interval_and_frac(sol, make_span(unset_integer_vars), rng);
-    // CUOPT_LOG_DEBUG("hash unset_integer_vars 0x%x sol 0x%x after sort\n",
-    //                 detail::compute_hash(unset_integer_vars),
-    //                 sol.get_hash());
   }
   set_host_bounds(sol);
   size_t set_count               = 0;

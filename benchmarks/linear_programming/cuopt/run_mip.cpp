@@ -206,8 +206,6 @@ int run_single_file(std::string file_path,
   settings.tolerances.relative_tolerance = 1e-12;
   settings.tolerances.absolute_tolerance = 1e-6;
   settings.presolve                      = true;
-  // settings.heuristics_only = true;
-
   cuopt::linear_programming::benchmark_info_t benchmark_info;
   settings.benchmark_info_ptr = &benchmark_info;
   auto start_run_solver       = std::chrono::high_resolution_clock::now();
@@ -406,6 +404,7 @@ int main(int argc, char* argv[])
   if (program.is_used("--initial-solution-path")) {
     initial_solution_file = program.get<std::string>("--initial-solution-path");
   }
+
   if (run_dir) {
     std::queue<std::string> task_queue;
     std::queue<int> gpu_queue;

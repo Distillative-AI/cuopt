@@ -229,7 +229,6 @@ bool line_segment_search_t<i_t, f_t>::search_line_segment(
                               best_feasible_cost,
                               curr_cost);
     }
-    // cuopt_assert(context.gpu_heur_loop, "");
     if (context.settings.determinism_mode == CUOPT_MODE_OPPORTUNISTIC) {
       if (timer.check_time_limit()) { break; }
     }
