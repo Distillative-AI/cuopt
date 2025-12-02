@@ -153,19 +153,9 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
 
   auto h_weights          = cuopt::host_copy(in_fj.cstr_weights, solution.handle_ptr->get_stream());
   auto h_objective_weight = in_fj.objective_weight.value(solution.handle_ptr->get_stream());
-
-  // for now: always assign the CPUFJs to perform 1000 iters per s
-  fj_settings_t cpu_fj_settings{};
-  if (context.settings.determinism_mode == CUOPT_MODE_OPPORTUNISTIC) {
-    cpu_fj_settings.iteration_limit = std::numeric_limits<i_t>::max();
-  } else {
-    // TODO: CHANGE
-    cpu_fj_settings.iteration_limit = 1000 * time_limit;
-  }
-
   for (auto& cpu_fj : ls_cpu_fj) {
     cpu_fj.fj_cpu = cpu_fj.fj_ptr->create_cpu_climber(
-      solution, h_weights, h_weights, h_objective_weight, cpu_fj_settings, true);
+      solution, h_weights, h_weights, h_objective_weight, fj_settings_t{}, true);
   }
 
   auto solution_copy = solution;
@@ -196,14 +186,16 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
 
   f_t best_cpu_obj = std::numeric_limits<f_t>::max();
   // // Wait for CPU solver to finish
-  for (auto& cpu_fj : ls_cpu_fj) {
-    bool cpu_sol_found = cpu_fj.wait_for_cpu_solver();
-    if (cpu_sol_found) {
-      f_t cpu_obj = cpu_fj.fj_cpu->h_best_objective;
-      if (cpu_obj < best_cpu_obj) {
-        best_cpu_obj = cpu_obj;
-        solution_cpu.copy_new_assignment(cpu_fj.fj_cpu->h_best_assignment);
-        solution_cpu.compute_feasibility();
+  if (context.settings.determinism_mode == CUOPT_MODE_OPPORTUNISTIC) {
+    for (auto& cpu_fj : ls_cpu_fj) {
+      bool cpu_sol_found = cpu_fj.wait_for_cpu_solver();
+      if (cpu_sol_found) {
+        f_t cpu_obj = cpu_fj.fj_cpu->h_best_objective;
+        if (cpu_obj < best_cpu_obj) {
+          best_cpu_obj = cpu_obj;
+          solution_cpu.copy_new_assignment(cpu_fj.fj_cpu->h_best_assignment);
+          solution_cpu.compute_feasibility();
+        }
       }
     }
   }
@@ -211,9 +203,6 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
 
   bool gpu_feasible = solution.get_feasible();
   bool cpu_feasible = cpu_sol_found && solution_cpu.get_feasible();
-  if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
-    cpu_feasible = false;  // ignore CPUFJ in deterministic mode
-  }
 
   static std::unordered_map<std::string, int> total_calls;
   static std::unordered_map<std::string, int> cpu_better;
@@ -415,11 +404,7 @@ bool local_search_t<i_t, f_t>::check_fj_on_lp_optimal(solution_t<i_t, f_t>& solu
   bool is_feasible =
     constraint_prop.apply_round(solution, lp_run_time_after_feasible, bounds_prop_timer);
   if (!is_feasible) {
-    f_t lp_run_time = 2.;
-    // CHANGE
-    if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
-      lp_run_time = std::numeric_limits<f_t>::infinity();
-    }
+    const f_t lp_run_time = 2.;
     relaxed_lp_settings_t lp_settings;
     lp_settings.time_limit = std::min(lp_run_time, timer.remaining_time());
     lp_settings.work_limit = lp_settings.time_limit;

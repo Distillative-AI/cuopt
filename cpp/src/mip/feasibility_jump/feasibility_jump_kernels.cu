@@ -899,7 +899,6 @@ DI void update_changed_constraints(typename fj_t<i_t, f_t>::climber_data_t::view
       // sort changed constraints to guarantee determinism
       // TODO: horribly slow as it is... block-parallelize at least? but not trivial for arbitrary
       // sizes w/ CUB
-      // TODO(2): tsk.. ... just bucket sort...
       if (fj.settings->work_limit != std::numeric_limits<double>::infinity()) {
         thrust::sort(thrust::seq,
                      fj.constraints_changed.begin(),

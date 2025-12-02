@@ -767,7 +767,8 @@ bool constraint_prop_t<i_t, f_t>::run_repair_procedure(problem_t<i_t, f_t>& prob
   repair_stats.repair_attempts++;
   f_t repair_start_time                = timer.remaining_time();
   i_t n_of_repairs_needed_for_feasible = 0;
-  i_t iter_limit                       = std::numeric_limits<i_t>::max();
+  // TODO: do this better
+  i_t iter_limit = std::numeric_limits<i_t>::max();
   if (this->context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
     timer      = work_limit_timer_t(context.gpu_heur_loop, std::numeric_limits<f_t>::infinity());
     iter_limit = 100;
@@ -854,14 +855,7 @@ bool constraint_prop_t<i_t, f_t>::find_integer(
 {
   using crit_t             = termination_criterion_t;
   auto& unset_integer_vars = unset_vars;
-  i_t seed                 = cuopt::seed_generator::get_seed();
-  std::mt19937 rng(seed);
-
-  // CHANGE
-  if (this->context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
-    timer = work_limit_timer_t(context.gpu_heur_loop, std::numeric_limits<f_t>::infinity());
-  }
-
+  std::mt19937 rng(cuopt::seed_generator::get_seed());
   lb_restore.resize(sol.problem_ptr->n_variables, sol.handle_ptr->get_stream());
   ub_restore.resize(sol.problem_ptr->n_variables, sol.handle_ptr->get_stream());
   assignment_restore.resize(sol.problem_ptr->n_variables, sol.handle_ptr->get_stream());
@@ -1120,9 +1114,6 @@ bool constraint_prop_t<i_t, f_t>::apply_round(
   // === CONSTRAINT PROP PREDICTOR FEATURES - END ===
 
   max_timer = work_limit_timer_t{context.gpu_heur_loop, max_time_for_bounds_prop};
-  if (this->context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
-    max_timer = work_limit_timer_t(context.gpu_heur_loop, std::numeric_limits<double>::infinity());
-  }
   if (check_brute_force_rounding(sol)) {
     auto cp_end_time = std::chrono::high_resolution_clock::now();
     auto cp_elapsed_ms =

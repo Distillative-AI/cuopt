@@ -263,38 +263,14 @@ template <typename i_t, typename f_t>
 void diversity_manager_t<i_t, f_t>::run_fj_alone(solution_t<i_t, f_t>& solution)
 {
   CUOPT_LOG_INFO("Running FJ alone!");
-  // Benchmark FJ with 1000 different random starting solutions and varying iteration limits
-  CUOPT_LOG_INFO("Starting FJ benchmark: 1000 runs with random starting solutions");
-
-  std::mt19937 rng(cuopt::seed_generator::get_seed());
-  std::uniform_int_distribution<i_t> iter_dist(100, 50000);
-
-  for (i_t run = 0; run < 1000; ++run) {
-    // Generate random starting solution within bounds
-    solution.assign_random_within_bounds(1.0, false);
-    solution.round_nearest();
-
-    // Configure FJ settings with random iteration limit
-    ls.fj.settings                        = fj_settings_t{};
-    ls.fj.settings.mode                   = fj_mode_t::EXIT_NON_IMPROVING;
-    ls.fj.settings.n_of_minimums_for_exit = 20000 * 1000;
-    ls.fj.settings.update_weights         = true;
-    ls.fj.settings.feasibility_run        = false;
-    ls.fj.settings.iteration_limit        = iter_dist(rng);
-    ls.fj.settings.time_limit             = std::numeric_limits<double>::infinity();
-
-    if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
-      ls.fj.settings.iteration_limit = iter_dist(rng);
-    }
-
-    CUOPT_LOG_INFO(
-      "FJ benchmark run %d/%d: iteration_limit=%d", run + 1, 1000, ls.fj.settings.iteration_limit);
-
-    ls.fj.solve(solution);
-  }
-
-  CUOPT_LOG_INFO("FJ benchmark finished: 1000 runs completed");
-  exit(0);
+  solution.round_nearest();
+  ls.fj.settings.mode                   = fj_mode_t::EXIT_NON_IMPROVING;
+  ls.fj.settings.n_of_minimums_for_exit = 20000 * 1000;
+  ls.fj.settings.update_weights         = true;
+  ls.fj.settings.feasibility_run        = false;
+  ls.fj.settings.time_limit             = timer.remaining_time();
+  ls.fj.solve(solution);
+  CUOPT_LOG_INFO("FJ alone finished!");
 }
 
 // returns the best feasible solution
@@ -320,7 +296,9 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
 {
   raft::common::nvtx::range fun_scope("run_solver");
 
-  diversity_config.fj_only_run = false;
+  CUOPT_LOG_DEBUG("Determinism mode: %s",
+                  context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC ? "deterministic"
+                                                                                : "opportunistic");
 
   population.timer     = timer;
   const f_t time_limit = timer.remaining_time();
@@ -606,6 +584,7 @@ diversity_manager_t<i_t, f_t>::recombine_and_local_search(solution_t<i_t, f_t>& 
                   sol1.get_feasible(),
                   sol2.get_quality(population.weights),
                   sol2.get_feasible());
+  bool deterministic                = context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC;
   double best_objective_of_parents  = std::min(sol1.get_objective(), sol2.get_objective());
   bool at_least_one_parent_feasible = sol1.get_feasible() || sol2.get_feasible();
   // randomly choose among 3 recombiners
@@ -616,7 +595,7 @@ diversity_manager_t<i_t, f_t>::recombine_and_local_search(solution_t<i_t, f_t>& 
                                   std::numeric_limits<double>::lowest(),
                                   std::numeric_limits<double>::lowest(),
                                   std::numeric_limits<double>::max(),
-                                  recombiner_work_normalized_reward_t(0.0));
+                                  recombiner_work_normalized_reward_t(deterministic, 0.0));
     return std::make_pair(solution_t<i_t, f_t>(sol1), solution_t<i_t, f_t>(sol2));
   }
   cuopt_assert(population.test_invariant(), "");
@@ -636,7 +615,7 @@ diversity_manager_t<i_t, f_t>::recombine_and_local_search(solution_t<i_t, f_t>& 
                                   std::numeric_limits<double>::lowest(),
                                   std::numeric_limits<double>::lowest(),
                                   std::numeric_limits<double>::max(),
-                                  recombiner_work_normalized_reward_t(0.0));
+                                  recombiner_work_normalized_reward_t(deterministic, 0.0));
     return std::make_pair(solution_t<i_t, f_t>(sol1), solution_t<i_t, f_t>(sol2));
   }
   cuopt_assert(offspring.test_number_all_integer(), "All must be integers after LS");
@@ -676,12 +655,15 @@ diversity_manager_t<i_t, f_t>::recombine_and_local_search(solution_t<i_t, f_t>& 
     offspring_qual, sol1.get_quality(population.weights), sol2.get_quality(population.weights));
   f_t best_quality_of_parents =
     std::min(sol1.get_quality(population.weights), sol2.get_quality(population.weights));
-  mab_recombiner.add_mab_reward(
-    mab_recombiner.last_chosen_option,
-    best_quality_of_parents,
-    population.best().get_quality(population.weights),
-    offspring_qual,
-    recombiner_work_normalized_reward_t(recombine_stats.get_last_recombiner_work()));
+  mab_recombiner.add_mab_reward(mab_recombiner.last_chosen_option,
+                                best_quality_of_parents,
+                                population.best().get_quality(population.weights),
+                                offspring_qual,
+                                !deterministic
+                                  ? recombiner_work_normalized_reward_t(
+                                      deterministic, recombine_stats.get_last_recombiner_time())
+                                  : recombiner_work_normalized_reward_t(
+                                      deterministic, recombine_stats.get_last_recombiner_work()));
   mab_ls.add_mab_reward(mab_ls_config_t<i_t, f_t>::last_ls_mab_option,
                         best_quality_of_parents,
                         population.best_feasible().get_quality(population.weights),
@@ -728,34 +710,40 @@ std::pair<solution_t<i_t, f_t>, bool> diversity_manager_t<i_t, f_t>::recombine(
   }
   mab_recombiner.set_last_chosen_option(selected_index);
   recombine_stats.add_attempt((recombiner_enum_t)recombiner);
+  recombine_stats.start_recombiner_time();
   CUOPT_LOG_DEBUG("Recombining sol %x and %x with recombiner %d, weights %x",
                   a.get_hash(),
                   b.get_hash(),
                   recombiner,
                   population.weights.get_hash());
+
   // Refactored code using a switch statement
   switch (recombiner) {
     case recombiner_enum_t::BOUND_PROP: {
       auto [sol, success, work] = bound_prop_recombiner.recombine(a, b, population.weights);
       recombine_stats.set_recombiner_work(work);
+      recombine_stats.stop_recombiner_time();
       if (success) { recombine_stats.add_success(); }
       return std::make_pair(sol, success);
     }
     case recombiner_enum_t::FP: {
       auto [sol, success, work] = fp_recombiner.recombine(a, b, population.weights);
       recombine_stats.set_recombiner_work(work);
+      recombine_stats.stop_recombiner_time();
       if (success) { recombine_stats.add_success(); }
       return std::make_pair(sol, success);
     }
     case recombiner_enum_t::LINE_SEGMENT: {
       auto [sol, success, work] = line_segment_recombiner.recombine(a, b, population.weights);
       recombine_stats.set_recombiner_work(work);
+      recombine_stats.stop_recombiner_time();
       if (success) { recombine_stats.add_success(); }
       return std::make_pair(sol, success);
     }
     case recombiner_enum_t::SUB_MIP: {
       auto [sol, success, work] = sub_mip_recombiner.recombine(a, b, population.weights);
       recombine_stats.set_recombiner_work(work);
+      recombine_stats.stop_recombiner_time();
       if (success) { recombine_stats.add_success(); }
       return std::make_pair(sol, success);
     }

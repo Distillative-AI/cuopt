@@ -1079,11 +1079,10 @@ i_t fj_t<i_t, f_t>::host_loop(solution_t<i_t, f_t>& solution, i_t climber_idx)
     if (timer.check_time_limit() || steps >= settings.iteration_limit) { limit_reached = true; }
 
 #if !FJ_SINGLE_STEP
-    // if (steps % 500 == 0)
-    if (false)
+    if (steps % 500 == 0)
 #endif
     {
-      CUOPT_LOG_DEBUG(
+      CUOPT_LOG_TRACE(
         "FJ "
         "step %d viol %.2g [%d], obj %.8g, best %.8g, mins %d, maxw %g, "
         "objw %g, sol %x, delta %x, inc %x, lhs %x, lhscomp %x, viol %x, weights %x",
@@ -1283,9 +1282,8 @@ i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution)
                   detail::compute_hash(cstr_left_weights),
                   detail::compute_hash(cstr_right_weights));
 
-  if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
-    settings.work_limit = settings.time_limit;
-  }
+  bool deterministic = context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC;
+  if (deterministic) { settings.work_limit = settings.time_limit; }
   // if work_limit is set: compute an estimate of the number of iterations required
   if (settings.work_limit != std::numeric_limits<double>::infinity()) {
     std::map<std::string, float> features_map = get_feature_vector(0);
@@ -1333,7 +1331,7 @@ i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution)
   handle_ptr->sync_stream();
 
   // Compute and store feature vector for later logging
-  feature_vector = get_feature_vector(0);
+  if (deterministic) { feature_vector = get_feature_vector(0); }
 
   i_t iterations = host_loop(solution);
   RAFT_CHECK_CUDA(handle_ptr->get_stream());
@@ -1384,42 +1382,44 @@ i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution)
 
   cuopt_func_call(solution.test_variable_bounds());
 
-  double work_to_record = settings.work_limit;
+  if (deterministic) {
+    double work_to_record = settings.work_limit;
 
-  if (iterations < settings.iteration_limit) {
-    CUOPT_LOG_DEBUG(
-      "FJ early exit at %d iterations (limit: %d)", iterations, settings.iteration_limit);
-    // Compute the work unit corresponding to the number of iterations elapsed
-    // by incrementally guessing work units until the model predicts >= actual iterations
-    // TODO: awfully ugly, change
-    if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC && iterations > 0) {
-      double guessed_work         = 0.0;
-      const double work_increment = 0.1;
-      const double max_work       = settings.work_limit * 2.0;  // Safety limit
-      float predicted_iters       = 0.0f;
+    if (iterations < settings.iteration_limit) {
+      CUOPT_LOG_DEBUG(
+        "FJ early exit at %d iterations (limit: %d)", iterations, settings.iteration_limit);
+      // Compute the work unit corresponding to the number of iterations elapsed
+      // by incrementally guessing work units until the model predicts >= actual iterations
+      // TODO: awfully ugly, change
+      if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC && iterations > 0) {
+        double guessed_work         = 0.0;
+        const double work_increment = 0.1;
+        const double max_work       = settings.work_limit * 2.0;  // Safety limit
+        float predicted_iters       = 0.0f;
 
-      // Make a copy of the feature vector and modify the time/work_limit field
-      std::map<std::string, float> features_for_prediction = feature_vector;
+        // Make a copy of the feature vector and modify the time/work_limit field
+        std::map<std::string, float> features_for_prediction = feature_vector;
 
-      while (guessed_work <= max_work) {
-        features_for_prediction["time"] = (float)guessed_work;
-        predicted_iters                 = std::max(
-          0.0f,
-          (float)ceil(
-            context.work_unit_predictors.fj_predictor.predict_scalar(features_for_prediction)));
+        while (guessed_work <= max_work) {
+          features_for_prediction["time"] = (float)guessed_work;
+          predicted_iters                 = std::max(
+            0.0f,
+            (float)ceil(
+              context.work_unit_predictors.fj_predictor.predict_scalar(features_for_prediction)));
 
-        if (predicted_iters >= (float)iterations) {
-          work_to_record = guessed_work;
-          break;
+          if (predicted_iters >= (float)iterations) {
+            work_to_record = guessed_work;
+            break;
+          }
+
+          guessed_work += work_increment;
         }
-
-        guessed_work += work_increment;
       }
     }
-  }
 
-  CUOPT_LOG_DEBUG("FJ: recording work %fwu for %d iterations", work_to_record, iterations);
-  timer.record_work(work_to_record);
+    CUOPT_LOG_DEBUG("FJ: recording work %fwu for %d iterations", work_to_record, iterations);
+    timer.record_work(work_to_record);
+  }
 
   CUOPT_LOG_DEBUG("FJ sol hash %x", solution.get_hash());
 

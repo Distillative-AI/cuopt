@@ -189,9 +189,7 @@ bool line_segment_search_t<i_t, f_t>::search_line_segment(
                               best_feasible_cost,
                               curr_cost);
     }
-    if (context.settings.determinism_mode == CUOPT_MODE_OPPORTUNISTIC) {
-      if (timer.check_time_limit()) { break; }
-    }
+    if (timer.check_time_limit()) { break; }
     i_t number_of_integer_var_diff = compute_number_of_integer_var_diff<i_t, f_t>(
       solution.problem_ptr->integer_indices,
       solution.assignment,
@@ -229,9 +227,7 @@ bool line_segment_search_t<i_t, f_t>::search_line_segment(
                               best_feasible_cost,
                               curr_cost);
     }
-    if (context.settings.determinism_mode == CUOPT_MODE_OPPORTUNISTIC) {
-      if (timer.check_time_limit()) { break; }
-    }
+    if (timer.check_time_limit()) { break; }
   }
   // if not recombiner mode but local search mode
   if (!settings.recombiner_mode) {

@@ -125,7 +125,7 @@ struct fj_cpu_climber_t {
 
   // vector<bool> is actually likely beneficial here since we're memory bound
   std::vector<bool> flip_move_computed;
-
+  ;
   // CSR nnz offset -> (delta, score)
   std::vector<std::pair<f_t, fj_staged_score_t>> cached_mtm_moves;
 
@@ -150,11 +150,6 @@ struct fj_cpu_climber_t {
   std::string log_prefix{""};
 
   std::atomic<bool> halted{false};
-
-  // PAPI performance counters
-  int papi_event_set{-1};
-  bool papi_initialized{false};
-  std::vector<int> papi_events;
 
   // Feature tracking for regression model (last 1000 iterations)
   i_t nnz_processed_window{0};

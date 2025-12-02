@@ -188,7 +188,6 @@ bool feasibility_pump_t<i_t, f_t>::linear_project_onto_polytope(solution_t<i_t, 
         constr_indices, constr_coeffs_2, h_assignment[i], (f_t)default_cont_upper);
     }
   }
-
   adjust_objective_with_original(solution, obj_coefficients, longer_lp_run);
   // commit all the changes that were done by the host
   if (h_variables.size() > 0) { temp_p.insert_variables(h_variables); }
