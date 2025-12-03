@@ -195,11 +195,276 @@ void strong_branching(const lp_problem_t<i_t, f_t>& original_lp,
   pc.update_pseudo_costs_from_strong_branching(fractional, root_soln);
 }
 
+template <typename f_t>
+rounding_direction_t martin_criteria(f_t val, f_t root_val)
+{
+  const f_t down_val  = std::floor(root_val);
+  const f_t up_val    = std::ceil(root_val);
+  const f_t down_dist = val - down_val;
+  const f_t up_dist   = up_val - val;
+  constexpr f_t eps   = 1e-6;
+
+  if (down_dist < up_dist + eps) {
+    return rounding_direction_t::DOWN;
+  } else {
+    return rounding_direction_t::UP;
+  }
+}
+
+template <typename i_t, typename f_t>
+branch_variable_t<i_t> line_search_diving(const std::vector<i_t>& fractional,
+                                          const std::vector<f_t>& solution,
+                                          const std::vector<f_t>& root_solution,
+                                          logger_t& log)
+{
+  constexpr f_t eps              = 1e-6;
+  i_t branch_var                 = -1;
+  f_t min_score                  = INFINITY;
+  rounding_direction_t round_dir = rounding_direction_t::NONE;
+
+  for (auto j : fractional) {
+    f_t score                = inf;
+    rounding_direction_t dir = rounding_direction_t::NONE;
+
+    if (solution[j] < root_solution[j] - eps) {
+      f_t f = solution[j] - std::floor(solution[j]);
+      f_t d = root_solution[j] - solution[j];
+      score = f / d;
+      dir   = rounding_direction_t::DOWN;
+
+    } else if (solution[j] > root_solution[j] + eps) {
+      f_t f = std::ceil(solution[j]) - solution[j];
+      f_t d = solution[j] - root_solution[j];
+      score = f / d;
+      dir   = rounding_direction_t::UP;
+    }
+
+    if (min_score > score) {
+      min_score  = score;
+      branch_var = j;
+      round_dir  = dir;
+    }
+  }
+
+  log.debug("Line search diving: selected var %d with val = %e, round dir = %d and score = %e\n",
+            branch_var,
+            solution[branch_var],
+            round_dir,
+            min_score);
+
+  // If the current solution is equal to the root solution, arbitrarily
+  // set the branch variable to the first fractional variable and round it down
+  if (round_dir == rounding_direction_t::NONE) {
+    branch_var = fractional[0];
+    round_dir  = rounding_direction_t::DOWN;
+  }
+
+  return {branch_var, round_dir};
+}
+
+template <typename i_t, typename f_t>
+branch_variable_t<i_t> pseudocost_diving(pseudo_costs_t<i_t, f_t>& pc,
+                                         const std::vector<i_t>& fractional,
+                                         const std::vector<f_t>& solution,
+                                         const std::vector<f_t>& root_solution,
+                                         logger_t& log)
+{
+  std::lock_guard<omp_mutex_t> lock(pc.mutex);
+  i_t branch_var                 = -1;
+  f_t max_score                  = -INFINITY;
+  rounding_direction_t round_dir = rounding_direction_t::NONE;
+  constexpr f_t eps              = 1e-6;
+
+  i_t num_initialized_down;
+  i_t num_initialized_up;
+  f_t pseudo_cost_down_avg;
+  f_t pseudo_cost_up_avg;
+  pc.initialized(
+    num_initialized_down, num_initialized_up, pseudo_cost_down_avg, pseudo_cost_up_avg);
+
+  for (auto j : fractional) {
+    rounding_direction_t dir = rounding_direction_t::NONE;
+    f_t f_down               = solution[j] - std::floor(solution[j]);
+    f_t f_up                 = std::ceil(solution[j]) - solution[j];
+
+    f_t pc_down = pc.pseudo_cost_num_down[j] != 0
+                    ? pc.pseudo_cost_sum_down[j] / pc.pseudo_cost_num_down[j]
+                    : pseudo_cost_down_avg;
+
+    f_t pc_up = pc.pseudo_cost_num_up[j] != 0 ? pc.pseudo_cost_sum_up[j] / pc.pseudo_cost_num_up[j]
+                                              : pseudo_cost_up_avg;
+
+    f_t score_down = std::sqrt(f_up) * (1 + pc_up) / (1 + pc_down);
+    f_t score_up   = std::sqrt(f_down) * (1 + pc_down) / (1 + pc_up);
+    f_t score      = 0;
+
+    if (solution[j] < root_solution[j] - 0.4) {
+      score = score_down;
+      dir   = rounding_direction_t::DOWN;
+    } else if (solution[j] > root_solution[j] + 0.4) {
+      score = score_up;
+      dir   = rounding_direction_t::UP;
+    } else if (f_down < 0.3) {
+      score = score_down;
+      dir   = rounding_direction_t::DOWN;
+    } else if (f_down > 0.7) {
+      score = score_up;
+      dir   = rounding_direction_t::UP;
+    } else if (pc_down < pc_up + eps) {
+      score = score_down;
+      dir   = rounding_direction_t::DOWN;
+    } else {
+      score = score_up;
+      dir   = rounding_direction_t::UP;
+    }
+
+    if (score > max_score) {
+      max_score  = score;
+      branch_var = j;
+      round_dir  = dir;
+    }
+  }
+  log.debug("Pseudocost diving: selected var %d with val = %e, round dir = %d and score = %e\n",
+            branch_var,
+            solution[branch_var],
+            round_dir,
+            max_score);
+
+  return {branch_var, round_dir};
+}
+
+template <typename i_t, typename f_t>
+branch_variable_t<i_t> guided_diving(pseudo_costs_t<i_t, f_t>& pc,
+                                     const std::vector<i_t>& fractional,
+                                     const std::vector<f_t>& solution,
+                                     const std::vector<f_t>& incumbent,
+                                     logger_t& log)
+{
+  std::lock_guard<omp_mutex_t> lock(pc.mutex);
+  i_t branch_var                 = -1;
+  f_t max_score                  = -INFINITY;
+  rounding_direction_t round_dir = rounding_direction_t::NONE;
+  constexpr f_t eps              = 1e-6;
+
+  i_t num_initialized_down;
+  i_t num_initialized_up;
+  f_t pseudo_cost_down_avg;
+  f_t pseudo_cost_up_avg;
+  pc.initialized(
+    num_initialized_down, num_initialized_up, pseudo_cost_down_avg, pseudo_cost_up_avg);
+
+  for (auto j : fractional) {
+    f_t f_down    = solution[j] - std::floor(solution[j]);
+    f_t f_up      = std::ceil(solution[j]) - solution[j];
+    f_t down_dist = std::abs(incumbent[j] - std::floor(solution[j]));
+    f_t up_dist   = std::abs(std::ceil(solution[j]) - incumbent[j]);
+    rounding_direction_t dir =
+      down_dist < up_dist + eps ? rounding_direction_t::DOWN : rounding_direction_t::UP;
+
+    f_t pc_down = pc.pseudo_cost_num_down[j] != 0
+                    ? pc.pseudo_cost_sum_down[j] / pc.pseudo_cost_num_down[j]
+                    : pseudo_cost_down_avg;
+
+    f_t pc_up = pc.pseudo_cost_num_up[j] != 0 ? pc.pseudo_cost_sum_up[j] / pc.pseudo_cost_num_up[j]
+                                              : pseudo_cost_up_avg;
+
+    f_t score1 = dir == rounding_direction_t::DOWN ? 5 * pc_down * f_down : 5 * pc_up * f_up;
+    f_t score2 = dir == rounding_direction_t::DOWN ? pc_up * f_up : pc_down * f_down;
+    f_t score  = (score1 + score2) / 6;
+
+    if (score > max_score) {
+      max_score  = score;
+      branch_var = j;
+      round_dir  = dir;
+    }
+  }
+
+  log.debug("Guided diving: selected var %d with val = %e, round dir = %d and score = %e\n",
+            branch_var,
+            solution[branch_var],
+            round_dir,
+            max_score);
+  return {branch_var, round_dir};
+}
+
+template <typename i_t, typename f_t>
+std::tuple<f_t, f_t> calculate_variable_locks(const lp_problem_t<i_t, f_t>& lp_problem, i_t var_idx)
+{
+  i_t up_lock   = 0;
+  i_t down_lock = 0;
+  i_t start     = lp_problem.A.col_start[var_idx];
+  i_t end       = lp_problem.A.col_start[var_idx + 1];
+
+  for (i_t k = start; k < end; ++k) {
+    f_t nz_val = lp_problem.A.x[k];
+    i_t nz_row = lp_problem.A.i[k];
+
+    if (std::isfinite(lp_problem.upper[nz_row]) && std::isfinite(lp_problem.lower[nz_row])) {
+      down_lock += 1;
+      up_lock += 1;
+      continue;
+    }
+
+    f_t sign = std::isfinite(lp_problem.upper[nz_row]) ? 1 : -1;
+
+    if (nz_val * sign > 0) {
+      up_lock += 1;
+    } else {
+      down_lock += 1;
+    }
+  }
+
+  return {up_lock, down_lock};
+}
+
+template <typename i_t, typename f_t>
+branch_variable_t<i_t> coefficient_diving(const lp_problem_t<i_t, f_t>& lp_problem,
+                                          const std::vector<i_t>& fractional,
+                                          const std::vector<f_t>& solution,
+                                          logger_t& log)
+{
+  i_t branch_var                 = -1;
+  f_t min_locks                  = INT_MAX;
+  rounding_direction_t round_dir = rounding_direction_t::NONE;
+  constexpr f_t eps              = 1e-6;
+
+  for (auto j : fractional) {
+    f_t f_down                = solution[j] - std::floor(solution[j]);
+    f_t f_up                  = std::ceil(solution[j]) - solution[j];
+    auto [up_lock, down_lock] = calculate_variable_locks(lp_problem, j);
+    f_t locks                 = std::min(up_lock, down_lock);
+
+    if (min_locks > locks) {
+      min_locks  = locks;
+      branch_var = j;
+
+      if (up_lock < down_lock) {
+        round_dir = rounding_direction_t::UP;
+      } else if (up_lock > down_lock) {
+        round_dir = rounding_direction_t::DOWN;
+      } else if (f_down < f_up + eps) {
+        round_dir = rounding_direction_t::DOWN;
+      } else {
+        round_dir = rounding_direction_t::UP;
+      }
+    }
+  }
+
+  log.debug(
+    "Coefficient diving: selected var %d with val = %e, round dir = %d and min locks = %e\n",
+    branch_var,
+    solution[branch_var],
+    round_dir,
+    min_locks);
+
+  return {branch_var, round_dir};
+}
+
 template <typename i_t, typename f_t>
 void pseudo_costs_t<i_t, f_t>::update_pseudo_costs(mip_node_t<i_t, f_t>* node_ptr,
                                                    f_t leaf_objective)
 {
-  mutex.lock();
+  std::lock_guard<omp_mutex_t> lock(mutex);
   const f_t change_in_obj = leaf_objective - node_ptr->lower_bound;
   const f_t frac          = node_ptr->branch_dir == rounding_direction_t::DOWN
                               ? node_ptr->fractional_val - std::floor(node_ptr->fractional_val)
@@ -211,7 +476,6 @@ void pseudo_costs_t<i_t, f_t>::update_pseudo_costs(mip_node_t<i_t, f_t>* node_pt
     pseudo_cost_sum_up[node_ptr->branch_var] += change_in_obj / frac;
     pseudo_cost_num_up[node_ptr->branch_var]++;
   }
-  mutex.unlock();
 }
 
 template <typename i_t, typename f_t>
@@ -254,16 +518,19 @@ void pseudo_costs_t<i_t, f_t>::initialized(i_t& num_initialized_down,
 }
 
 template <typename i_t, typename f_t>
-i_t pseudo_costs_t<i_t, f_t>::variable_selection(const std::vector<i_t>& fractional,
-                                                 const std::vector<f_t>& solution,
-                                                 logger_t& log)
+std::pair<i_t, f_t> pseudo_costs_t<i_t, f_t>::variable_selection_and_obj_estimate(
+  const std::vector<i_t>& fractional,
+  const std::vector<f_t>& solution,
+  f_t lower_bound,
+  logger_t& log)
 {
-  mutex.lock();
+  std::lock_guard<omp_mutex_t> lock(mutex);
 
   const i_t num_fractional = fractional.size();
   std::vector<f_t> pseudo_cost_up(num_fractional);
   std::vector<f_t> pseudo_cost_down(num_fractional);
   std::vector<f_t> score(num_fractional);
+  f_t estimate = lower_bound;
 
   i_t num_initialized_down;
   i_t num_initialized_up;
@@ -296,6 +563,9 @@ i_t pseudo_costs_t<i_t, f_t>::variable_selection(const std::vector<i_t>& fractio
     const f_t f_up    = std::ceil(solution[j]) - solution[j];
     score[k] =
       std::max(f_down * pseudo_cost_down[k], eps) * std::max(f_up * pseudo_cost_up[k], eps);
+
+    estimate += std::min(std::max(pseudo_cost_down[k] * f_down, eps),
+                         std::max(pseudo_cost_up[k] * f_up, eps));
   }
 
   i_t branch_var = fractional[0];
@@ -312,9 +582,7 @@ i_t pseudo_costs_t<i_t, f_t>::variable_selection(const std::vector<i_t>& fractio
   log.printf(
     "pc branching on %d. Value %e. Score %e\n", branch_var, solution[branch_var], score[select]);
 
-  mutex.unlock();
-
-  return branch_var;
+  return {branch_var, estimate};
 }
 
 template <typename i_t, typename f_t>
@@ -356,6 +624,29 @@ template void strong_branching<int, double>(const lp_problem_t<int, double>& ori
                                             const std::vector<double>& edge_norms,
                                             pseudo_costs_t<int, double>& pc);
 
+template rounding_direction_t martin_criteria(double val, double root_val);
+
+template branch_variable_t<int> line_search_diving(const std::vector<int>& fractional,
+                                                   const std::vector<double>& solution,
+                                                   const std::vector<double>& root_solution,
+                                                   logger_t& log);
+
+template branch_variable_t<int> pseudocost_diving(pseudo_costs_t<int, double>& pc,
+                                                  const std::vector<int>& fractional,
+                                                  const std::vector<double>& solution,
+                                                  const std::vector<double>& root_solution,
+                                                  logger_t& log);
+
+template branch_variable_t<int> guided_diving(pseudo_costs_t<int, double>& pc,
+                                              const std::vector<int>& fractional,
+                                              const std::vector<double>& solution,
+                                              const std::vector<double>& incumbent,
+                                              logger_t& log);
+
+template branch_variable_t<int> coefficient_diving(const lp_problem_t<int, double>& lp_problem,
+                                                   const std::vector<int>& fractional,
+                                                   const std::vector<double>& solution,
+                                                   logger_t& log);
 #endif
 
 }  // namespace cuopt::linear_programming::dual_simplex

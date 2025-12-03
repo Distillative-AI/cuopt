@@ -59,6 +59,7 @@ class mip_node_t {
       node_id(0),
       branch_var(-1),
       branch_dir(rounding_direction_t::NONE),
+      objective_estimate(inf),
       vstatus(basis)
   {
     children[0] = nullptr;
@@ -80,6 +81,7 @@ class mip_node_t {
       branch_var(branch_variable),
       branch_dir(branch_direction),
       fractional_val(branch_var_value),
+      objective_estimate(parent_node->objective_estimate),
       vstatus(basis)
 
   {
@@ -227,17 +229,19 @@ class mip_node_t {
   mip_node_t<i_t, f_t> detach_copy() const
   {
     mip_node_t<i_t, f_t> copy(lower_bound, vstatus);
-    copy.branch_var       = branch_var;
-    copy.branch_dir       = branch_dir;
-    copy.branch_var_lower = branch_var_lower;
-    copy.branch_var_upper = branch_var_upper;
-    copy.fractional_val   = fractional_val;
-    copy.node_id          = node_id;
+    copy.branch_var         = branch_var;
+    copy.branch_dir         = branch_dir;
+    copy.branch_var_lower   = branch_var_lower;
+    copy.branch_var_upper   = branch_var_upper;
+    copy.fractional_val     = fractional_val;
+    copy.objective_estimate = objective_estimate;
+    copy.node_id            = node_id;
     return copy;
   }
 
   node_status_t status;
   f_t lower_bound;
+  f_t objective_estimate;
   i_t depth;
   i_t node_id;
   i_t branch_var;

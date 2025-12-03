@@ -26,7 +26,7 @@ struct diving_root_t {
 
   friend bool operator>(const diving_root_t<i_t, f_t>& a, const diving_root_t<i_t, f_t>& b)
   {
-    return a.node.lower_bound > b.node.lower_bound;
+    return a.node.objective_estimate > b.node.objective_estimate;
   }
 };
 
