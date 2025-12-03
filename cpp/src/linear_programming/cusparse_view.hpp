@@ -130,6 +130,8 @@ class cusparse_view_t {
   std::vector<cusparseDnVecDescr_t> next_AtYs_vector;
   std::vector<cusparseDnVecDescr_t> tmp_dual_vector;
   std::vector<cusparseDnVecDescr_t> reflected_primal_solution_vector;
+  std::vector<cusparseDnVecDescr_t> delta_primal_solution_vector; // Will be initialized by infeasiblity_information which owns the data
+  std::vector<cusparseDnVecDescr_t> delta_dual_solution_vector; // Will be initialized by infeasiblity_information which owns the data
 
   // cusparse view of At * Y batch computation
   cusparseDnMatDescr_t batch_current_AtYs;

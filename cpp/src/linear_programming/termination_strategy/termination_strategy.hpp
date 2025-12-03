@@ -32,11 +32,13 @@ class pdlp_termination_strategy_t {
  public:
   pdlp_termination_strategy_t(raft::handle_t const* handle_ptr,
                               problem_t<i_t, f_t>& op_problem,
+                              const problem_t<i_t, f_t>& scaled_op_problem,
                               cusparse_view_t<i_t, f_t>& cusparse_view,
+                              const cusparse_view_t<i_t, f_t>& scaled_cusparse_view,
                               const i_t primal_size,
                               const i_t dual_size,
+                              const pdlp_initial_scaling_strategy_t<i_t, f_t>& scaling_strategy, // Only used for cuPDLPx infeaislbity detection 
                               const pdlp_solver_settings_t<i_t, f_t>& settings,
-                              cusparse_view_t<i_t, f_t>& last_restart_cusparse_view,
                               const std::vector<pdlp_climber_strategy_t>& climber_strategies);
 
   void evaluate_termination_criteria(
@@ -44,8 +46,8 @@ class pdlp_termination_strategy_t {
     rmm::device_uvector<f_t>& primal_iterate,
     rmm::device_uvector<f_t>& dual_iterate,
     const rmm::device_uvector<f_t>& dual_slack, // // Only useful in cuPDLPx restart mode
-    rmm::device_uvector<f_t>& last_restart_primal_iterate, // Only useful for infeasiblity detection
-  rmm::device_uvector<f_t>& last_restart_dual_iterate, // Only useful for infeasiblity detection
+    rmm::device_uvector<f_t>& delta_primal_iterate, // Only useful for infeasiblity detection
+    rmm::device_uvector<f_t>& delta_dual_iterate, // Only useful for infeasiblity detection
     i_t total_pdlp_iterations,
     const rmm::device_uvector<f_t>& combined_bounds,  // Only useful if per_constraint_residual
     const rmm::device_uvector<f_t>&

@@ -537,6 +537,12 @@ void pdhg_solver_t<i_t, f_t>::compute_next_primal_dual_solution_reflected(
       // Compute next primal
       compute_At_y();
 
+#ifdef CUPDLP_DEBUG_MODE
+print("current_saddle_point_state_.get_primal_solution()", current_saddle_point_state_.get_primal_solution());
+print("problem_ptr->objective_coefficients", problem_ptr->objective_coefficients);
+print("current_saddle_point_state_.get_current_AtY()", current_saddle_point_state_.get_current_AtY());
+#endif
+
       if (!batch_mode_)
       {
         cub::DeviceTransform::Transform(
@@ -551,13 +557,6 @@ void pdhg_solver_t<i_t, f_t>::compute_next_primal_dual_solution_reflected(
       }
       else
       {
-#ifdef CUPDLP_DEBUG_MODE
-print("current_saddle_point_state_.get_primal_solution()", current_saddle_point_state_.get_primal_solution());
-print("problem_ptr->objective_coefficients", problem_ptr->objective_coefficients);
-print("current_saddle_point_state_.get_current_AtY()", current_saddle_point_state_.get_current_AtY());
-
-#endif
-
         cub::DeviceTransform::Transform(
         cuda::std::make_tuple(current_saddle_point_state_.get_primal_solution().data(),
                               problem_wrap_container(problem_ptr->objective_coefficients),

@@ -8,6 +8,9 @@
 #include <linear_programming/pdlp_constants.hpp>
 #include <linear_programming/termination_strategy/infeasibility_information.hpp>
 #include <linear_programming/utils.cuh>
+#include <linear_programming/restart_strategy/pdlp_restart_strategy.cuh>
+#include <linear_programming/initial_scaling_strategy/initial_scaling.cuh>
+
 #include <cuopt/linear_programming/utilities/segmented_sum_handler.cuh>
 
 #include <mip/mip_constants.hpp>
@@ -26,19 +29,22 @@ template <typename i_t, typename f_t>
 infeasibility_information_t<i_t, f_t>::infeasibility_information_t(
   raft::handle_t const* handle_ptr,
   problem_t<i_t, f_t>& op_problem,
+  const problem_t<i_t, f_t>& op_problem_scaled,
   cusparse_view_t<i_t, f_t>& cusparse_view,
+  const cusparse_view_t<i_t, f_t>& scaled_cusparse_view,
   i_t primal_size,
   i_t dual_size,
+  const pdlp_initial_scaling_strategy_t<i_t, f_t>& scaling_strategy,
   bool infeasibility_detection,
-  cusparse_view_t<i_t, f_t>& last_restart_cusparse_view,
   const std::vector<pdlp_climber_strategy_t>& climber_strategies)
   : handle_ptr_(handle_ptr),
     stream_view_(handle_ptr_->get_stream()),
     primal_size_h_(primal_size),
     dual_size_h_(dual_size),
     problem_ptr(&op_problem),
+    op_problem_scaled_(op_problem_scaled),
     op_problem_cusparse_view_(cusparse_view),
-    last_restart_cusparse_view_(last_restart_cusparse_view),
+    scaled_cusparse_view_(scaled_cusparse_view),
     primal_ray_inf_norm_(climber_strategies.size(), stream_view_),
     primal_ray_inf_norm_inverse_{stream_view_},
     neg_primal_ray_inf_norm_inverse_{stream_view_},
@@ -65,16 +71,17 @@ infeasibility_information_t<i_t, f_t>::infeasibility_information_t(
     homogenous_dual_upper_bounds_{
       (!infeasibility_detection) ? 0 : static_cast<size_t>(dual_size_h_), stream_view_},
     primal_slack_{
-      (pdlp_hyper_params::use_reflected_primal_dual) ? static_cast<size_t>(dual_size_h_ * climber_strategies.size()) : 0,
+      (is_cupdlpx_restart<i_t, f_t>()) ? static_cast<size_t>(dual_size_h_ * climber_strategies.size()) : 0,
       stream_view_},
     dual_slack_{
-      (pdlp_hyper_params::use_reflected_primal_dual) ? static_cast<size_t>(primal_size_h_ * climber_strategies.size()) : 0,
+      (is_cupdlpx_restart<i_t, f_t>()) ? static_cast<size_t>(primal_size_h_ * climber_strategies.size()) : 0,
       stream_view_},
     sum_primal_slack_{climber_strategies.size(), stream_view_},
     sum_dual_slack_{climber_strategies.size(), stream_view_},
     reusable_device_scalar_value_1_{1.0, stream_view_},
     reusable_device_scalar_value_0_{0.0, stream_view_},
     reusable_device_scalar_value_neg_1_{-1.0, stream_view_},
+    scaling_strategy_(scaling_strategy),
     climber_strategies_(climber_strategies)
 {
   if (infeasibility_detection) {
@@ -119,6 +126,12 @@ infeasibility_information_t<i_t, f_t>::infeasibility_information_t(
 
     size_of_buffer_       = std::max({temp_storage_bytes_1, temp_storage_bytes_2});
     this->rmm_tmp_buffer_ = rmm::device_buffer{size_of_buffer_, stream_view_};
+
+    RAFT_CUDA_TRY(cudaMemsetAsync(dual_ray_linear_objective_.data(), 0, sizeof(f_t) * dual_ray_linear_objective_.size(), stream_view_));
+    RAFT_CUDA_TRY(cudaMemsetAsync(max_dual_ray_infeasibility_.data(), 0, sizeof(f_t) * max_dual_ray_infeasibility_.size(), stream_view_));
+
+    RAFT_CUDA_TRY(cudaMemsetAsync(primal_ray_linear_objective_.data(), 0, sizeof(f_t) * primal_ray_linear_objective_.size(), stream_view_));
+    RAFT_CUDA_TRY(cudaMemsetAsync(max_primal_ray_infeasibility_.data(), 0, sizeof(f_t) * max_primal_ray_infeasibility_.size(), stream_view_));
   }
 }
 
@@ -145,13 +158,13 @@ __global__ void compute_remaining_stats_kernel(
          *infeasibility_information_view.dual_ray_linear_objective);
 #endif
   if (scaling_factor < 0.0 || scaling_factor > 0.0) {
-    *infeasibility_information_view.max_dual_ray_infeasibility =
-      *infeasibility_information_view.max_dual_ray_infeasibility / scaling_factor;
-    *infeasibility_information_view.dual_ray_linear_objective =
-      *infeasibility_information_view.dual_ray_linear_objective / scaling_factor;
+    infeasibility_information_view.max_dual_ray_infeasibility[0] =
+      infeasibility_information_view.max_dual_ray_infeasibility[0] / scaling_factor;
+    infeasibility_information_view.dual_ray_linear_objective[0] =
+      infeasibility_information_view.dual_ray_linear_objective[0] / scaling_factor;
   } else {
-    *infeasibility_information_view.max_dual_ray_infeasibility = 0.0;
-    *infeasibility_information_view.dual_ray_linear_objective  = 0.0;
+    infeasibility_information_view.max_dual_ray_infeasibility[0] = f_t(0.0);
+    infeasibility_information_view.dual_ray_linear_objective[0]  = f_t(0.0);
   }
 #ifdef PDLP_DEBUG_MODE
   printf("    After max_dual_ray_infeasibility=%lf dual_ray_linear_objective=%lf\n",
@@ -161,13 +174,13 @@ __global__ void compute_remaining_stats_kernel(
 #endif
   // Update primal max ray infeasibility
   if (*infeasibility_information_view.primal_ray_inf_norm > f_t(0.0)) {
-    *infeasibility_information_view.max_primal_ray_infeasibility =
-      raft::max(*infeasibility_information_view.max_primal_ray_infeasibility,
+    infeasibility_information_view.max_primal_ray_infeasibility[0] =
+      raft::max(infeasibility_information_view.max_primal_ray_infeasibility[0],
                 *infeasibility_information_view.primal_ray_max_violation) /
       *infeasibility_information_view.primal_ray_inf_norm;
   } else {
-    *infeasibility_information_view.max_primal_ray_infeasibility = f_t(0.0);
-    *infeasibility_information_view.primal_ray_linear_objective  = f_t(0.0);
+    infeasibility_information_view.max_primal_ray_infeasibility[0] = f_t(0.0);
+    infeasibility_information_view.primal_ray_linear_objective[0]  = f_t(0.0);
   }
 #ifdef PDLP_DEBUG_MODE
   printf("    max_primal_ray_infeasibility=%lf primal_ray_linear_objective=%lf\n",
@@ -204,14 +217,19 @@ void infeasibility_information_t<i_t, f_t>::compute_infeasibility_information(
   raft::common::nvtx::range fun_scope("compute_infeasibility_information");
   using f_t2                = typename type_2<f_t>::type;
 
-  if (true)
+  if (is_cupdlpx_restart<i_t, f_t>())
   {
-    print("delta_primal_solution before", primal_ray);
-    print("delta_dual_solution before", dual_ray);
-
+    const f_t bound_rescaling = (pdlp_hyper_params::bound_objective_rescaling) ? scaling_strategy_.get_h_bound_rescaling() : f_t(1.0);
+    const f_t objective_rescaling = (pdlp_hyper_params::bound_objective_rescaling) ? scaling_strategy_.get_h_objective_rescaling() : f_t(1.0);
+    
+#ifdef CUPDLP_DEBUG_MODE
+    print("delta_primal_solution after scale before mod", primal_ray);
+    print("delta_dual_solution after scale before mod", dual_ray);
+#endif
+  
     cub::DeviceTransform::Transform(
       cuda::std::make_tuple(primal_ray.data(),
-      problem_wrap_container(problem_ptr->variable_bounds)),
+      problem_wrap_container(op_problem_scaled_.variable_bounds)),
       primal_ray.data(),
       primal_ray.size(),
       [] HD (f_t primal, f_t2 bounds){
@@ -231,23 +249,24 @@ void infeasibility_information_t<i_t, f_t>::compute_infeasibility_information(
 
       cub::DeviceTransform::Transform(
         cuda::std::make_tuple(dual_ray.data(),
-                                problem_wrap_container(problem_ptr->constraint_lower_bounds),
-                                problem_wrap_container(problem_ptr->constraint_upper_bounds)),
+                                problem_wrap_container(op_problem_scaled_.constraint_lower_bounds),
+                                problem_wrap_container(op_problem_scaled_.constraint_upper_bounds)),
         dual_ray.data(),
         dual_ray.size(),
           [] HD (f_t dual, f_t lower, f_t upper){
             f_t dual_to_return = dual;
             if (!isfinite(lower))
-              dual_to_return = cuda::std::max(dual_to_return, f_t(0.0));
-            if (!isfinite(upper))
               dual_to_return = cuda::std::min(dual_to_return, f_t(0.0));
+            if (!isfinite(upper))
+              dual_to_return = cuda::std::max(dual_to_return, f_t(0.0));
             return dual_to_return;
           },
         stream_view_);
 
+#ifdef CUPDLP_DEBUG_MODE
         print("delta_primal_solution after", primal_ray);
         print("delta_dual_solution after", dual_ray);
-
+#endif
       // Inf norm of dual ray
       segmented_sum_handler_.segmented_reduce_helper(dual_ray.data(), dual_ray_inf_norm_.data(), climber_strategies_.size(), dual_size_h_, max_abs_t<f_t>{}, f_t(0.0));
 
@@ -265,10 +284,12 @@ void infeasibility_information_t<i_t, f_t>::compute_infeasibility_information(
             stream_view_);
         }
       }
-
-    printf("primal_ray_inf_norm=%lf\n", primal_ray_inf_norm_.element(0, stream_view_));
-
-    printf("dual_ray_inf_norm=%lf\n", dual_ray_inf_norm_.element(0, stream_view_));
+#ifdef CUPDLP_DEBUG_MODE
+        print("delta_primal_solution after scale", primal_ray);
+        print("delta_dual_solution after scale", dual_ray);
+        printf("primal_ray_inf_norm=%lf\n", primal_ray_inf_norm_.element(0, stream_view_));
+        printf("dual_ray_inf_norm=%lf\n", dual_ray_inf_norm_.element(0, stream_view_));
+#endif
 
       // TODO batch mode: for not deterministic mode use SpMM
       for (size_t i = 0; i < climber_strategies_.size(); ++i)
@@ -276,50 +297,49 @@ void infeasibility_information_t<i_t, f_t>::compute_infeasibility_information(
         RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmv(handle_ptr_->get_cusparse_handle(),
                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
                                       reusable_device_scalar_value_1_.data(),
-                                      last_restart_cusparse_view_.A,
-                                      last_restart_cusparse_view_.primal_solution_vector[i],
+                                      scaled_cusparse_view_.A,
+                                      scaled_cusparse_view_.delta_primal_solution_vector[i],
                                       reusable_device_scalar_value_0_.data(),
-                                      last_restart_cusparse_view_.tmp_dual_vector[i],
+                                      scaled_cusparse_view_.tmp_dual_vector[i],
                                       CUSPARSE_SPMV_CSR_ALG2,
-                                      (f_t*)last_restart_cusparse_view_.buffer_non_transpose.data(),
+                                      (f_t*)scaled_cusparse_view_.buffer_non_transpose.data(),
                                       stream_view_));
         RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmv(handle_ptr_->get_cusparse_handle(),
                                                     CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                                    reusable_device_scalar_value_neg_1_.data(),
-                                                    last_restart_cusparse_view_.A_T,
-                                                    last_restart_cusparse_view_.dual_solution_vector[i],
+                                                    reusable_device_scalar_value_1_.data(),
+                                                    scaled_cusparse_view_.A_T,
+                                                    scaled_cusparse_view_.delta_dual_solution_vector[i],
                                                     reusable_device_scalar_value_0_.data(),
-                                                    last_restart_cusparse_view_.tmp_primal_vector[i],
+                                                    scaled_cusparse_view_.tmp_primal_vector[i],
                                                     CUSPARSE_SPMV_CSR_ALG2,
-                                                    (f_t*)last_restart_cusparse_view_.buffer_transpose.data(),
+                                                    (f_t*)scaled_cusparse_view_.buffer_transpose.data(),
                                                     stream_view_));
       }
 
-      print("primal_product", current_pdhg_solver.get_primal_tmp_resource());
-      print("dual_product", current_pdhg_solver.get_dual_tmp_resource());
+#ifdef CUPDLP_DEBUG_MODE
+      print("primal_product", current_pdhg_solver.get_dual_tmp_resource());
+      print("dual_product", current_pdhg_solver.get_primal_tmp_resource());
+#endif
 
-      // Dot product on each objective . delta primal = primal_ray_linear_objective
-      segmented_sum_handler_.segmented_sum_helper(
-        thrust::make_transform_iterator(
-          thrust::make_zip_iterator(thrust::make_tuple(
-            problem_wrap_container(problem_ptr->objective_coefficients), primal_ray.data())),
-          tuple_multiplies<f_t>{}),
-        primal_ray_linear_objective_.data(),
-        climber_strategies_.size(),
-        primal_size_h_
-      );
+    // Dot product on each objective . delta primal = primal_ray_linear_objective
+    segmented_sum_handler_.segmented_sum_helper(
+      thrust::make_transform_iterator(
+        thrust::make_zip_iterator(thrust::make_tuple(
+          problem_wrap_container(op_problem_scaled_.objective_coefficients), primal_ray.data())),
+        tuple_multiplies<f_t>{}),
+        thrust::make_transform_output_iterator(primal_ray_linear_objective_.data(), [bound_rescaling, objective_rescaling] __device__ (f_t out) { return out / (bound_rescaling * objective_rescaling); }),
+      climber_strategies_.size(),
+      primal_size_h_
+    );
 
+#ifdef CUPDLP_DEBUG_MODE
     printf("primal_ray_linear_objective before=%lf\n", primal_ray_linear_objective_.element(0, stream_view_));
+#endif
 
-
-      // TODO now: can't I just unscale ouais y a une grosse question de qu'est ce qui est scale unscale dans tout ça, compare avec lui et voir
-      // Unscale?
-      //cub::DeviceTransform::Transform(primal_ray_linear_objective_.data(), primal_ray_linear_objective_.data(), primal_ray_linear_objective_.size(), 
-      //[])
-    cub::DeviceTransform::Transform(
+  cub::DeviceTransform::Transform(
           cuda::std::make_tuple(dual_ray.data(),
-          problem_wrap_container(problem_ptr->constraint_lower_bounds),
-          problem_wrap_container(problem_ptr->constraint_upper_bounds)),
+          problem_wrap_container(op_problem_scaled_.constraint_lower_bounds),
+          problem_wrap_container(op_problem_scaled_.constraint_upper_bounds)),
           primal_slack_.data(),
           primal_slack_.size(),
           [] HD (f_t dual, f_t lower, f_t upper){
@@ -327,13 +347,14 @@ void infeasibility_information_t<i_t, f_t>::compute_infeasibility_information(
           },
           stream_view_);
 
+#ifdef CUPDLP_DEBUG_MODE
     print("primal_slack", primal_slack_);
-
+#endif
 
       using f_t2 = typename type_2<f_t>::type;
       cub::DeviceTransform::Transform(
         cuda::std::make_tuple(current_pdhg_solver.get_primal_tmp_resource().data(),
-        problem_wrap_container(problem_ptr->variable_bounds)),
+        problem_wrap_container(op_problem_scaled_.variable_bounds)),
         dual_slack_.data(),
         dual_slack_.size(),
         [] HD (f_t dual, f_t2 bounds){
@@ -343,8 +364,9 @@ void infeasibility_information_t<i_t, f_t>::compute_infeasibility_information(
         },
         stream_view_);
 
+#ifdef CUPDLP_DEBUG_MODE
     print("dual_slack", dual_slack_);
-
+#endif
 
       segmented_sum_handler_.segmented_sum_helper(primal_slack_.data(),
         sum_primal_slack_.data(),
@@ -358,63 +380,74 @@ void infeasibility_information_t<i_t, f_t>::compute_infeasibility_information(
         primal_size_h_
       );
 
+#ifdef CUPDLP_DEBUG_MODE
       printf("sum_primal_slack=%lf\n", sum_primal_slack_.element(0, stream_view_));
       printf("sum_dual_slack=%lf\n", sum_dual_slack_.element(0, stream_view_));
+#endif
 
-    // TODO now: theoritically should scale again here
     cub::DeviceTransform::Transform(
       cuda::std::make_tuple(current_pdhg_solver.get_dual_tmp_resource().data(),
-      problem_wrap_container(problem_ptr->constraint_lower_bounds),
-      problem_wrap_container(problem_ptr->constraint_upper_bounds)),
+      problem_wrap_container(op_problem_scaled_.constraint_lower_bounds),
+      problem_wrap_container(op_problem_scaled_.constraint_upper_bounds),
+      problem_wrap_container(scaling_strategy_.get_constraint_matrix_scaling_vector())
+    
+    ),
       primal_slack_.data(),
       primal_slack_.size(),
-      [] HD (f_t primal, f_t lower, f_t upper){
+      [] HD (f_t primal, f_t lower, f_t upper, f_t scale){
         // TODO why is it max max here?
-        return cuda::std::max(-primal, f_t(0.0)) * isfinite(lower) + cuda::std::max(primal, f_t(0.0)) * isfinite(upper);
+        return (cuda::std::max(-primal, f_t(0.0)) * isfinite(lower) + cuda::std::max(primal, f_t(0.0)) * isfinite(upper)) * scale;
       },
       stream_view_);
 
+#ifdef CUPDLP_DEBUG_MODE
     print("primal_slack", primal_slack_);
-
+#endif
 
   cub::DeviceTransform::Transform(
     cuda::std::make_tuple(current_pdhg_solver.get_primal_tmp_resource().data(),
-    problem_wrap_container(problem_ptr->variable_bounds)),
+    problem_wrap_container(op_problem_scaled_.variable_bounds),
+    problem_wrap_container(scaling_strategy_.get_variable_scaling_vector())
+  ),
     dual_slack_.data(),
     dual_slack_.size(),
-    [] HD (f_t dual, f_t2 bounds){
+    [] HD (f_t dual, f_t2 bounds, f_t scale){
       const f_t lower = get_lower(bounds);
       const f_t upper = get_upper(bounds);
       // TODO ask Chris: why is it max max above and max min here?
-      return cuda::std::max(-dual, f_t(0.0)) * !isfinite(lower) + cuda::std::min(-dual, f_t(0.0)) * !isfinite(upper);
+      return (cuda::std::max(-dual, f_t(0.0)) * !isfinite(lower) - cuda::std::min(-dual, f_t(0.0)) * !isfinite(upper)) * scale;
     },
     stream_view_);
+#ifdef CUPDLP_DEBUG_MODE
     print("dual_slack", dual_slack_);
-
+#endif
       // Inf norm to get max primal/dual infeasible
       segmented_sum_handler_.segmented_reduce_helper(primal_slack_.data(), max_primal_ray_infeasibility_.data(), climber_strategies_.size(), dual_size_h_, max_abs_t<f_t>{}, f_t(0.0));
-    printf("max_primal_ray_infeasibility=%lf\n", max_primal_ray_infeasibility_.element(0, stream_view_));
       segmented_sum_handler_.segmented_reduce_helper(dual_slack_.data(), max_dual_ray_infeasibility_.data(), climber_strategies_.size(), primal_size_h_, max_abs_t<f_t>{}, f_t(0.0));
+
+#ifdef CUPDLP_DEBUG_MODE
+      printf("max_primal_ray_infeasibility=%lf\n", max_primal_ray_infeasibility_.element(0, stream_view_));
     printf("max_dual_ray_infeasibility=%lf\n", max_dual_ray_infeasibility_.element(0, stream_view_));
+#endif
 
       cub::DeviceTransform::Transform(
         cuda::std::make_tuple(max_dual_ray_infeasibility_.data(), dual_ray_inf_norm_.data(), sum_primal_slack_.data(), sum_dual_slack_.data()),
         thrust::make_zip_iterator(max_dual_ray_infeasibility_.data(), dual_ray_linear_objective_.data()),
         dual_ray_linear_objective_.size(),
-        [] HD (f_t max_dual_ray_infeasibility, f_t dual_ray_inf_norm, f_t sum_primal_slack, f_t sum_dual_slack) -> thrust::tuple<f_t, f_t> {
+        [bound_rescaling, objective_rescaling] __device__ (f_t max_dual_ray_infeasibility, f_t dual_ray_inf_norm, f_t sum_primal_slack, f_t sum_dual_slack) -> thrust::tuple<f_t, f_t> {
           const f_t scaling_factor = cuda::std::max(max_dual_ray_infeasibility, dual_ray_inf_norm);
-          // TODO should be scaled here
           if (scaling_factor > f_t(0.0))
-            return {max_dual_ray_infeasibility / scaling_factor, (sum_primal_slack + sum_dual_slack) / scaling_factor};
+            return {max_dual_ray_infeasibility / scaling_factor, ((sum_primal_slack + sum_dual_slack) / (bound_rescaling * objective_rescaling)) / scaling_factor};
           else
             return {f_t(0.0), f_t(0.0)};
         },
         stream_view_);
+
+#ifdef CUPDLP_DEBUG_MODE
         printf("max_dual_ray_infeasibility=%lf\n", max_dual_ray_infeasibility_.element(0, stream_view_));
         printf("dual_ray_objective=%lf\n", dual_ray_linear_objective_.element(0, stream_view_));
-
-        exit(1);
-  }
+#endif
+}
   else
   {
     my_inf_norm(primal_ray, primal_ray_inf_norm_, handle_ptr_);
@@ -656,12 +689,12 @@ typename infeasibility_information_t<i_t, f_t>::view_t infeasibility_information
 
   v.primal_ray_inf_norm          = primal_ray_inf_norm_.data();
   v.primal_ray_max_violation     = primal_ray_max_violation_.data();
-  v.max_primal_ray_infeasibility = max_primal_ray_infeasibility_.data();
-  v.primal_ray_linear_objective  = primal_ray_linear_objective_.data();
+  v.max_primal_ray_infeasibility = make_span(max_primal_ray_infeasibility_);
+  v.primal_ray_linear_objective  = make_span(primal_ray_linear_objective_);
 
   v.dual_ray_inf_norm          = dual_ray_inf_norm_.data();
-  v.max_dual_ray_infeasibility = max_dual_ray_infeasibility_.data();
-  v.dual_ray_linear_objective  = dual_ray_linear_objective_.data();
+  v.max_dual_ray_infeasibility = make_span(max_dual_ray_infeasibility_);
+  v.dual_ray_linear_objective  = make_span(dual_ray_linear_objective_);
 
   v.reduced_cost_inf_norm = reduced_cost_inf_norm_.data();
 

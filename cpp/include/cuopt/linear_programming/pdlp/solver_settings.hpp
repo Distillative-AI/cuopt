@@ -179,8 +179,8 @@ class pdlp_solver_settings_t {
     f_t relative_primal_tolerance   = 1.0e-4;
     f_t absolute_gap_tolerance      = 1.0e-4;
     f_t relative_gap_tolerance      = 1.0e-4;
-    f_t primal_infeasible_tolerance = 1.0e-8;
-    f_t dual_infeasible_tolerance   = 1.0e-8;
+    f_t primal_infeasible_tolerance = 1.0e-10;
+    f_t dual_infeasible_tolerance   = 1.0e-10;
   };
 
   tolerances_t get_tolerances() const noexcept;

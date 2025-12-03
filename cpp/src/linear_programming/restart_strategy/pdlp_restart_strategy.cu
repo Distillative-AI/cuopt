@@ -141,7 +141,7 @@ const std::vector<pdlp_climber_strategy_t>& climber_strategies)
                                     current_duality_gap_.primal_gradient_.data(),
                                     current_duality_gap_.dual_gradient_.data())},
     last_restart_duality_gap_cusparse_view_{
-      (is_kkt_restart<i_t, f_t>()) // We need this cuSparse view for both trust region and cuPDLPx with batch mode
+      (!is_trust_region_restart<i_t, f_t>())
         ? cusparse_view_t<i_t, f_t>(handle_ptr_, cusparse_view.A_, cusparse_view.A_indices_, climber_strategies)
         : cusparse_view_t<i_t, f_t>(handle_ptr_,
                                     op_problem,

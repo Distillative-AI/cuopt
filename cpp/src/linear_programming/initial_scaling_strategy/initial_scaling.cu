@@ -399,6 +399,19 @@ __global__ void scale_transposed_problem_kernel(
 }
 
 template <typename i_t, typename f_t>
+f_t pdlp_initial_scaling_strategy_t<i_t, f_t>::get_h_bound_rescaling() const
+{
+  return h_bound_rescaling;
+}
+
+template <typename i_t, typename f_t>
+f_t pdlp_initial_scaling_strategy_t<i_t, f_t>::get_h_objective_rescaling() const
+{
+  return h_objective_rescaling;
+}
+
+
+template <typename i_t, typename f_t>
 void pdlp_initial_scaling_strategy_t<i_t, f_t>::scale_problem()
 {
   raft::common::nvtx::range fun_scope("scale_problem");
@@ -734,14 +747,14 @@ const problem_t<i_t, f_t>& pdlp_initial_scaling_strategy_t<i_t, f_t>::get_scaled
 }
 
 template <typename i_t, typename f_t>
-rmm::device_uvector<f_t>&
-pdlp_initial_scaling_strategy_t<i_t, f_t>::get_constraint_matrix_scaling_vector()
+const rmm::device_uvector<f_t>&
+pdlp_initial_scaling_strategy_t<i_t, f_t>::get_constraint_matrix_scaling_vector() const
 {
   return cummulative_constraint_matrix_scaling_;
 }
 
 template <typename i_t, typename f_t>
-rmm::device_uvector<f_t>& pdlp_initial_scaling_strategy_t<i_t, f_t>::get_variable_scaling_vector()
+const rmm::device_uvector<f_t>& pdlp_initial_scaling_strategy_t<i_t, f_t>::get_variable_scaling_vector() const
 {
   return cummulative_variable_scaling_;
 }

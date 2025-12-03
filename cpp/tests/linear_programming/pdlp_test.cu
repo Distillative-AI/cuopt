@@ -684,6 +684,9 @@ TEST(pdlp_class, per_constraint_test)
         d_initial_primal,
         d_initial_primal,
         solver.pdhg_solver_.get_dual_slack(),
+        d_initial_primal,
+        d_initial_primal,
+        0,
         problem.combined_bounds,
         problem.objective_coefficients);
     pdlp_termination_status_t termination_current = current_termination_strategy.get_termination_status(0);
@@ -705,6 +708,9 @@ TEST(pdlp_class, per_constraint_test)
         d_initial_primal,
         d_initial_primal,
         solver.pdhg_solver_.get_dual_slack(),
+        d_initial_primal,
+        d_initial_primal,
+        0,
         problem.combined_bounds,
         problem.objective_coefficients);
       
@@ -1248,6 +1254,165 @@ TEST(pdlp_class, cupdlpx_infeasible_detection)
     solve_lp(&handle_, op_problem, solver_settings);
 
   EXPECT_EQ(solution.get_termination_status(0), pdlp_termination_status_t::PrimalInfeasible);
+}
+
+TEST(pdlp_class, cupdlpx_infeasible_detection_afiro_new_bounds)
+{
+  const raft::handle_t handle_{};
+
+  auto solver_settings   = pdlp_solver_settings_t<int, double>{};
+  solver_settings.method = cuopt::linear_programming::method_t::PDLP;
+  solver_settings.detect_infeasibility = true;
+
+
+  auto path = make_path_absolute("linear_programming/afiro_original.mps");
+  cuopt::mps_parser::mps_data_model_t<int, double> op_problem =
+    cuopt::mps_parser::parse_mps<int, double>(path, true);
+
+  for (size_t i = 1; i < 8; ++i) 
+  {
+    op_problem.get_variable_lower_bounds()[i] = 7.0;
+    op_problem.get_variable_upper_bounds()[i] = 8.0;
+  }
+  for (size_t i = 13; i < 27; ++i) 
+  {
+    op_problem.get_variable_lower_bounds()[i] = 1.0;
+    op_problem.get_variable_upper_bounds()[i] = 5.0;
+  }
+
+
+  optimization_problem_solution_t<int, double> solution =
+    solve_lp(&handle_, op_problem, solver_settings);
+
+  EXPECT_EQ(solution.get_termination_status(0), pdlp_termination_status_t::PrimalInfeasible);
+}
+
+TEST(pdlp_class, cupdlpx_batch_infeasible_detection)
+{
+  const raft::handle_t handle_{};
+
+  EXPECT_FALSE(cuopt::linear_programming::detail::deterministic_batch_pdlp);
+
+  cuopt::linear_programming::detail::deterministic_batch_pdlp  = true;
+
+  auto solver_settings   = pdlp_solver_settings_t<int, double>{};
+  solver_settings.method = cuopt::linear_programming::method_t::PDLP;
+  solver_settings.detect_infeasibility = true;
+
+  constexpr int batch_size = 5;
+
+  auto path = make_path_absolute("linear_programming/good-mps-fixed-ranges.mps");
+  cuopt::mps_parser::mps_data_model_t<int, double> op_problem =
+    cuopt::mps_parser::parse_mps<int, double>(path, true);
+
+  const auto& variable_lower_bounds = op_problem.get_variable_lower_bounds();
+  const auto& variable_upper_bounds = op_problem.get_variable_upper_bounds();
+
+  std::vector<double> new_variable_lower_bounds(variable_lower_bounds.size() * batch_size);
+  std::vector<double> new_variable_upper_bounds(variable_upper_bounds.size() * batch_size);
+
+  // Copy the bounds
+  for (size_t i = 0; i < batch_size; i++)
+    for (size_t j = 0; j < variable_lower_bounds.size(); ++j)
+      new_variable_lower_bounds[i * variable_lower_bounds.size() + j] = variable_lower_bounds[j];
+  for (size_t i = 0; i < batch_size; i++)
+    for (size_t j = 0; j < variable_upper_bounds.size(); ++j)
+      new_variable_upper_bounds[i * variable_upper_bounds.size() + j] = variable_upper_bounds[j];
+
+  op_problem.set_variable_lower_bounds(new_variable_lower_bounds.data(), new_variable_lower_bounds.size());
+  op_problem.set_variable_upper_bounds(new_variable_upper_bounds.data(), new_variable_upper_bounds.size());
+
+  optimization_problem_solution_t<int, double> solution =
+    solve_lp(&handle_, op_problem, solver_settings);
+
+  EXPECT_EQ(solution.get_termination_status(0), pdlp_termination_status_t::PrimalInfeasible);
+
+  // All should have the bitwise same termination reason, and iterations
+  const auto ref_stats = (int)solution.get_termination_status(0);
+  const auto ref_it = solution.get_additional_termination_information(0).number_of_steps_taken;
+  const auto ref_it_total = solution.get_additional_termination_information(0).total_number_of_attempted_steps;
+
+  for (size_t i = 1; i < batch_size; ++i)
+  {
+    EXPECT_EQ(ref_stats, (int)solution.get_termination_status(i));
+    EXPECT_EQ(ref_it, solution.get_additional_termination_information(i).number_of_steps_taken);
+    EXPECT_EQ(ref_it_total, solution.get_additional_termination_information(i).total_number_of_attempted_steps);
+  }
+
+  cuopt::linear_programming::detail::deterministic_batch_pdlp  = false;
+}
+
+TEST(pdlp_class, cupdlpx_infeasible_detection_batch_afiro_new_bounds)
+{
+  const raft::handle_t handle_{};
+
+  EXPECT_FALSE(cuopt::linear_programming::detail::deterministic_batch_pdlp);
+
+  cuopt::linear_programming::detail::deterministic_batch_pdlp  = true;
+
+  auto solver_settings   = pdlp_solver_settings_t<int, double>{};
+  solver_settings.method = cuopt::linear_programming::method_t::PDLP;
+  solver_settings.detect_infeasibility = true;
+
+
+  auto path = make_path_absolute("linear_programming/afiro_original.mps");
+  cuopt::mps_parser::mps_data_model_t<int, double> op_problem =
+    cuopt::mps_parser::parse_mps<int, double>(path, true);
+
+  for (size_t i = 1; i < 8; ++i) 
+  {
+    op_problem.get_variable_lower_bounds()[i] = 7.0;
+    op_problem.get_variable_upper_bounds()[i] = 8.0;
+  }
+  for (size_t i = 13; i < 27; ++i) 
+  {
+    op_problem.get_variable_lower_bounds()[i] = 1.0;
+    op_problem.get_variable_upper_bounds()[i] = 5.0;
+  }
+
+
+  optimization_problem_solution_t<int, double> solution =
+    solve_lp(&handle_, op_problem, solver_settings);
+
+  EXPECT_EQ(solution.get_termination_status(0), pdlp_termination_status_t::PrimalInfeasible);
+
+  constexpr int batch_size = 5;
+
+  const auto& variable_lower_bounds = op_problem.get_variable_lower_bounds();
+  const auto& variable_upper_bounds = op_problem.get_variable_upper_bounds();
+
+  std::vector<double> new_variable_lower_bounds(variable_lower_bounds.size() * batch_size);
+  std::vector<double> new_variable_upper_bounds(variable_upper_bounds.size() * batch_size);
+
+  // Copy the bounds
+  for (size_t i = 0; i < batch_size; i++)
+    for (size_t j = 0; j < variable_lower_bounds.size(); ++j)
+      new_variable_lower_bounds[i * variable_lower_bounds.size() + j] = variable_lower_bounds[j];
+  for (size_t i = 0; i < batch_size; i++)
+    for (size_t j = 0; j < variable_upper_bounds.size(); ++j)
+      new_variable_upper_bounds[i * variable_upper_bounds.size() + j] = variable_upper_bounds[j];
+
+  op_problem.set_variable_lower_bounds(new_variable_lower_bounds.data(), new_variable_lower_bounds.size());
+  op_problem.set_variable_upper_bounds(new_variable_upper_bounds.data(), new_variable_upper_bounds.size());
+
+
+  optimization_problem_solution_t<int, double> solution2 =
+  solve_lp(&handle_, op_problem, solver_settings);
+
+
+  // All should have the bitwise same termination reason, and iterations
+  const auto ref_stats = (int)solution.get_termination_status(0);
+  const auto ref_it = solution.get_additional_termination_information(0).number_of_steps_taken;
+  const auto ref_it_total = solution.get_additional_termination_information(0).total_number_of_attempted_steps;
+
+  for (size_t i = 0; i < batch_size; ++i)
+  {
+    EXPECT_EQ(ref_stats, (int)solution2.get_termination_status(i));
+    EXPECT_EQ(ref_it, solution2.get_additional_termination_information(i).number_of_steps_taken);
+    EXPECT_EQ(ref_it_total, solution2.get_additional_termination_information(i).total_number_of_attempted_steps);
+  }
+
+  cuopt::linear_programming::detail::deterministic_batch_pdlp  = false;
 }
 
 }  // namespace cuopt::linear_programming::test

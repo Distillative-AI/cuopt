@@ -23,11 +23,13 @@ template <typename i_t, typename f_t>
 pdlp_termination_strategy_t<i_t, f_t>::pdlp_termination_strategy_t(
   raft::handle_t const* handle_ptr,
   problem_t<i_t, f_t>& op_problem,
+  const problem_t<i_t, f_t>& scaled_op_problem,
   cusparse_view_t<i_t, f_t>& cusparse_view,
+                              const cusparse_view_t<i_t, f_t>& scaled_cusparse_view,
   const i_t primal_size,
   const i_t dual_size,
+  const pdlp_initial_scaling_strategy_t<i_t, f_t>& scaling_strategy,
   const pdlp_solver_settings_t<i_t, f_t>& settings,
-  cusparse_view_t<i_t, f_t>& last_restart_cusparse_view,
   const std::vector<pdlp_climber_strategy_t>& climber_strategies)
   : handle_ptr_(handle_ptr),
     stream_view_(handle_ptr_->get_stream()),
@@ -35,11 +37,13 @@ pdlp_termination_strategy_t<i_t, f_t>::pdlp_termination_strategy_t(
     convergence_information_{handle_ptr_, op_problem, cusparse_view, primal_size, dual_size, climber_strategies},
     infeasibility_information_{handle_ptr_,
                               op_problem,
+                              scaled_op_problem,
                               cusparse_view,
+                              scaled_cusparse_view,
                               primal_size,
                               dual_size,
+                              scaling_strategy,
                               settings.detect_infeasibility,
-                              last_restart_cusparse_view,
                               climber_strategies},
     termination_status_(climber_strategies.size()),
     settings_(settings),
@@ -121,8 +125,8 @@ void pdlp_termination_strategy_t<i_t, f_t>::evaluate_termination_criteria(
   rmm::device_uvector<f_t>& primal_iterate,
   rmm::device_uvector<f_t>& dual_iterate,
   const rmm::device_uvector<f_t>& dual_slack,
-  rmm::device_uvector<f_t>& last_restart_primal_iterate,
-  rmm::device_uvector<f_t>& last_restart_dual_iterate,
+  rmm::device_uvector<f_t>& delta_primal_iterate,
+  rmm::device_uvector<f_t>& delta_dual_iterate,
   i_t total_pdlp_iterations,
   const rmm::device_uvector<f_t>& combined_bounds,
   const rmm::device_uvector<f_t>& objective_coefficients)
@@ -139,12 +143,12 @@ void pdlp_termination_strategy_t<i_t, f_t>::evaluate_termination_criteria(
   if (settings_.detect_infeasibility) {
     // TODO PDLP infeasible: looks like he is not checking as often as we do
     if (pdlp_hyper_params::use_reflected_primal_dual) {
-      if (total_pdlp_iterations % pdlp_hyper_params::major_iteration == 0 && total_pdlp_iterations < 3 * pdlp_hyper_params::major_iteration)
+      if (total_pdlp_iterations != 0 && total_pdlp_iterations % pdlp_hyper_params::major_iteration == 0 && total_pdlp_iterations < 3 * pdlp_hyper_params::major_iteration)
       {
         infeasibility_information_.compute_infeasibility_information(
         current_pdhg_solver,
-        last_restart_dual_iterate,
-        last_restart_primal_iterate);
+        delta_primal_iterate,
+        delta_dual_iterate);
       }
     }
     else {
@@ -287,9 +291,9 @@ if (idx == 0)
 
   if (infeasibility_detection) {
     // test for primal infeasibility
-    if (*infeasibility_information.dual_ray_linear_objective > 0.0 &&
-        *infeasibility_information.max_dual_ray_infeasibility /
-            *infeasibility_information.dual_ray_linear_objective <=
+    if (infeasibility_information.dual_ray_linear_objective[idx] > f_t(0.0) &&
+        infeasibility_information.max_dual_ray_infeasibility[idx] /
+            infeasibility_information.dual_ray_linear_objective[idx] <=
           tolerance.primal_infeasible_tolerance) {
       termination_status[idx] = (i_t)pdlp_termination_status_t::PrimalInfeasible;
       return;
@@ -298,9 +302,9 @@ if (idx == 0)
     // test for dual infeasibility
     //  for QP add && primal_ray_quadratic_norm / (-primal_ray_linear_objective)
     //  <=eps_dual_infeasible
-    if (*infeasibility_information.primal_ray_linear_objective < f_t(0.0) &&
-        *infeasibility_information.max_primal_ray_infeasibility /
-            -(*infeasibility_information.primal_ray_linear_objective) <=
+    if (infeasibility_information.primal_ray_linear_objective[idx] < f_t(0.0) &&
+        infeasibility_information.max_primal_ray_infeasibility[idx] /
+            -(infeasibility_information.primal_ray_linear_objective[idx]) <=
           tolerance.dual_infeasible_tolerance) {
       termination_status[idx] = (i_t)pdlp_termination_status_t::DualInfeasible;
       return;
@@ -388,19 +392,19 @@ pdlp_termination_strategy_t<i_t, f_t>::fill_return_problem_solution(
   raft::copy(&term_stats_vector[i].gap, convergence_information_view.gap.data() + i, 1, stream_view_);
   term_stats_vector[i].relative_gap = convergence_information_.get_relative_gap_value(i);
   raft::copy(&term_stats_vector[i].max_primal_ray_infeasibility,
-            infeasibility_information_view.max_primal_ray_infeasibility,
+            &infeasibility_information_view.max_primal_ray_infeasibility[i],
             1,
             stream_view_);
   raft::copy(&term_stats_vector[i].primal_ray_linear_objective,
-            infeasibility_information_view.primal_ray_linear_objective,
+            &infeasibility_information_view.primal_ray_linear_objective[i],
             1,
             stream_view_);
   raft::copy(&term_stats_vector[i].max_dual_ray_infeasibility,
-            infeasibility_information_view.max_dual_ray_infeasibility,
+            &infeasibility_information_view.max_dual_ray_infeasibility[i],
             1,
             stream_view_);
   raft::copy(&term_stats_vector[i].dual_ray_linear_objective,
-            infeasibility_information_view.dual_ray_linear_objective,
+            &infeasibility_information_view.dual_ray_linear_objective[i],
             1,
             stream_view_);
   term_stats_vector[i].solved_by_pdlp = (termination_status[i] != pdlp_termination_status_t::ConcurrentLimit);

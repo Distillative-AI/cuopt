@@ -116,19 +116,23 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(problem_t<i_t, f_t>& op_problem,
                       climber_strategies_},
     average_termination_strategy_{handle_ptr_,
                                   op_problem,
+                                  op_problem_scaled_,
                                   average_op_problem_evaluation_cusparse_view_,
+                                  pdhg_solver_.get_cusparse_view(),
                                   primal_size_h_,
                                   dual_size_h_,
+                                  initial_scaling_strategy_,
                                   settings_,
-                                  restart_strategy_.last_restart_duality_gap_cusparse_view_,
                                   climber_strategies_},
     current_termination_strategy_{handle_ptr_,
                                   op_problem,
+                                  op_problem_scaled_,
                                   current_op_problem_evaluation_cusparse_view_,
+                                  pdhg_solver_.get_cusparse_view(),
                                   primal_size_h_,
                                   dual_size_h_,
+                                  initial_scaling_strategy_,
                                   settings_,
-                                  restart_strategy_.last_restart_duality_gap_cusparse_view_,
                                   climber_strategies_},
     initial_primal_{0, stream_view_},
     initial_dual_{0, stream_view_},
@@ -574,8 +578,8 @@ std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>
         ? pdhg_solver_.get_dual_solution()
         : pdhg_solver_.get_potential_next_dual_solution(),
       pdhg_solver_.get_dual_slack(),
-      restart_strategy_.last_restart_duality_gap_.primal_solution_,
-      restart_strategy_.last_restart_duality_gap_.dual_solution_,
+pdhg_solver_.get_saddle_point_state().get_delta_primal(),
+                                                 pdhg_solver_.get_saddle_point_state().get_delta_dual(),
       total_pdlp_iterations_,
       problem_ptr->combined_bounds,
       problem_ptr->objective_coefficients);
@@ -781,12 +785,12 @@ std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>
   // Check for infeasibility
 
   // If strict infeasibility, any infeasibility is detected, it is returned
-  // Else both are needed
+  // Else both are needed (unless there is no average)
   // (If infeasibility_detection is not set, termination reason cannot be Infeasible)
   if (settings_.detect_infeasibility)
   {
-    cuopt_expects(!batch_mode_, cuopt::error_type_t::ValidationError, "Infeasiblity detection is not supported in batch mode");
-    if (settings_.strict_infeasibility) {
+    // TODO batch mode: handle part of the batch being done
+    if (settings_.strict_infeasibility || pdlp_hyper_params::never_restart_to_average) {
       if (termination_current == pdlp_termination_status_t::PrimalInfeasible ||
           termination_current == pdlp_termination_status_t::DualInfeasible) {
   #ifdef PDLP_VERBOSE_MODE
@@ -804,7 +808,7 @@ std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>
           (pdlp_hyper_params::use_adaptive_step_size_strategy)
             ? pdhg_solver_.get_dual_solution()
             : pdhg_solver_.get_potential_next_dual_solution(),
-          {termination_current});
+          std::move(current_termination_strategy_.get_terminations_status()));
       }
       if (termination_average == pdlp_termination_status_t::PrimalInfeasible ||
           termination_average == pdlp_termination_status_t::DualInfeasible) {
@@ -821,7 +825,7 @@ std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>
           pdhg_solver_,
           unscaled_primal_avg_solution_,
           unscaled_dual_avg_solution_,
-          {termination_average});
+          std::move(average_termination_strategy_.get_terminations_status()));
       }
     } else {
       if ((termination_current == pdlp_termination_status_t::PrimalInfeasible &&
@@ -843,7 +847,7 @@ std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>
           (pdlp_hyper_params::use_adaptive_step_size_strategy)
             ? pdhg_solver_.get_dual_solution()
             : pdhg_solver_.get_potential_next_dual_solution(),
-          {termination_current});
+          std::move(current_termination_strategy_.get_terminations_status()));
       }
     }
   }
@@ -1712,28 +1716,31 @@ void pdlp_solver_t<i_t, f_t>::compute_initial_step_size()
   }
 }
 
-template <typename f_t>
+template <typename i_t, typename f_t>
 __global__ void compute_weights_initial_primal_weight_from_squared_norms(const f_t* b_vec_norm,
                                                                          const f_t* c_vec_norm,
-                                                                         f_t* primal_weight,
-                                                                         f_t* best_primal_weight)
+                                                                         raft::device_span<f_t> primal_weight,
+                                                                         raft::device_span<f_t> best_primal_weight,
+                                                                         int batch_size)
 {
-  if (threadIdx.x + blockIdx.x * blockDim.x > 0) { return; }
+  const int id = threadIdx.x + blockIdx.x * blockDim.x;
+  if (id >= batch_size) { return; }
   f_t c_vec_norm_ = *c_vec_norm;
   f_t b_vec_norm_ = *b_vec_norm;
 
-  if (b_vec_norm_ > 0.0 && c_vec_norm_ > 0.0) {
+  if (b_vec_norm_ > f_t(0.0) && c_vec_norm_ > f_t(0.0)) {
 #ifdef PDLP_DEBUG_MODE
     printf("b_vec_norm_ %lf c_vec_norm_ %lf primal_importance %lf\n",
            b_vec_norm_,
            c_vec_norm_,
            pdlp_hyper_params::primal_importance);
 #endif
-    *primal_weight      = pdlp_hyper_params::primal_importance * (c_vec_norm_ / b_vec_norm_);
-    *best_primal_weight = *primal_weight;
+    // TODO WARNING NECESSARY BUT WILL BREAK BACKWARD COMPATIBLITY
+    primal_weight[id]      = pdlp_hyper_params::primal_importance * (c_vec_norm_ + (f_t(1.0))) / (b_vec_norm_ + f_t(1.0));
+    best_primal_weight[id] = primal_weight[id];
   } else {
-    *primal_weight      = pdlp_hyper_params::primal_importance;
-    *best_primal_weight = *primal_weight;
+    primal_weight[id]      = pdlp_hyper_params::primal_importance;
+    best_primal_weight[id] = primal_weight[id];
   }
 }
 
@@ -1782,8 +1789,10 @@ void pdlp_solver_t<i_t, f_t>::compute_initial_primal_weight()
     }
   }
 
-  compute_weights_initial_primal_weight_from_squared_norms<<<1, 1, 0, stream_view_>>>(
-    b_vec_norm.data(), c_vec_norm.data(), primal_weight_.data(), best_primal_weight_.data());
+    const auto [grid_size, block_size] = kernel_config_from_batch_size(climber_strategies_.size());
+  compute_weights_initial_primal_weight_from_squared_norms<i_t, f_t>
+    <<<grid_size, block_size, 0, stream_view_>>>
+    (b_vec_norm.data(), c_vec_norm.data(), make_span(primal_weight_), make_span(best_primal_weight_), climber_strategies_.size());
   RAFT_CUDA_TRY(cudaPeekAtLastError());
 
   // Sync since we are using local variable
@@ -1821,8 +1830,9 @@ template class pdlp_solver_t<int, float>;
 template __global__ void compute_weights_initial_primal_weight_from_squared_norms<float>(
   const float* b_vec_norm,
   const float* c_vec_norm,
-  float* primal_weight,
-  float* best_primal_weight);
+  raft::device_span<float> primal_weight,
+  raft::device_span<float> best_primal_weight,
+  int batch_size);
 #endif
 
 #if MIP_INSTANTIATE_DOUBLE
@@ -1831,8 +1841,9 @@ template class pdlp_solver_t<int, double>;
 template __global__ void compute_weights_initial_primal_weight_from_squared_norms<double>(
   const double* b_vec_norm,
   const double* c_vec_norm,
-  double* primal_weight,
-  double* best_primal_weight);
+  raft::device_span<double> primal_weight,
+  raft::device_span<double> best_primal_weight,
+int batch_size);
 #endif
 
 }  // namespace cuopt::linear_programming::detail

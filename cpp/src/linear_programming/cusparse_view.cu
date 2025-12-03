@@ -266,7 +266,9 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
     dual_gradients_vector(climber_strategies.size()),
     current_AtYs_vector(climber_strategies.size()),
     tmp_primal_vector(climber_strategies.size()),
-    reflected_primal_solution_vector(climber_strategies.size())
+    reflected_primal_solution_vector(climber_strategies.size()),
+    delta_primal_solution_vector(climber_strategies.size()),
+    delta_dual_solution_vector(climber_strategies.size())
 {
   raft::common::nvtx::range fun_scope("Initializing cuSparse view");
 
@@ -378,6 +380,26 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
         }
     }
   }
+
+  // Necessary even in batch mode
+for (size_t i = 0; i < climber_strategies.size(); i++) {
+        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
+      &delta_primal_solution_vector[i],
+      op_problem_scaled.n_variables,
+      current_saddle_point_state.get_delta_primal().data() + i * op_problem_scaled.n_variables));
+      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
+      &delta_dual_solution_vector[i],
+      op_problem_scaled.n_constraints,
+      current_saddle_point_state.get_delta_dual().data() + i * op_problem_scaled.n_constraints));
+            RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
+            &tmp_dual_vector[i],
+            op_problem_scaled.n_constraints,
+            _tmp_dual.data() + i * op_problem_scaled.n_constraints));
+        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
+        &tmp_primal_vector[i],
+        op_problem_scaled.n_variables,
+        _tmp_primal.data() + i * op_problem_scaled.n_variables));
+    }
 
     primal_gradient.create(op_problem_scaled.n_variables,
                          current_saddle_point_state.get_primal_gradient().data());
@@ -602,8 +624,8 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(raft::handle_t const* handle_ptr,
         &tmp_primal_vector[i],
         op_problem.n_variables,
         _tmp_primal.data() + i * op_problem.n_variables));
+        }
     }
-  }
 
   const rmm::device_scalar<f_t> alpha{1, handle_ptr->get_stream()};
   const rmm::device_scalar<f_t> beta{1, handle_ptr->get_stream()};
@@ -715,7 +737,7 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(raft::handle_t const* handle_ptr,
 }
 
 // Constructor used 3 times in restart strategy for the duality gaps
-// Used in trust region and one for batch cuPDLPx
+// Used in trust region restart
 template <typename i_t, typename f_t>
 cusparse_view_t<i_t, f_t>::cusparse_view_t(
   raft::handle_t const* handle_ptr,
@@ -732,9 +754,7 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
     primal_gradient{},
     dual_gradient{},
     tmp_primal(existing_cusparse_view.tmp_primal),
-    tmp_primal_vector(existing_cusparse_view.tmp_primal_vector),
     tmp_dual(existing_cusparse_view.tmp_dual),
-    tmp_dual_vector(existing_cusparse_view.tmp_primal_vector),
     buffer_non_transpose{0, handle_ptr->get_stream()},
     buffer_transpose{0, handle_ptr->get_stream()},
     buffer_transpose_batch{0, handle_ptr->get_stream()},
@@ -778,17 +798,6 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
 
   primal_gradient.create(op_problem.n_variables, _primal_gradient);
   dual_gradient.create(op_problem.n_constraints, _dual_gradient);
-
-  if (batch_mode_)
-  {
-    for (size_t i = 0; i < climber_strategies_.size(); i++) {
-        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
-          &primal_solution_vector[i],
-          op_problem.n_variables,
-          _primal_solution + i * op_problem.n_variables));
-
-    }
-  }
 
   const rmm::device_scalar<f_t> alpha{1, handle_ptr->get_stream()};
   const rmm::device_scalar<f_t> beta{1, handle_ptr->get_stream()};

@@ -67,9 +67,12 @@ class pdlp_initial_scaling_strategy_t {
                          rmm::device_uvector<f_t>& dual_solution,
                          rmm::device_uvector<f_t>& dual_slack) const;
   void unscale_solutions(solution_t<i_t, f_t>& solution) const;
-  rmm::device_uvector<f_t>& get_constraint_matrix_scaling_vector();
-  rmm::device_uvector<f_t>& get_variable_scaling_vector();
+  const rmm::device_uvector<f_t>& get_constraint_matrix_scaling_vector() const;
+  const rmm::device_uvector<f_t>& get_variable_scaling_vector() const;
   const problem_t<i_t, f_t>& get_scaled_op_problem();
+
+  f_t get_h_bound_rescaling() const;
+  f_t get_h_objective_rescaling() const;
 
   void bound_objective_rescaling();
 

@@ -32,8 +32,8 @@ struct segmented_sum_handler_t {
   // Empty constructor for when used in non batch mode
   segmented_sum_handler_t() {}
 
-  template <typename InputIteratorT>
-  void segmented_sum_helper(InputIteratorT input, f_t* output, i_t batch_size, i_t problem_size)
+  template <typename InputIteratorT, typename OutputIteratorT>
+  void segmented_sum_helper(InputIteratorT input, OutputIteratorT output, i_t batch_size, i_t problem_size)
   {
     cub::DeviceSegmentedReduce::Sum(
     nullptr, byte_needed_, 
@@ -54,14 +54,14 @@ struct segmented_sum_handler_t {
     cub::DeviceSegmentedReduce::Reduce(
     nullptr, byte_needed_,
     input,
-    output, batch_size, problem_size, reduction_op, initial_value, stream_view_);
+    output, batch_size, problem_size, reduction_op, initial_value, stream_view_.value());
 
-    segmented_sum_storage_.resize(byte_needed_, stream_view_);
+    segmented_sum_storage_.resize(byte_needed_, stream_view_.value());
 
     cub::DeviceSegmentedReduce::Reduce(
     segmented_sum_storage_.data(), byte_needed_,
     input,
-    output, batch_size, problem_size, reduction_op, initial_value, stream_view_);
+    output, batch_size, problem_size, reduction_op, initial_value, stream_view_.value());
   }
 
   size_t byte_needed_;
