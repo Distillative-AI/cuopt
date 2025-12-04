@@ -8,9 +8,9 @@
 #pragma once
 
 #include <dual_simplex/diving_heuristics.hpp>
-#include <dual_simplex/diving_queue.hpp>
 #include <dual_simplex/initial_basis.hpp>
 #include <dual_simplex/mip_node.hpp>
+#include <dual_simplex/node_queue.hpp>
 #include <dual_simplex/phase2.hpp>
 #include <dual_simplex/pseudo_costs.hpp>
 #include <dual_simplex/simplex_solver_settings.hpp>
@@ -21,7 +21,6 @@
 #include <utilities/omp_helpers.hpp>
 
 #include <omp.h>
-#include <queue>
 #include <vector>
 
 namespace cuopt::linear_programming::dual_simplex {
@@ -89,9 +88,6 @@ struct bnb_stats_t {
 template <typename i_t, typename f_t>
 class branch_and_bound_t {
  public:
-  template <typename T>
-  using mip_node_heap_t = std::priority_queue<T, std::vector<T>, node_compare_t<i_t, f_t>>;
-
   branch_and_bound_t(const user_problem_t<i_t, f_t>& user_problem,
                      const simplex_solver_settings_t<i_t, f_t>& solver_settings);
 
@@ -129,7 +125,6 @@ class branch_and_bound_t {
 
   f_t get_upper_bound();
   f_t get_lower_bound();
-  i_t get_heap_size();
   bool enable_concurrent_lp_root_solve() const { return enable_concurrent_lp_root_solve_; }
   volatile int* get_root_concurrent_halt() { return &root_concurrent_halt_; }
   void set_root_concurrent_halt(int value) { root_concurrent_halt_ = value; }
@@ -183,19 +178,14 @@ class branch_and_bound_t {
   // Pseudocosts
   pseudo_costs_t<i_t, f_t> pc_;
 
-  // Heap storing the nodes to be explored.
-  omp_mutex_t mutex_heap_;
-  mip_node_heap_t<mip_node_t<i_t, f_t>*> heap_;
+  // Heap storing the nodes waiting to be explored.
+  node_queue_t<i_t, f_t> node_queue;
 
   // Search tree
   search_tree_t<i_t, f_t> search_tree_;
 
   // Count the number of subtrees that are currently being explored.
   omp_atomic_t<i_t> active_subtrees_;
-
-  // Queue for storing the promising node for performing dives.
-  omp_mutex_t mutex_dive_queue_;
-  diving_queue_t<i_t, f_t> diving_queue_;
 
   // Global status of the solver.
   omp_atomic_t<mip_exploration_status_t> solver_status_;

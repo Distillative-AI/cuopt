@@ -268,22 +268,6 @@ void remove_fathomed_nodes(std::vector<mip_node_t<i_t, f_t>*>& stack)
 }
 
 template <typename i_t, typename f_t>
-class node_compare_t {
- public:
-  bool operator()(const mip_node_t<i_t, f_t>& a, const mip_node_t<i_t, f_t>& b) const
-  {
-    return a.lower_bound >
-           b.lower_bound;  // True if a comes before b, elements that come before are output last
-  }
-
-  bool operator()(const mip_node_t<i_t, f_t>* a, const mip_node_t<i_t, f_t>* b) const
-  {
-    return a->lower_bound >
-           b->lower_bound;  // True if a comes before b, elements that come before are output last
-  }
-};
-
-template <typename i_t, typename f_t>
 class search_tree_t {
  public:
   search_tree_t() : num_nodes(0) {}

@@ -247,25 +247,15 @@ f_t branch_and_bound_t<i_t, f_t>::get_upper_bound()
 template <typename i_t, typename f_t>
 f_t branch_and_bound_t<i_t, f_t>::get_lower_bound()
 {
-  f_t lower_bound = lower_bound_ceiling_.load();
-  mutex_heap_.lock();
-  if (heap_.size() > 0) { lower_bound = std::min(heap_.top()->lower_bound, lower_bound); }
-  mutex_heap_.unlock();
+  f_t lower_bound      = lower_bound_ceiling_.load();
+  f_t heap_lower_bound = node_queue.get_lower_bound();
+  lower_bound          = std::min(heap_lower_bound, lower_bound);
 
   for (i_t i = 0; i < local_lower_bounds_.size(); ++i) {
     lower_bound = std::min(local_lower_bounds_[i].load(), lower_bound);
   }
 
-  return lower_bound;
-}
-
-template <typename i_t, typename f_t>
-i_t branch_and_bound_t<i_t, f_t>::get_heap_size()
-{
-  mutex_heap_.lock();
-  i_t size = heap_.size();
-  mutex_heap_.unlock();
-  return size;
+  return std::isfinite(lower_bound) ? lower_bound : -inf;
 }
 
 template <typename i_t, typename f_t>
@@ -950,10 +940,8 @@ void branch_and_bound_t<i_t, f_t>::exploration_ramp_up(mip_node_t<i_t, f_t>* nod
 
     } else {
       // We've generated enough nodes, push further nodes onto the heap
-      mutex_heap_.lock();
-      heap_.push(node->get_down_child());
-      heap_.push(node->get_up_child());
-      mutex_heap_.unlock();
+      node_queue.push(node->get_down_child());
+      node_queue.push(node->get_up_child());
     }
   }
 }
@@ -1072,28 +1060,7 @@ void branch_and_bound_t<i_t, f_t>::explore_subtree(i_t task_id,
       if (stack.size() > 0) {
         mip_node_t<i_t, f_t>* node = stack.back();
         stack.pop_back();
-
-        // The order here matters. We want to create a copy of the node
-        // before adding to the global heap. Otherwise,
-        // some thread may consume the node (possibly fathoming it)
-        // before we had the chance to add to the diving queue.
-        // This lead to a SIGSEGV. Although, in this case, it
-        // would be better if we discard the node instead.
-        if (get_heap_size() > settings_.num_bfs_threads) {
-          std::vector<f_t> lower = original_lp_.lower;
-          std::vector<f_t> upper = original_lp_.upper;
-          std::fill(
-            node_presolver.bounds_changed.begin(), node_presolver.bounds_changed.end(), false);
-          node->get_variable_bounds(lower, upper, node_presolver.bounds_changed);
-
-          mutex_dive_queue_.lock();
-          diving_queue_.emplace(node->detach_copy(), std::move(lower), std::move(upper));
-          mutex_dive_queue_.unlock();
-        }
-
-        mutex_heap_.lock();
-        heap_.push(node);
-        mutex_heap_.unlock();
+        node_queue.push(node);
       }
 
       exploration_stats_.nodes_unexplored += 2;
@@ -1131,31 +1098,24 @@ void branch_and_bound_t<i_t, f_t>::best_first_thread(i_t task_id,
 
   while (solver_status_ == mip_exploration_status_t::RUNNING &&
          abs_gap > settings_.absolute_mip_gap_tol && rel_gap > settings_.relative_mip_gap_tol &&
-         (active_subtrees_ > 0 || get_heap_size() > 0)) {
-    mip_node_t<i_t, f_t>* start_node = nullptr;
-
+         (active_subtrees_ > 0 || node_queue.best_first_queue_size() > 0)) {
     // If there any node left in the heap, we pop the top node and explore it.
-    mutex_heap_.lock();
-    if (heap_.size() > 0) {
-      start_node = heap_.top();
-      heap_.pop();
-      active_subtrees_++;
-    }
-    mutex_heap_.unlock();
+    std::optional<mip_node_t<i_t, f_t>*> start_node = node_queue.pop_best_first(active_subtrees_);
 
-    if (start_node != nullptr) {
-      if (get_upper_bound() < start_node->lower_bound) {
+    if (start_node.has_value()) {
+      if (get_upper_bound() < start_node.value()->lower_bound) {
         // This node was put on the heap earlier but its lower bound is now greater than the
         // current upper bound
-        search_tree.graphviz_node(settings_.log, start_node, "cutoff", start_node->lower_bound);
-        search_tree.update(start_node, node_status_t::FATHOMED);
+        search_tree.graphviz_node(
+          settings_.log, start_node.value(), "cutoff", start_node.value()->lower_bound);
+        search_tree.update(start_node.value(), node_status_t::FATHOMED);
         active_subtrees_--;
         continue;
       }
 
       // Best-first search with plunging
       explore_subtree(task_id,
-                      start_node,
+                      start_node.value(),
                       search_tree,
                       leaf_problem,
                       node_presolver,
@@ -1200,19 +1160,30 @@ void branch_and_bound_t<i_t, f_t>::diving_thread(bnb_thread_type_t diving_type,
   std::vector<i_t> basic_list(m);
   std::vector<i_t> nonbasic_list;
 
-  while (solver_status_ == mip_exploration_status_t::RUNNING &&
-         (active_subtrees_ > 0 || get_heap_size() > 0)) {
-    std::optional<diving_root_t<i_t, f_t>> start_node;
+  std::vector<f_t> start_lower;
+  std::vector<f_t> start_upper;
+  bool reset_starting_bounds = true;
 
-    mutex_dive_queue_.lock();
-    if (diving_queue_.size() > 0) { start_node = diving_queue_.pop(); }
-    mutex_dive_queue_.unlock();
+  while (solver_status_ == mip_exploration_status_t::RUNNING &&
+         (active_subtrees_ > 0 || node_queue.best_first_queue_size() > 0)) {
+    if (reset_starting_bounds) {
+      start_lower = original_lp_.lower;
+      start_upper = original_lp_.upper;
+      std::fill(node_presolver.bounds_changed.begin(), node_presolver.bounds_changed.end(), false);
+      reset_starting_bounds = false;
+    }
+
+    std::optional<mip_node_t<i_t, f_t>> start_node =
+      node_queue.pop_diving(start_lower, start_upper, node_presolver.bounds_changed);
 
     if (start_node.has_value()) {
-      if (get_upper_bound() < start_node->node.lower_bound) { continue; }
+      reset_starting_bounds = true;
+
+      bool is_feasible = node_presolver.bounds_strengthening(start_lower, start_upper, settings_);
+      if (get_upper_bound() < start_node->lower_bound || !is_feasible) { continue; }
 
       bool recompute_bounds_and_basis = true;
-      search_tree_t<i_t, f_t> subtree(std::move(start_node->node));
+      search_tree_t<i_t, f_t> subtree(std::move(start_node.value()));
       std::deque<mip_node_t<i_t, f_t>*> stack;
       stack.push_front(&subtree.root);
 
@@ -1244,8 +1215,8 @@ void branch_and_bound_t<i_t, f_t>::diving_thread(bnb_thread_type_t diving_type,
                                               node_presolver,
                                               diving_type,
                                               recompute_bounds_and_basis,
-                                              start_node->lower,
-                                              start_node->upper,
+                                              start_lower,
+                                              start_upper,
                                               dive_stats,
                                               log);
 
@@ -1578,7 +1549,8 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
     }
   }
 
-  f_t lower_bound = heap_.size() > 0 ? heap_.top()->lower_bound : search_tree_.root.lower_bound;
+  f_t lower_bound = node_queue.best_first_queue_size() > 0 ? node_queue.get_lower_bound()
+                                                           : search_tree_.root.lower_bound;
   return set_final_solution(solution, lower_bound);
 }
 
