@@ -565,8 +565,8 @@ bool local_search_t<i_t, f_t, REQUEST>::perform_sliding_tsp(
                                sol.get_cost(false, move_candidates.weights));
 
   cuopt_assert(abs((cost_before - cost_after) +
-                     move_candidates.debug_delta.value(sol.sol_handle->get_stream()) <
-                   EPSILON * (1 + abs(cost_before))),
+                   move_candidates.debug_delta.value(sol.sol_handle->get_stream())) <
+                 EPSILON * (1 + abs(cost_before)),
                "Cost mismatch on sliding_tsp costs!");
   cuopt_assert(cost_before - cost_after >= EPSILON, "Cost should improve!");
 

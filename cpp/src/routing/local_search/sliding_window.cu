@@ -1116,9 +1116,8 @@ bool local_search_t<i_t, f_t, REQUEST>::perform_sliding_window(
 
   cuopt_assert(cost_before - cost_after >= EPSILON, "Cost should improve!");
   cuopt_assert(abs((cost_before - cost_after) -
-                     move_candidates.debug_delta.value(solution.sol_handle->get_stream()) <
-                   EPSILON),
-               "Cost mismatch on cross costs!");
+                   move_candidates.debug_delta.value(solution.sol_handle->get_stream())) < EPSILON,
+               "Cost mismatch on sliding_window costs!");
   return true;
 }
 

@@ -465,8 +465,8 @@ bool execute_vrp_moves(solution_t<i_t, f_t, REQUEST>& sol,
                     sol.get_cost(move_candidates.include_objective, move_candidates.weights));
   cuopt_assert(cost_before - cost_after > EPSILON, "Cost should improve!");
   cuopt_assert(abs((cost_before - cost_after) +
-                     move_candidates.debug_delta.value(sol.sol_handle->get_stream()) <
-                   EPSILON * (1 + abs(cost_before))),
+                   move_candidates.debug_delta.value(sol.sol_handle->get_stream())) <
+                 EPSILON * (1 + abs(cost_before)),
                "Cost mismatch on vrp costs!");
   return true;
 }

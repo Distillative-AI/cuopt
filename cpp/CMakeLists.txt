@@ -97,6 +97,16 @@ if(BUILD_TSAN)
   add_link_options(-fsanitize=thread)
 endif(BUILD_TSAN)
 
+# To use MemorySanitizer:
+# 1. Build with clang and the -msan flag (MemorySanitizer requires clang)
+# 2. Run the binary with env var set: MSAN_OPTIONS='halt_on_error=1'
+# Note: MemorySanitizer requires all code (including libraries) to be instrumented for accurate results
+if(BUILD_MSAN)
+  message(STATUS "Building with MemorySanitizer enabled")
+  list(APPEND CUOPT_CXX_FLAGS -fsanitize=memory -fno-omit-frame-pointer -g -fsanitize-memory-track-origins=1)
+  add_link_options(-fsanitize=memory)
+endif(BUILD_MSAN)
+
 if(DEFINE_ASSERT)
   add_definitions(-DASSERT_MODE)
 endif(DEFINE_ASSERT)
