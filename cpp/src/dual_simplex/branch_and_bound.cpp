@@ -779,10 +779,12 @@ node_solve_info_t branch_and_bound_t<i_t, f_t>::solve_node(
     search_tree.graphviz_node(log, node_ptr, "lower bound", leaf_objective);
     pc_.update_pseudo_costs(node_ptr, leaf_objective);
 
-    if (settings_.node_processed_callback != nullptr) {
-      std::vector<f_t> original_x;
-      uncrush_primal_solution(original_problem_, original_lp_, leaf_solution.x, original_x);
-      settings_.node_processed_callback(original_x, leaf_objective);
+    if (thread_type == bnb_thread_type_t::EXPLORATION) {
+      if (settings_.node_processed_callback != nullptr) {
+        std::vector<f_t> original_x;
+        uncrush_primal_solution(original_problem_, original_lp_, leaf_solution.x, original_x);
+        settings_.node_processed_callback(original_x, leaf_objective);
+      }
     }
 
     if (leaf_num_fractional == 0) {
