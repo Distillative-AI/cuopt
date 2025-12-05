@@ -177,7 +177,22 @@ void pdhg_solver_t<i_t, f_t>::compute_At_y()
   }
   else
   {
-    // TODO batch mode SpMM:
+    if (!deterministic_batch_pdlp)
+    {
+      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmm(handle_ptr_->get_cusparse_handle(),
+                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                       reusable_device_scalar_value_1_.data(),
+                                                       cusparse_view_.A_T,
+                                                       cusparse_view_.batch_dual_solutions,
+                                                       reusable_device_scalar_value_0_.data(),
+                                                       cusparse_view_.batch_current_AtYs,
+                                                       CUSPARSE_SPMM_CSR_ALG3,
+                                                       (f_t*)cusparse_view_.buffer_transpose_batch.data(),
+                                                       stream_view_));
+    }
+    else
+    {
     for (size_t i = 0; i < climber_strategies_.size(); i++) {
         RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmv(handle_ptr_->get_cusparse_handle(),
                                                        CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -190,6 +205,7 @@ void pdhg_solver_t<i_t, f_t>::compute_At_y()
                                                        (f_t*)cusparse_view_.buffer_transpose.data(),
                                                        stream_view_));
       }
+    }
   }
 }
 
@@ -213,20 +229,35 @@ void pdhg_solver_t<i_t, f_t>::compute_A_x()
   }
   else
   {
-    // TODO batch mode: tmp for determinism, switch to SPMM
-    for (size_t i = 0; i < climber_strategies_.size(); ++i)
+    if (!deterministic_batch_pdlp)
     {
-      RAFT_CUSPARSE_TRY(
-    raft::sparse::detail::cusparsespmv(handle_ptr_->get_cusparse_handle(),
-                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                       reusable_device_scalar_value_1_.data(),
-                                       cusparse_view_.A,
-                                       cusparse_view_.reflected_primal_solution_vector[i],
-                                       reusable_device_scalar_value_0_.data(),
-                                       cusparse_view_.dual_gradients_vector[i],
-                                       CUSPARSE_SPMV_CSR_ALG2,
-                                       (f_t*)cusparse_view_.buffer_non_transpose.data(),
-                                       stream_view_));
+      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmm(handle_ptr_->get_cusparse_handle(),
+                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                       reusable_device_scalar_value_1_.data(),
+                                                       cusparse_view_.A,
+                                                       cusparse_view_.batch_reflected_primal_solutions,
+                                                       reusable_device_scalar_value_0_.data(),
+                                                       cusparse_view_.batch_dual_gradients,
+                                                       CUSPARSE_SPMM_CSR_ALG3,
+                                                       (f_t*)cusparse_view_.buffer_non_transpose_batch.data(),
+                                                       stream_view_));
+    }
+    else
+    {
+      for (size_t i = 0; i < climber_strategies_.size(); ++i)
+      {
+        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmv(handle_ptr_->get_cusparse_handle(),
+                                        CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                        reusable_device_scalar_value_1_.data(),
+                                        cusparse_view_.A,
+                                        cusparse_view_.reflected_primal_solution_vector[i],
+                                        reusable_device_scalar_value_0_.data(),
+                                        cusparse_view_.dual_gradients_vector[i],
+                                        CUSPARSE_SPMV_CSR_ALG2,
+                                        (f_t*)cusparse_view_.buffer_non_transpose.data(),
+                                        stream_view_));
+      }
     }
   }
 }

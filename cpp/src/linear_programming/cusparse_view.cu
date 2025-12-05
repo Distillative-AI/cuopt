@@ -338,6 +338,13 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
       op_problem_scaled.n_variables,
       _reflected_primal_solution.data(),
       CUSPARSE_ORDER_COL));
+      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
+        &batch_dual_gradients,
+        op_problem_scaled.n_constraints,
+        climber_strategies.size(),
+        op_problem_scaled.n_constraints,
+        current_saddle_point_state.get_dual_gradient().data(),
+        CUSPARSE_ORDER_COL));
 
     if (deterministic_batch_pdlp)
     {
@@ -387,14 +394,14 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
       &delta_dual_solution_vector[i],
       op_problem_scaled.n_constraints,
       current_saddle_point_state.get_delta_dual().data() + i * op_problem_scaled.n_constraints));
-            RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
-            &tmp_dual_vector[i],
-            op_problem_scaled.n_constraints,
-            _tmp_dual.data() + i * op_problem_scaled.n_constraints));
-        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
-        &tmp_primal_vector[i],
-        op_problem_scaled.n_variables,
-        _tmp_primal.data() + i * op_problem_scaled.n_variables));
+      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
+      &tmp_dual_vector[i],
+      op_problem_scaled.n_constraints,
+      _tmp_dual.data() + i * op_problem_scaled.n_constraints));
+      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
+      &tmp_primal_vector[i],
+      op_problem_scaled.n_variables,
+      _tmp_primal.data() + i * op_problem_scaled.n_variables));
     }
   }
   else
@@ -413,20 +420,20 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
   op_problem_scaled.n_constraints,
   current_saddle_point_state.get_delta_dual().data(),
   CUSPARSE_ORDER_COL));
-      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
-      &batch_tmp_primals,
-      op_problem_scaled.n_variables,
-      climber_strategies.size(),
-      op_problem_scaled.n_variables,
-      _tmp_primal.data(),
-      CUSPARSE_ORDER_COL));
-    RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
-      &batch_dual_gradients,
-      op_problem_scaled.n_constraints,
-      climber_strategies.size(),
-      op_problem_scaled.n_constraints,
-      current_saddle_point_state.get_dual_gradient().data(),
-      CUSPARSE_ORDER_COL));
+  RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
+  &batch_tmp_duals,
+  op_problem_scaled.n_constraints,
+  climber_strategies.size(),
+  op_problem_scaled.n_constraints,
+  _tmp_dual.data(),
+  CUSPARSE_ORDER_COL));
+  RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
+    &batch_tmp_primals,
+    op_problem_scaled.n_variables,
+    climber_strategies.size(),
+    op_problem_scaled.n_variables,
+    _tmp_primal.data(),
+    CUSPARSE_ORDER_COL));
   }
 
   primal_gradient.create(op_problem_scaled.n_variables,
@@ -480,7 +487,7 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
 
   buffer_transpose.resize(buffer_size_transpose, handle_ptr->get_stream());
 
-  if (batch_mode_)
+  if (batch_mode_ && !deterministic_batch_pdlp)
   {
     size_t buffer_size_transpose_batch = 0;
     RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmm_bufferSize(handle_ptr_->get_cusparse_handle(),
@@ -490,7 +497,7 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
                                                                    A_T,
                                                                    batch_dual_solutions,
                                                                    beta.data(),
-                                                                   batch_tmp_primals,
+                                                                   batch_current_AtYs,
                                                                    CUSPARSE_SPMM_CSR_ALG3,
                                                                    &buffer_size_transpose_batch,
                                                                    handle_ptr->get_stream()));
@@ -501,9 +508,9 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
                                                                    CUSPARSE_OPERATION_NON_TRANSPOSE,
                                                                    alpha.data(),
                                                                    A,
-                                                                   batch_primal_solutions,
+                                                                   batch_reflected_primal_solutions,
                                                                    beta.data(),
-                                                                   batch_tmp_duals,
+                                                                   batch_dual_gradients,
                                                                    CUSPARSE_SPMM_CSR_ALG3,
                                                                    &buffer_size_non_transpose_batch,
                                                                    handle_ptr->get_stream()));
@@ -533,7 +540,7 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
                              buffer_transpose.data(),
                              handle_ptr->get_stream());
   // TODO batch mode: add when swtich to SpMM
-  if (batch_mode_) {
+  if (batch_mode_ && !deterministic_batch_pdlp) {
     my_cusparsespmm_preprocess(handle_ptr_->get_cusparse_handle(),
                             CUSPARSE_OPERATION_NON_TRANSPOSE,
                             CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -547,7 +554,7 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
                             CUSPARSE_OPERATION_NON_TRANSPOSE,
                             alpha.data(),
                             A,
-                            batch_tmp_primals,
+                            batch_reflected_primal_solutions,
                             beta.data(), batch_dual_gradients, CUSPARSE_SPMM_CSR_ALG3, buffer_non_transpose_batch.data(), handle_ptr->get_stream());
   }
 #endif
@@ -631,9 +638,8 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(raft::handle_t const* handle_ptr,
   tmp_primal.create(op_problem.n_variables, _tmp_primal.data());
   tmp_dual.create(op_problem.n_constraints, _tmp_dual.data());
 
-  if (batch_mode_) {
+  if (batch_mode_ && is_cupdlpx_restart<i_t, f_t>()) {
     // TODO batch mode: also use container
-    cuopt_assert(!pdlp_hyper_params::use_adaptive_step_size_strategy, "pdlp_hyper_params::use_adaptive_step_size_strategy not supported for batch mode");
     RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
       &batch_primal_solutions,
       op_problem.n_variables,
@@ -663,25 +669,28 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(raft::handle_t const* handle_ptr,
         _tmp_primal.data(),
         CUSPARSE_ORDER_COL));
 
-    for (size_t i = 0; i < climber_strategies.size(); i++) {
-      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
-        &primal_solution_vector[i],
-        op_problem.n_variables,
-        _potential_next_primal.data() + i * op_problem.n_variables));
-      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
-        &dual_solution_vector[i],
-        op_problem.n_constraints,
-        _potential_next_dual.data() + i * op_problem.n_constraints));
-      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
-            &tmp_dual_vector[i],
-            op_problem.n_constraints,
-            _tmp_dual.data() + i * op_problem.n_constraints));
+    if (deterministic_batch_pdlp)
+    {
+      for (size_t i = 0; i < climber_strategies.size(); i++) {
         RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
-        &tmp_primal_vector[i],
-        op_problem.n_variables,
-        _tmp_primal.data() + i * op_problem.n_variables));
+          &primal_solution_vector[i],
+          op_problem.n_variables,
+          _potential_next_primal.data() + i * op_problem.n_variables));
+        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
+          &dual_solution_vector[i],
+          op_problem.n_constraints,
+          _potential_next_dual.data() + i * op_problem.n_constraints));
+        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
+              &tmp_dual_vector[i],
+              op_problem.n_constraints,
+              _tmp_dual.data() + i * op_problem.n_constraints));
+          RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
+          &tmp_primal_vector[i],
+          op_problem.n_variables,
+          _tmp_primal.data() + i * op_problem.n_variables));
         }
-    }
+      }
+  }
 
   const rmm::device_scalar<f_t> alpha{1, handle_ptr->get_stream()};
   const rmm::device_scalar<f_t> beta{1, handle_ptr->get_stream()};
@@ -714,7 +723,7 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(raft::handle_t const* handle_ptr,
 
   buffer_transpose.resize(buffer_size_transpose, handle_ptr->get_stream());
 
-  if (batch_mode_)
+  if (batch_mode_ && !deterministic_batch_pdlp)
   {
     size_t buffer_size_transpose_batch = 0;
     RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmm_bufferSize(handle_ptr_->get_cusparse_handle(),
@@ -767,7 +776,7 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(raft::handle_t const* handle_ptr,
                              buffer_transpose.data(),
                              handle_ptr->get_stream());
 
-  if (batch_mode_) {
+  if (batch_mode_ && !deterministic_batch_pdlp) {
     my_cusparsespmm_preprocess(handle_ptr_->get_cusparse_handle(),
                               CUSPARSE_OPERATION_NON_TRANSPOSE,
                               CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -787,7 +796,7 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(raft::handle_t const* handle_ptr,
                               A_T,
                               batch_dual_solutions,
                               beta.data(), batch_tmp_primals, CUSPARSE_SPMM_CSR_ALG3, buffer_transpose_batch.data(), handle_ptr->get_stream());
-  
+
   }
 #endif
 }

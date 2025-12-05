@@ -291,30 +291,57 @@ void infeasibility_information_t<i_t, f_t>::compute_infeasibility_information(
         printf("dual_ray_inf_norm=%lf\n", dual_ray_inf_norm_.element(0, stream_view_));
 #endif
 
-      // TODO batch mode: for not deterministic mode use SpMM
-      for (size_t i = 0; i < climber_strategies_.size(); ++i)
+      if (!deterministic_batch_pdlp)
       {
-        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmv(handle_ptr_->get_cusparse_handle(),
-                                      CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                      reusable_device_scalar_value_1_.data(),
-                                      scaled_cusparse_view_.A,
-                                      scaled_cusparse_view_.delta_primal_solution_vector[i],
-                                      reusable_device_scalar_value_0_.data(),
-                                      scaled_cusparse_view_.tmp_dual_vector[i],
-                                      CUSPARSE_SPMV_CSR_ALG2,
-                                      (f_t*)scaled_cusparse_view_.buffer_non_transpose.data(),
-                                      stream_view_));
-        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmv(handle_ptr_->get_cusparse_handle(),
-                                                    CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                                    reusable_device_scalar_value_1_.data(),
-                                                    scaled_cusparse_view_.A_T,
-                                                    scaled_cusparse_view_.delta_dual_solution_vector[i],
-                                                    reusable_device_scalar_value_0_.data(),
-                                                    scaled_cusparse_view_.tmp_primal_vector[i],
-                                                    CUSPARSE_SPMV_CSR_ALG2,
-                                                    (f_t*)scaled_cusparse_view_.buffer_transpose.data(),
-                                                    stream_view_));
+        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmm(handle_ptr_->get_cusparse_handle(),
+                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                       reusable_device_scalar_value_1_.data(),
+                                                       scaled_cusparse_view_.A,
+                                                       scaled_cusparse_view_.batch_delta_primal_solutions,
+                                                       reusable_device_scalar_value_0_.data(),
+                                                       scaled_cusparse_view_.batch_tmp_duals,
+                                                       CUSPARSE_SPMM_CSR_ALG3,
+                                                       (f_t*)scaled_cusparse_view_.buffer_non_transpose_batch.data(),
+                                                       stream_view_));
+        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmm(handle_ptr_->get_cusparse_handle(),
+                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                       reusable_device_scalar_value_1_.data(),
+                                                       scaled_cusparse_view_.A_T,
+                                                       scaled_cusparse_view_.batch_delta_dual_solutions,
+                                                       reusable_device_scalar_value_0_.data(),
+                                                       scaled_cusparse_view_.batch_tmp_primals,
+                                                       CUSPARSE_SPMM_CSR_ALG3,
+                                                       (f_t*)scaled_cusparse_view_.buffer_transpose_batch.data(),
+                                                       stream_view_));
       }
+      else
+      {
+        for (size_t i = 0; i < climber_strategies_.size(); ++i)
+        {
+          RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmv(handle_ptr_->get_cusparse_handle(),
+                                        CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                        reusable_device_scalar_value_1_.data(),
+                                        scaled_cusparse_view_.A,
+                                        scaled_cusparse_view_.delta_primal_solution_vector[i],
+                                        reusable_device_scalar_value_0_.data(),
+                                        scaled_cusparse_view_.tmp_dual_vector[i],
+                                        CUSPARSE_SPMV_CSR_ALG2,
+                                        (f_t*)scaled_cusparse_view_.buffer_non_transpose.data(),
+                                        stream_view_));
+          RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmv(handle_ptr_->get_cusparse_handle(),
+                                                      CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                      reusable_device_scalar_value_1_.data(),
+                                                      scaled_cusparse_view_.A_T,
+                                                      scaled_cusparse_view_.delta_dual_solution_vector[i],
+                                                      reusable_device_scalar_value_0_.data(),
+                                                      scaled_cusparse_view_.tmp_primal_vector[i],
+                                                      CUSPARSE_SPMV_CSR_ALG2,
+                                                      (f_t*)scaled_cusparse_view_.buffer_transpose.data(),
+                                                      stream_view_));
+        }
+    }
 
 #ifdef CUPDLP_DEBUG_MODE
       print("primal_product", current_pdhg_solver.get_dual_tmp_resource());

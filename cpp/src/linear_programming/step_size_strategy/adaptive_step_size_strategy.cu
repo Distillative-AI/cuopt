@@ -345,8 +345,23 @@ void adaptive_step_size_strategy_t<i_t, f_t>::compute_interaction_and_movement(
   }
   else
   {
-    // TODO batch mode: tmp for determinism
-    // For the SpMM version, could use a mask batch operation again but with different buffer views
+    // TODO batch mode: handle if not all restart
+    if (!deterministic_batch_pdlp)
+    {
+      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmm(handle_ptr_->get_cusparse_handle(),
+                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                       reusable_device_scalar_value_1_.data(),
+                                                       cusparse_view.A_T,
+                                                       cusparse_view.batch_potential_next_dual_solution,
+                                                       reusable_device_scalar_value_0_.data(),
+                                                       cusparse_view.batch_next_AtYs,
+                                                       CUSPARSE_SPMM_CSR_ALG3,
+                                                       (f_t*)cusparse_view.buffer_transpose_batch.data(),
+                                                       stream_view_));
+    }
+    else
+    {
     for (size_t i = 0; i < climber_strategies_.size(); ++i)
     {
       RAFT_CUSPARSE_TRY(
@@ -360,6 +375,7 @@ void adaptive_step_size_strategy_t<i_t, f_t>::compute_interaction_and_movement(
                                         CUSPARSE_SPMV_CSR_ALG2,
                                         (f_t*)cusparse_view.buffer_transpose.data(),
                                         stream_view_));
+      }
     }
   }
 

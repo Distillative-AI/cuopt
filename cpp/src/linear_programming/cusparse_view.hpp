@@ -124,6 +124,9 @@ class cusparse_view_t {
   cusparseDnMatDescr_t batch_potential_next_dual_solution;
   cusparseDnMatDescr_t batch_next_AtYs;
   cusparseDnMatDescr_t batch_tmp_duals;
+  cusparseDnMatDescr_t batch_reflected_primal_solutions;
+  cusparseDnMatDescr_t batch_delta_primal_solutions;
+  cusparseDnMatDescr_t batch_delta_dual_solutions;
   std::vector<cusparseDnVecDescr_t> primal_solution_vector;
   std::vector<cusparseDnVecDescr_t> dual_solution_vector;
   std::vector<cusparseDnVecDescr_t> potential_next_dual_solution_vector;
