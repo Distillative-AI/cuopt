@@ -301,7 +301,7 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
                        current_saddle_point_state.get_dual_solution().data());
 
   // TODO batch mdoe: convert those to RAII views
-  if (batch_mode_) {
+  if (batch_mode_ && is_cupdlpx_restart<i_t, f_t>()) {
     RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
       &batch_dual_solutions,
       op_problem_scaled.n_constraints,
@@ -317,20 +317,6 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
       current_saddle_point_state.get_current_AtY().data(),
       CUSPARSE_ORDER_COL));
     RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
-      &batch_tmp_primals,
-      op_problem_scaled.n_variables,
-      climber_strategies.size(),
-      op_problem_scaled.n_variables,
-      _tmp_primal.data(),
-      CUSPARSE_ORDER_COL));
-    RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
-      &batch_dual_gradients,
-      op_problem_scaled.n_constraints,
-      climber_strategies.size(),
-      op_problem_scaled.n_constraints,
-      current_saddle_point_state.get_dual_gradient().data(),
-      CUSPARSE_ORDER_COL));
-    RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
       &batch_potential_next_dual_solution,
       op_problem_scaled.n_constraints,
       climber_strategies.size(),
@@ -344,46 +330,56 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
       op_problem_scaled.n_variables,
       current_saddle_point_state.get_next_AtY().data(),
       CUSPARSE_ORDER_COL));
+      cuopt_assert(_reflected_primal_solution.size() > 0, "Reflected primal solution empty");
+     RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
+      &batch_reflected_primal_solutions,
+      op_problem_scaled.n_variables,
+      climber_strategies.size(),
+      op_problem_scaled.n_variables,
+      _reflected_primal_solution.data(),
+      CUSPARSE_ORDER_COL));
 
-    // TODO batch mode: tmp for deterministm, how much of those are necessary with the current PDLP+ algorithM?
-    for (size_t i = 0; i < climber_strategies.size(); i++) {
-      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
-        &dual_solution_vector[i],
-        op_problem_scaled.n_constraints,
-        current_saddle_point_state.get_dual_solution().data() + i * op_problem_scaled.n_constraints));
-      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
-        &current_AtYs_vector[i],
-        op_problem_scaled.n_variables,
-        current_saddle_point_state.get_current_AtY().data() + i * op_problem_scaled.n_variables));
-      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
-        &tmp_primal_vector[i],
-        op_problem_scaled.n_variables,
-        _tmp_primal.data() + i * op_problem_scaled.n_variables));
-      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
-        &dual_gradients_vector[i],
-        op_problem_scaled.n_constraints,
-        current_saddle_point_state.get_dual_gradient().data() + i * op_problem_scaled.n_constraints));
-      
-      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
-        &potential_next_dual_solution_vector[i],
-        op_problem_scaled.n_constraints,
-        _potential_next_dual_solution.data() + i * op_problem_scaled.n_constraints));
-      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
-        &next_AtYs_vector[i],
-        op_problem_scaled.n_variables,
-        current_saddle_point_state.get_next_AtY().data() + i * op_problem_scaled.n_variables));
-        if (pdlp_hyper_params::use_reflected_primal_dual) {
-          cuopt_assert(_reflected_primal_solution.size() > 0, "Reflected primal solution empty");
-          RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(&reflected_primal_solution_vector[i],
-                                                                      op_problem_scaled.n_variables,
-                                                                      _reflected_primal_solution.data() + i * op_problem_scaled.n_variables));
-        }
+    if (deterministic_batch_pdlp)
+    {
+      for (size_t i = 0; i < climber_strategies.size(); i++) {
+        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
+          &dual_solution_vector[i],
+          op_problem_scaled.n_constraints,
+          current_saddle_point_state.get_dual_solution().data() + i * op_problem_scaled.n_constraints));
+        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
+          &current_AtYs_vector[i],
+          op_problem_scaled.n_variables,
+          current_saddle_point_state.get_current_AtY().data() + i * op_problem_scaled.n_variables));
+        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
+          &tmp_primal_vector[i],
+          op_problem_scaled.n_variables,
+          _tmp_primal.data() + i * op_problem_scaled.n_variables));
+        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
+          &dual_gradients_vector[i],
+          op_problem_scaled.n_constraints,
+          current_saddle_point_state.get_dual_gradient().data() + i * op_problem_scaled.n_constraints));
+        
+        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
+          &potential_next_dual_solution_vector[i],
+          op_problem_scaled.n_constraints,
+          _potential_next_dual_solution.data() + i * op_problem_scaled.n_constraints));
+        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
+          &next_AtYs_vector[i],
+          op_problem_scaled.n_variables,
+          current_saddle_point_state.get_next_AtY().data() + i * op_problem_scaled.n_variables));
+        cuopt_assert(_reflected_primal_solution.size() > 0, "Reflected primal solution empty");
+        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(&reflected_primal_solution_vector[i],
+                                                                    op_problem_scaled.n_variables,
+                                                                    _reflected_primal_solution.data() + i * op_problem_scaled.n_variables));
+      }
     }
   }
 
-  // Necessary even in batch mode
-for (size_t i = 0; i < climber_strategies.size(); i++) {
-        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
+  // Necessary even in non batch mode (because of infeasiblity detection)
+  if (deterministic_batch_pdlp)
+  {
+    for (size_t i = 0; i < climber_strategies.size(); i++) {
+      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
       &delta_primal_solution_vector[i],
       op_problem_scaled.n_variables,
       current_saddle_point_state.get_delta_primal().data() + i * op_problem_scaled.n_variables));
@@ -400,9 +396,41 @@ for (size_t i = 0; i < climber_strategies.size(); i++) {
         op_problem_scaled.n_variables,
         _tmp_primal.data() + i * op_problem_scaled.n_variables));
     }
+  }
+  else
+  {
+    RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
+  &batch_delta_primal_solutions,
+  op_problem_scaled.n_variables,
+  climber_strategies.size(),
+  op_problem_scaled.n_variables,
+  current_saddle_point_state.get_delta_primal().data(),
+  CUSPARSE_ORDER_COL));
+  RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
+  &batch_delta_dual_solutions,
+  op_problem_scaled.n_constraints,
+  climber_strategies.size(),
+  op_problem_scaled.n_constraints,
+  current_saddle_point_state.get_delta_dual().data(),
+  CUSPARSE_ORDER_COL));
+      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
+      &batch_tmp_primals,
+      op_problem_scaled.n_variables,
+      climber_strategies.size(),
+      op_problem_scaled.n_variables,
+      _tmp_primal.data(),
+      CUSPARSE_ORDER_COL));
+    RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
+      &batch_dual_gradients,
+      op_problem_scaled.n_constraints,
+      climber_strategies.size(),
+      op_problem_scaled.n_constraints,
+      current_saddle_point_state.get_dual_gradient().data(),
+      CUSPARSE_ORDER_COL));
+  }
 
-    primal_gradient.create(op_problem_scaled.n_variables,
-                         current_saddle_point_state.get_primal_gradient().data());
+  primal_gradient.create(op_problem_scaled.n_variables,
+                        current_saddle_point_state.get_primal_gradient().data());
   dual_gradient.create(op_problem_scaled.n_constraints,
                        current_saddle_point_state.get_dual_gradient().data());
 
@@ -452,7 +480,35 @@ for (size_t i = 0; i < climber_strategies.size(); i++) {
 
   buffer_transpose.resize(buffer_size_transpose, handle_ptr->get_stream());
 
-  // TODO batch mode: add SpMM vectors, buffer and call to preprocess
+  if (batch_mode_)
+  {
+    size_t buffer_size_transpose_batch = 0;
+    RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmm_bufferSize(handle_ptr_->get_cusparse_handle(),
+                                                                   CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                                   CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                                   alpha.data(),
+                                                                   A_T,
+                                                                   batch_dual_solutions,
+                                                                   beta.data(),
+                                                                   batch_tmp_primals,
+                                                                   CUSPARSE_SPMM_CSR_ALG3,
+                                                                   &buffer_size_transpose_batch,
+                                                                   handle_ptr->get_stream()));
+    buffer_transpose_batch.resize(buffer_size_transpose_batch, handle_ptr->get_stream());
+    size_t buffer_size_non_transpose_batch = 0;
+    RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmm_bufferSize(handle_ptr_->get_cusparse_handle(),
+                                                                   CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                                   CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                                   alpha.data(),
+                                                                   A,
+                                                                   batch_primal_solutions,
+                                                                   beta.data(),
+                                                                   batch_tmp_duals,
+                                                                   CUSPARSE_SPMM_CSR_ALG3,
+                                                                   &buffer_size_non_transpose_batch,
+                                                                   handle_ptr->get_stream()));
+    buffer_non_transpose_batch.resize(buffer_size_non_transpose_batch, handle_ptr->get_stream());
+  }
 
 #if CUDA_VER_12_4_UP
   my_cusparsespmv_preprocess(handle_ptr_->get_cusparse_handle(),
@@ -477,7 +533,7 @@ for (size_t i = 0; i < climber_strategies.size(); i++) {
                              buffer_transpose.data(),
                              handle_ptr->get_stream());
   // TODO batch mode: add when swtich to SpMM
-  /*if (batch_mode_) {
+  if (batch_mode_) {
     my_cusparsespmm_preprocess(handle_ptr_->get_cusparse_handle(),
                             CUSPARSE_OPERATION_NON_TRANSPOSE,
                             CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -493,7 +549,7 @@ for (size_t i = 0; i < climber_strategies.size(); i++) {
                             A,
                             batch_tmp_primals,
                             beta.data(), batch_dual_gradients, CUSPARSE_SPMM_CSR_ALG3, buffer_non_transpose_batch.data(), handle_ptr->get_stream());
-  }*/
+  }
 #endif
 }
 
