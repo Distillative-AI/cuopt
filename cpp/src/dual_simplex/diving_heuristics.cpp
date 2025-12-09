@@ -17,7 +17,7 @@ branch_variable_t<i_t> line_search_diving(const std::vector<i_t>& fractional,
 {
   constexpr f_t eps              = 1e-6;
   i_t branch_var                 = -1;
-  f_t min_score                  = INFINITY;
+  f_t min_score                  = std::numeric_limits<f_t>::max();
   rounding_direction_t round_dir = rounding_direction_t::NONE;
 
   for (auto j : fractional) {
@@ -72,7 +72,7 @@ branch_variable_t<i_t> pseudocost_diving(pseudo_costs_t<i_t, f_t>& pc,
 {
   std::lock_guard<omp_mutex_t> lock(pc.mutex);
   i_t branch_var                 = -1;
-  f_t max_score                  = -INFINITY;
+  f_t max_score                  = std::numeric_limits<f_t>::lowest();
   rounding_direction_t round_dir = rounding_direction_t::NONE;
   constexpr f_t eps              = 1e-6;
 
@@ -147,7 +147,7 @@ branch_variable_t<i_t> guided_diving(pseudo_costs_t<i_t, f_t>& pc,
 {
   std::lock_guard<omp_mutex_t> lock(pc.mutex);
   i_t branch_var                 = -1;
-  f_t max_score                  = -INFINITY;
+  f_t max_score                  = std::numeric_limits<f_t>::lowest();
   rounding_direction_t round_dir = rounding_direction_t::NONE;
   constexpr f_t eps              = 1e-6;
 
@@ -233,7 +233,7 @@ branch_variable_t<i_t> coefficient_diving(const lp_problem_t<i_t, f_t>& lp_probl
                                           logger_t& log)
 {
   i_t branch_var                 = -1;
-  f_t min_locks                  = INT_MAX;
+  i_t min_locks                  = std::numeric_limits<i_t>::max();
   rounding_direction_t round_dir = rounding_direction_t::NONE;
   constexpr f_t eps              = 1e-6;
 
