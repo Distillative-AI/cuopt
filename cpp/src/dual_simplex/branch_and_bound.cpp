@@ -799,8 +799,6 @@ node_solve_info_t branch_and_bound_t<i_t, f_t>::solve_node(
       auto [branch_var, round_dir] = variable_selection(
         node_ptr, leaf_fractional, leaf_solution.x, thread_type, lp_settings.log);
 
-      assert(round_dir != rounding_direction_t::NONE);
-      assert(branch_var >= 0);
       assert(leaf_vstatus.size() == leaf_problem.num_cols);
 
       search_tree.branch(
