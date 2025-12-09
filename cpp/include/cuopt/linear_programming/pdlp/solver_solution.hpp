@@ -193,7 +193,7 @@ class optimization_problem_solution_t : public base_solution_t {
    * @brief Returns the final status as a human readable string
    * @return The human readable solver status string
    */
-  std::string get_termination_status_string() const;
+  std::string get_termination_status_string(i_t id = 0) const;
   static std::string get_termination_status_string(pdlp_termination_status_t termination_status);
 
   /**
@@ -202,13 +202,13 @@ class optimization_problem_solution_t : public base_solution_t {
    * solver.
    * @return Best objective value
    */
-  f_t get_objective_value() const;
+  f_t get_objective_value(i_t) const;
 
   /**
    * @brief Returns the dual objective value of the solution as a `f_t`.
    * @return objective value of the dual problem
    */
-  f_t get_dual_objective_value() const;
+  f_t get_dual_objective_value(i_t) const;
 
   /**
    * @brief Returns the solution for the values of the primal variables as a vector of `f_t`.

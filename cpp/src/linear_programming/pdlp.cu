@@ -52,6 +52,7 @@ template <typename i_t, typename f_t>
 static size_t batch_size_handler(const problem_t<i_t, f_t>& op_problem)
 {
   // TODO batch mode: handle if not on var bounds
+  cuopt_assert(op_problem.variable_bounds.size() != 0 && op_problem.n_variables != 0, "Those should never be 0");
   return op_problem.variable_bounds.size() / op_problem.n_variables;
 }
 
@@ -264,20 +265,27 @@ template <typename i_t, typename f_t>
 void pdlp_solver_t<i_t, f_t>::set_initial_primal_solution(
   const rmm::device_uvector<f_t>& initial_primal_solution)
 {
-  initial_primal_.resize(initial_primal_solution.size(), stream_view_);
-  raft::copy(initial_primal_.data(),
-             initial_primal_solution.data(),
-             initial_primal_solution.size(),
-             stream_view_);
+  initial_primal_.resize(primal_size_h_ * climber_strategies_.size() , stream_view_);
+  // In batch case initial_primal_ can be larger than the given initial_primal_solution 
+  cub::DeviceTransform::Transform(
+  problem_wrap_container(initial_primal_solution),
+  initial_primal_.data(),
+  initial_primal_.size(),
+  cuda::std::identity{},
+  stream_view_);
 }
 
 template <typename i_t, typename f_t>
 void pdlp_solver_t<i_t, f_t>::set_initial_dual_solution(
   const rmm::device_uvector<f_t>& initial_dual_solution)
 {
-  initial_dual_.resize(initial_dual_solution.size(), stream_view_);
-  raft::copy(
-    initial_dual_.data(), initial_dual_solution.data(), initial_dual_solution.size(), stream_view_);
+  initial_dual_.resize(dual_size_h_ * climber_strategies_.size(), stream_view_);
+  cub::DeviceTransform::Transform(
+  problem_wrap_container(initial_dual_solution),
+  initial_dual_.data(),
+  initial_dual_.size(),
+  cuda::std::identity{},
+  stream_view_);
 }
 
 static bool time_limit_reached(const timer_t& timer) { return timer.check_time_limit(); }
@@ -988,19 +996,18 @@ void pdlp_solver_t<i_t, f_t>::update_primal_dual_solutions(
   std::cout << "  Updating primal and dual solution" << std::endl;
 #endif
 
-  // TODO batch mode: handle initial solution
-  cuopt_expects(!batch_mode_, cuopt::error_type_t::ValidationError, "Giving an initial solution is not supported in batch mode");
-
   // Copy the initial solution in pdhg as a first solution
   if (primal) {
+    cuopt_assert(pdhg_solver_.get_primal_solution().size() == primal.value()->size(), "Both of those should have equal size");
     raft::copy(pdhg_solver_.get_primal_solution().data(),
                primal.value()->data(),
-               primal_size_h_,
+               pdhg_solver_.get_primal_solution().size(),
                stream_view_);
   }
   if (dual) {
+    cuopt_assert(pdhg_solver_.get_dual_solution().size() == dual.value()->size(), "Both of those should have equal size");
     raft::copy(
-      pdhg_solver_.get_dual_solution().data(), dual.value()->data(), dual_size_h_, stream_view_);
+      pdhg_solver_.get_dual_solution().data(), dual.value()->data(), pdhg_solver_.get_dual_solution().size(), stream_view_);
   }
 
   // Handle initial step size if needed
@@ -1837,9 +1844,9 @@ void pdlp_solver_t<i_t, f_t>::compute_initial_primal_weight()
     if (pdlp_hyper_params::bound_objective_rescaling) {
     constexpr f_t one = f_t(1.0);
     thrust::uninitialized_fill(
-    handle_ptr_->get_thrust_policy(), primal_weight_.begin(), step_size_.end(), one);
+    handle_ptr_->get_thrust_policy(), primal_weight_.begin(), primal_weight_.end(), one);
     thrust::uninitialized_fill(
-    handle_ptr_->get_thrust_policy(), best_primal_weight_.begin(), step_size_.end(), one);
+    handle_ptr_->get_thrust_policy(), best_primal_weight_.begin(), best_primal_weight_.end(), one);
       return;
     } else {
       cuopt_expects(pdlp_hyper_params::initial_primal_weight_b_scaling == 1,

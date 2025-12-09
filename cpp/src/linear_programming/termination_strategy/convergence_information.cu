@@ -799,6 +799,7 @@ f_t convergence_information_t<i_t, f_t>::get_relative_gap_value(i_t climber_stra
 template <typename i_t, typename f_t>
 f_t convergence_information_t<i_t, f_t>::get_relative_l2_primal_residual_value(i_t climber_strategy_id) const
 {
+  // TODO batch mode: handle per climber rhs
   return l2_primal_residual_.element(climber_strategy_id, stream_view_) /
          (f_t(1.0) + l2_norm_primal_right_hand_side_.value(stream_view_));
 }
@@ -806,6 +807,7 @@ f_t convergence_information_t<i_t, f_t>::get_relative_l2_primal_residual_value(i
 template <typename i_t, typename f_t>
 f_t convergence_information_t<i_t, f_t>::get_relative_l2_dual_residual_value(i_t climber_strategy_id) const
 {
+  // TODO batch mode: handle per climber objective
   return l2_dual_residual_.element(climber_strategy_id, stream_view_) /
          (f_t(1.0) + l2_norm_primal_linear_objective_.value(stream_view_));
 }

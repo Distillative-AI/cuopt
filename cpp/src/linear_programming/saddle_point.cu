@@ -42,13 +42,13 @@ saddle_point_state_t<i_t, f_t>::saddle_point_state_t(raft::handle_t const* handl
     handle_ptr->get_thrust_policy(), dual_solution_.data(), dual_solution_.end(), f_t(0));
 
   RAFT_CUDA_TRY(cudaMemsetAsync(
-    delta_primal_.data(), 0.0, sizeof(f_t) * primal_size_, handle_ptr->get_stream()));
+    delta_primal_.data(), 0, sizeof(f_t) * delta_primal_.size(), handle_ptr->get_stream()));
   RAFT_CUDA_TRY(
-    cudaMemsetAsync(delta_dual_.data(), 0.0, sizeof(f_t) * dual_size_, handle_ptr->get_stream()));
+    cudaMemsetAsync(delta_dual_.data(), 0, sizeof(f_t) * delta_dual_.size(), handle_ptr->get_stream()));
   RAFT_CUDA_TRY(cudaMemsetAsync(
-    primal_gradient_.data(), 0.0, sizeof(f_t) * primal_size_, handle_ptr->get_stream()));
+    primal_gradient_.data(), 0, sizeof(f_t) * primal_gradient_.size(), handle_ptr->get_stream()));
   RAFT_CUDA_TRY(cudaMemsetAsync(
-    dual_gradient_.data(), 0.0, sizeof(f_t) * dual_size_, handle_ptr->get_stream()));
+    dual_gradient_.data(), 0, sizeof(f_t) * dual_gradient_.size(), handle_ptr->get_stream()));
 
   // No need to 0 init current/next AtY, they are directlty written as result of SpMV
 }

@@ -1015,12 +1015,14 @@ TEST(pdlp_class, simple_batch_afiro)
       afiro_primal_objective, solution.get_additional_termination_information(i).primal_objective));
   }
 
-  // All should have the bitwise same primal/dual objective, termination reason, iterations and primal/dual values compared to ref
+  // All should have the bitwise same primal/dual objective, termination reason, iterations, residuals and primal/dual values compared to ref
   const auto ref_stats = (int)solution.get_termination_status(0);
   const auto ref_primal = solution.get_additional_termination_information(0).primal_objective;
   const auto ref_dual = solution.get_additional_termination_information(0).dual_objective;
   const auto ref_it = solution.get_additional_termination_information(0).number_of_steps_taken;
   const auto ref_it_total = solution.get_additional_termination_information(0).total_number_of_attempted_steps;
+  const auto ref_primal_residual = solution.get_additional_termination_information(0).l2_primal_residual;
+  const auto ref_dual_residual = solution.get_additional_termination_information(0).l2_dual_residual;
 
   const auto ref_primal_solution = host_copy(solution.get_primal_solution());
   const auto ref_dual_solution = host_copy(solution.get_dual_solution());
@@ -1035,6 +1037,8 @@ TEST(pdlp_class, simple_batch_afiro)
     EXPECT_EQ(ref_dual, solution.get_additional_termination_information(i).dual_objective);
     EXPECT_EQ(ref_it, solution.get_additional_termination_information(i).number_of_steps_taken);
     EXPECT_EQ(ref_it_total, solution.get_additional_termination_information(i).total_number_of_attempted_steps);
+    EXPECT_EQ(ref_primal_residual, solution.get_additional_termination_information(i).l2_primal_residual);
+    EXPECT_EQ(ref_dual_residual, solution.get_additional_termination_information(i).l2_dual_residual);
     // Direclty compare on ref since we just compare the first climber to the rest
     for (size_t p = 0; p < primal_size; ++p)
       EXPECT_EQ(ref_primal_solution[p], ref_primal_solution[p + i * primal_size]);
@@ -1412,12 +1416,14 @@ TEST(pdlp_class, big_batch_afiro)
       afiro_primal_objective, solution.get_additional_termination_information(i).primal_objective));
   }
 
-  // All should have the bitwise same primal/dual objective, termination reason, iterations and primal/dual values compared to ref
+  // All should have the bitwise same primal/dual objective, termination reason, iterations, residuals and primal/dual values compared to ref
   const auto ref_stats = (int)solution.get_termination_status(0);
   const auto ref_primal = solution.get_additional_termination_information(0).primal_objective;
   const auto ref_dual = solution.get_additional_termination_information(0).dual_objective;
   const auto ref_it = solution.get_additional_termination_information(0).number_of_steps_taken;
   const auto ref_it_total = solution.get_additional_termination_information(0).total_number_of_attempted_steps;
+  const auto ref_primal_residual = solution.get_additional_termination_information(0).l2_primal_residual;
+  const auto ref_dual_residual = solution.get_additional_termination_information(0).l2_dual_residual;
 
   const auto ref_primal_solution = host_copy(solution.get_primal_solution());
   const auto ref_dual_solution = host_copy(solution.get_dual_solution());
@@ -1432,6 +1438,8 @@ TEST(pdlp_class, big_batch_afiro)
     EXPECT_EQ(ref_dual, solution.get_additional_termination_information(i).dual_objective);
     EXPECT_EQ(ref_it, solution.get_additional_termination_information(i).number_of_steps_taken);
     EXPECT_EQ(ref_it_total, solution.get_additional_termination_information(i).total_number_of_attempted_steps);
+    EXPECT_EQ(ref_primal_residual, solution.get_additional_termination_information(i).l2_primal_residual);
+    EXPECT_EQ(ref_dual_residual, solution.get_additional_termination_information(i).l2_dual_residual);
     // Direclty compare on ref since we just compare the first climber to the rest
     for (size_t p = 0; p < primal_size; ++p)
       EXPECT_EQ(ref_primal_solution[p], ref_primal_solution[p + i * primal_size]);

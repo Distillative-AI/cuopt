@@ -88,6 +88,7 @@ template <typename i_t, typename f_t>
 std::vector<pdlp_termination_status_t> pdlp_termination_strategy_t<i_t, f_t>::get_terminations_status()
 {
   std::vector<pdlp_termination_status_t> out(climber_strategies_.size());
+  cuopt_assert(out.size() == termination_status_.size(), "Both should have equal size");
   std::transform(termination_status_.begin(), termination_status_.end(), out.begin(), [](i_t in) { return (pdlp_termination_status_t)in;});
   return out;
 }
@@ -194,7 +195,6 @@ if (idx == 0)
     tolerance.absolute_gap_tolerance,
     tolerance.relative_gap_tolerance,
     convergence_information.abs_objective[idx]);
-  }
   if (per_constraint_residual) {
     printf(
       "Primal residual : convergence_information.linf_relative_primal_resiprimal %lf < "
@@ -208,8 +208,6 @@ if (idx == 0)
       tolerance.absolute_dual_tolerance);
   } else {
     // TODO batch mode: per problem rhs
-    if (idx == 0)
-{
     printf(
       "Primal residual  %lf <= %lf [%d] (tolerance.absolute_primal_tolerance %lf + "
       "tolerance.relative_primal_tolerance %lf * "
@@ -239,6 +237,20 @@ if (idx == 0)
     tolerance.absolute_dual_tolerance,
     tolerance.relative_dual_tolerance,
     *convergence_information.l2_norm_primal_linear_objective);
+  }
+  if (infeasibility_detection) {
+    printf(
+      "Primal infeasible ? [%d] : infeasibility_information.dual_ray_linear_objective (should positive) %lf / "
+      "infeasibility_information.max_dual_ray_infeasibility %lf = %lf <= tolerance.primal_infeasible_tolerance %lf\n",
+      infeasibility_information.dual_ray_linear_objective[idx] > f_t(0.0) &&
+        infeasibility_information.max_dual_ray_infeasibility[idx] /
+            infeasibility_information.dual_ray_linear_objective[idx] <=
+          tolerance.primal_infeasible_tolerance,
+      infeasibility_information.dual_ray_linear_objective[idx],
+      infeasibility_information.max_dual_ray_infeasibility[idx],
+      infeasibility_information.max_dual_ray_infeasibility[idx] /
+            infeasibility_information.dual_ray_linear_objective[idx],
+      tolerance.primal_infeasible_tolerance);
   }
 }
 #endif
@@ -359,9 +371,8 @@ pdlp_termination_strategy_t<i_t, f_t>::fill_return_problem_solution(
   std::vector<pdlp_termination_status_t>&& termination_status,
   bool deep_copy)
 {
-  // TODO batch mode: handle this properly
-  //cuopt_assert(primal_iterate.size() == current_pdhg_solver.get_primal_size() * 2, "Primal iterate size mismatch");
-  //cuopt_assert(dual_iterate.size() == current_pdhg_solver.get_dual_size() * 2, "Dual iterate size mismatch");
+  cuopt_assert(primal_iterate.size() == current_pdhg_solver.get_primal_size() * termination_status.size(), "Primal iterate size mismatch");
+  cuopt_assert(dual_iterate.size() == current_pdhg_solver.get_dual_size() * termination_status.size(), "Dual iterate size mismatch");
 
   typename convergence_information_t<i_t, f_t>::view_t convergence_information_view =
     convergence_information_.view();
@@ -372,13 +383,13 @@ pdlp_termination_strategy_t<i_t, f_t>::fill_return_problem_solution(
     term_stats_vector(climber_strategies_.size());
   for (size_t i = 0; i < climber_strategies_.size(); ++i)
   {
-    // TODO batch mode handle per clibmer number_of_iterations
+    // TODO batch mode: handle per climber number_of_iterations
     term_stats_vector[i].number_of_steps_taken           = number_of_iterations;
     term_stats_vector[i].total_number_of_attempted_steps = current_pdhg_solver.get_total_pdhg_iterations();
 
-    raft::copy(&term_stats_vector[i].l2_primal_residual + i,
+    raft::copy(&term_stats_vector[i].l2_primal_residual,
             (settings_.per_constraint_residual)
-              ? convergence_information_view.relative_l_inf_primal_residual
+              ? convergence_information_view.relative_l_inf_primal_residual // TODO batch mode: handle per climber overall residual
         : convergence_information_view.l2_primal_residual.data() + i,
         1,
       stream_view_);
@@ -386,7 +397,7 @@ pdlp_termination_strategy_t<i_t, f_t>::fill_return_problem_solution(
     term_stats_vector[i].l2_relative_primal_residual =
     convergence_information_.get_relative_l2_primal_residual_value(i);
 
-    raft::copy(&term_stats_vector[i].l2_dual_residual + i,
+    raft::copy(&term_stats_vector[i].l2_dual_residual,
       (settings_.per_constraint_residual)
       ? convergence_information_view.relative_l_inf_dual_residual
       : convergence_information_view.l2_dual_residual.data() + i,
