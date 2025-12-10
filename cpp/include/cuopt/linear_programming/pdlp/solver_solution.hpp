@@ -202,7 +202,7 @@ class optimization_problem_solution_t : public base_solution_t {
    * solver.
    * @return Best objective value
    */
-  f_t get_objective_value(i_t) const;
+  f_t get_objective_value(i_t = 0) const;
 
   /**
    * @brief Returns the dual objective value of the solution as a `f_t`.
