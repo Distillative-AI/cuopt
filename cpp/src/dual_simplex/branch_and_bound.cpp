@@ -1353,6 +1353,29 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
   exploration_stats_.nodes_explored   = 0;
   original_lp_.A.to_compressed_row(Arow_);
 
+  std::vector<bnb_thread_type_t> diving_strategies;
+  diving_strategies.reserve(4);
+
+  if (!settings_.diving_settings.disable_pseudocost_diving) {
+    diving_strategies.push_back(bnb_thread_type_t::PSEUDOCOST_DIVING);
+  }
+
+  if (!settings_.diving_settings.disable_line_search_diving) {
+    diving_strategies.push_back(bnb_thread_type_t::LINE_SEARCH_DIVING);
+  }
+
+  if (!settings_.diving_settings.disable_guided_diving) {
+    diving_strategies.push_back(bnb_thread_type_t::GUIDED_DIVING);
+  }
+
+  if (!settings_.diving_settings.disable_coefficient_diving) {
+    diving_strategies.push_back(bnb_thread_type_t::COEFFICIENT_DIVING);
+  }
+
+  if (diving_strategies.empty()) {
+    settings_.log.printf("Warning: All diving heuristics are disabled!");
+  }
+
   if (guess_.size() != 0) {
     std::vector<f_t> crushed_guess;
     crush_primal_solution(original_problem_, original_lp_, guess_, new_slacks_, crushed_guess);
@@ -1515,25 +1538,6 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
   lower_bound_ceiling_                    = inf;
   should_report_                          = true;
 
-  std::vector<bnb_thread_type_t> diving_strategies;
-  diving_strategies.reserve(4);
-
-  if (!settings_.diving_settings.disable_pseudocost_diving) {
-    diving_strategies.push_back(bnb_thread_type_t::PSEUDOCOST_DIVING);
-  }
-
-  if (!settings_.diving_settings.disable_line_search_diving) {
-    diving_strategies.push_back(bnb_thread_type_t::LINE_SEARCH_DIVING);
-  }
-
-  if (!settings_.diving_settings.disable_guided_diving) {
-    diving_strategies.push_back(bnb_thread_type_t::GUIDED_DIVING);
-  }
-
-  if (!settings_.diving_settings.disable_coefficient_diving) {
-    diving_strategies.push_back(bnb_thread_type_t::COEFFICIENT_DIVING);
-  }
-
 #pragma omp parallel num_threads(settings_.num_threads)
   {
 #pragma omp master
@@ -1557,10 +1561,12 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
         best_first_thread(i);
       }
 
-      for (i_t k = 0; k < settings_.diving_settings.num_diving_tasks; k++) {
-        const bnb_thread_type_t diving_type = diving_strategies[k % num_strategies];
+      if (!diving_strategies.empty()) {
+        for (i_t k = 0; k < settings_.diving_settings.num_diving_tasks; k++) {
+          const bnb_thread_type_t diving_type = diving_strategies[k % num_strategies];
 #pragma omp task
-        diving_thread(diving_type);
+          diving_thread(diving_type);
+        }
       }
     }
   }

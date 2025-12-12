@@ -197,7 +197,7 @@ branch_variable_t<i_t> guided_diving(pseudo_costs_t<i_t, f_t>& pc,
 }
 
 template <typename i_t, typename f_t>
-std::tuple<f_t, f_t> calculate_variable_locks(const lp_problem_t<i_t, f_t>& lp_problem, i_t var_idx)
+std::tuple<i_t, i_t> calculate_variable_locks(const lp_problem_t<i_t, f_t>& lp_problem, i_t var_idx)
 {
   i_t up_lock   = 0;
   i_t down_lock = 0;

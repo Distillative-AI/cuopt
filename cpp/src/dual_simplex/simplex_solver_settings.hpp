@@ -91,7 +91,7 @@ struct simplex_solver_settings_t {
       heuristic_preemption_callback(nullptr),
       concurrent_halt(nullptr)
   {
-    diving_settings.num_diving_tasks = std::min(num_threads - num_bfs_threads, 1);
+    diving_settings.num_diving_tasks = std::max(num_threads - num_bfs_threads, 1);
   }
 
   void set_log(bool logging) const { log.log = logging; }

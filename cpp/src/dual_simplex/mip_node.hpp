@@ -60,7 +60,7 @@ class mip_node_t {
       node_id(0),
       branch_var(-1),
       branch_dir(rounding_direction_t::NONE),
-      objective_estimate(inf),
+      objective_estimate(std::numeric_limits<f_t>::infinity()),
       vstatus(basis)
   {
     children[0] = nullptr;
