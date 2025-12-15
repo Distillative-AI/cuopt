@@ -260,9 +260,9 @@ void rins_t<i_t, f_t>::run_rins()
   branch_and_bound_settings.num_bfs_threads = 1;
 
   // In the future, let RINS use all the diving heuristics. For now,
-  // restricting to line search diving.
+  // restricting to guided diving.
   branch_and_bound_settings.diving_settings.num_diving_tasks           = 1;
-  branch_and_bound_settings.diving_settings.disable_guided_diving      = true;
+  branch_and_bound_settings.diving_settings.disable_line_search_diving = true;
   branch_and_bound_settings.diving_settings.disable_coefficient_diving = true;
   branch_and_bound_settings.diving_settings.disable_pseudocost_diving  = true;
   branch_and_bound_settings.log.log                                    = false;
