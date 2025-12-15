@@ -241,7 +241,7 @@ branch_variable_t<i_t> coefficient_diving(const lp_problem_t<i_t, f_t>& lp_probl
     f_t f_down                = solution[j] - std::floor(solution[j]);
     f_t f_up                  = std::ceil(solution[j]) - solution[j];
     auto [up_lock, down_lock] = calculate_variable_locks(lp_problem, j);
-    f_t locks                 = std::min(up_lock, down_lock);
+    i_t locks                 = std::min(up_lock, down_lock);
 
     if (min_locks > locks) {
       min_locks  = locks;
@@ -263,7 +263,7 @@ branch_variable_t<i_t> coefficient_diving(const lp_problem_t<i_t, f_t>& lp_probl
   assert(branch_var >= 0);
 
   log.debug(
-    "Coefficient diving: selected var %d with val = %e, round dir = %d and min locks = %e\n",
+    "Coefficient diving: selected var %d with val = %e, round dir = %d and min locks = %d\n",
     branch_var,
     solution[branch_var],
     round_dir,
