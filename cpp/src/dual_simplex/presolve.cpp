@@ -621,7 +621,7 @@ void convert_user_problem(const user_problem_t<i_t, f_t>& user_problem,
   }
 
   constexpr bool run_bounds_strengthening = false;
-  if (run_bounds_strengthening) {
+  if constexpr (run_bounds_strengthening) {
     csr_matrix_t<i_t, f_t> Arow(1, 1, 1);
     problem.A.to_compressed_row(Arow);
 
@@ -629,8 +629,8 @@ void convert_user_problem(const user_problem_t<i_t, f_t>& user_problem,
 
     // Empty var_types means that all variables are continuous
     bounds_strengthening_t<i_t, f_t> strengthening(problem, Arow, row_sense, {});
-    std::fill(strengthening.bounds_changed.begin(), strengthening.bounds_changed.end(), true);
-    strengthening.bounds_strengthening(problem.lower, problem.upper, settings);
+    std::vector<bool> bounds_changed(problem.num_cols, true);
+    strengthening.bounds_strengthening(problem.lower, problem.upper, bounds_changed, settings);
   }
 
   settings.log.debug(

@@ -86,6 +86,32 @@ struct bnb_stats_t {
 };
 
 template <typename i_t, typename f_t>
+struct bnb_worker_data_t {
+  lp_problem_t<i_t, f_t> leaf_problem;
+  basis_update_mpf_t<i_t, f_t> basis_factors;
+  std::vector<i_t> basic_list;
+  std::vector<i_t> nonbasic_list;
+  bounds_strengthening_t<i_t, f_t> node_presolver;
+  std::vector<bool> bounds_changed;
+
+  bool recompute_basis  = true;
+  bool recompute_bounds = true;
+
+  bnb_worker_data_t(const lp_problem_t<i_t, f_t>& original_lp,
+                    const csr_matrix_t<i_t, f_t>& Arow,
+                    const std::vector<variable_type_t>& var_type,
+                    const simplex_solver_settings_t<i_t, f_t>& settings)
+    : leaf_problem(original_lp),
+      basis_factors(original_lp.num_rows, settings.refactor_frequency),
+      basic_list(original_lp.num_rows),
+      nonbasic_list(),
+      node_presolver(leaf_problem, Arow, {}, var_type),
+      bounds_changed(original_lp.num_cols, false)
+  {
+  }
+};
+
+template <typename i_t, typename f_t>
 class branch_and_bound_t {
  public:
   branch_and_bound_t(const user_problem_t<i_t, f_t>& user_problem,
@@ -200,6 +226,11 @@ class branch_and_bound_t {
   void report_heuristic(f_t obj);
   void report(std::string symbol, f_t obj, f_t lower_bound, i_t node_depth);
 
+  // Persistent data private for each individual worker.
+  std::unordered_map<int, std::unique_ptr<bnb_worker_data_t<i_t, f_t>>> persistent_worker_data_;
+  omp_mutex_t mutex_worker_data_;
+  bnb_worker_data_t<i_t, f_t>* get_worker_data(i_t tid);
+
   // Set the final solution.
   mip_status_t set_final_solution(mip_solution_t<i_t, f_t>& solution, f_t lower_bound);
 
@@ -217,15 +248,7 @@ class branch_and_bound_t {
   // there is enough unexplored nodes. This is done recursively using OpenMP tasks.
   void exploration_ramp_up(mip_node_t<i_t, f_t>* node, i_t initial_heap_size);
 
-  // Perform a plunge in the subtree determined by the `start_node`.
-  void plunge_from(i_t task_id,
-                   mip_node_t<i_t, f_t>* start_node,
-                   search_tree_t<i_t, f_t>& search_tree,
-                   lp_problem_t<i_t, f_t>& leaf_problem,
-                   bounds_strengthening_t<i_t, f_t>& node_presolver,
-                   basis_update_mpf_t<i_t, f_t>& basis_update,
-                   std::vector<i_t>& basic_list,
-                   std::vector<i_t>& nonbasic_list);
+  void plunge_from(i_t task_id, mip_node_t<i_t, f_t>* start_node);
 
   // Each "main" thread pops a node from the global heap and then performs a plunge
   // (i.e., a shallow dive) into the subtree determined by the node.
@@ -235,27 +258,24 @@ class branch_and_bound_t {
   void dive_from(mip_node_t<i_t, f_t>& start_node,
                  const std::vector<f_t>& start_lower,
                  const std::vector<f_t>& start_upper,
-                 lp_problem_t<i_t, f_t>& leaf_problem,
-                 bounds_strengthening_t<i_t, f_t>& node_presolver,
-                 basis_update_mpf_t<i_t, f_t>& basis_update,
-                 std::vector<i_t>& basic_list,
-                 std::vector<i_t>& nonbasic_list,
                  bnb_thread_type_t diving_type);
 
   // Each diving thread pops the first node from the dive queue and then performs
   // a deep dive into the subtree determined by the node.
   void diving_thread(bnb_thread_type_t diving_type);
 
+  // Set the bounds of the leaf node and then apply bounds propagation.
+  // Return true if the problem is feasible, false otherwise.
+  bool set_node_bounds(mip_node_t<i_t, f_t>* node_ptr,
+                       const std::vector<f_t>& start_lower,
+                       const std::vector<f_t>& start_upper,
+                       bnb_worker_data_t<i_t, f_t>* worker_data);
+
   // Solve the LP relaxation of a leaf node and update the tree.
   node_solve_info_t solve_node(mip_node_t<i_t, f_t>* node_ptr,
                                search_tree_t<i_t, f_t>& search_tree,
-                               lp_problem_t<i_t, f_t>& leaf_problem,
-                               basis_update_mpf_t<i_t, f_t>& basis_factors,
-                               std::vector<i_t>& basic_list,
-                               std::vector<i_t>& nonbasic_list,
-                               bounds_strengthening_t<i_t, f_t>& node_presolver,
                                bnb_thread_type_t thread_type,
-                               bool recompute_basis_and_bounds,
+                               bnb_worker_data_t<i_t, f_t>* worker_data,
                                const std::vector<f_t>& root_lower,
                                const std::vector<f_t>& root_upper,
                                bnb_stats_t<i_t, f_t>& stats,
