@@ -307,13 +307,12 @@ void branch_and_bound_t<i_t, f_t>::report(std::string symbol,
 template <typename i_t, typename f_t>
 bnb_worker_data_t<i_t, f_t>* branch_and_bound_t<i_t, f_t>::get_worker_data(i_t tid)
 {
-  std::lock_guard<omp_mutex_t> lock(mutex_worker_data_);
-  if (persistent_worker_data_.find(tid) == persistent_worker_data_.end()) {
-    persistent_worker_data_[tid] =
+  if (!worker_data_pool_[tid].get()) {
+    worker_data_pool_[tid] =
       std::make_unique<bnb_worker_data_t<i_t, f_t>>(original_lp_, Arow_, var_types_, settings_);
   }
 
-  return persistent_worker_data_[tid].get();
+  return worker_data_pool_[tid].get();
 }
 
 template <typename i_t, typename f_t>

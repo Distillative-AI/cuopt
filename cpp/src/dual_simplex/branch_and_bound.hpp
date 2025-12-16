@@ -226,9 +226,10 @@ class branch_and_bound_t {
   void report_heuristic(f_t obj);
   void report(std::string symbol, f_t obj, f_t lower_bound, i_t node_depth);
 
-  // Persistent data private for each individual worker.
-  std::unordered_map<int, std::unique_ptr<bnb_worker_data_t<i_t, f_t>>> persistent_worker_data_;
-  omp_mutex_t mutex_worker_data_;
+  
+  // A pool containing the data needed for a worker to perform a plunge or dive.
+  // This is lazily initialized via `get_worker_data()`.
+  std::vector<std::unique_ptr<bnb_worker_data_t<i_t, f_t>>> worker_data_pool_;
   bnb_worker_data_t<i_t, f_t>* get_worker_data(i_t tid);
 
   // Set the final solution.
