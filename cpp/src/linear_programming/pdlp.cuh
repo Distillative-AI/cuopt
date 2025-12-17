@@ -129,6 +129,10 @@ class pdlp_solver_t {
   raft::handle_t const* handle_ptr_;
   rmm::cuda_stream_view stream_view_;
 
+  #ifdef BATCH_VERBOSE_MODE
+  std::unordered_map<i_t, i_t> climber_done;
+  #endif
+
   problem_t<i_t, f_t>* problem_ptr;
   // Combined bounds in op_problem_scaled_ will only be scaled if
   // compute_initial_primal_weight_before_scaling is false because of compute_initial_primal_weight

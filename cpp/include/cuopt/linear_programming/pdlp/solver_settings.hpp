@@ -232,6 +232,7 @@ class pdlp_solver_settings_t {
   // For concurrent termination
   volatile int* concurrent_halt{nullptr};
   static constexpr f_t minimal_absolute_tolerance = 1.0e-12;
+  bool use_batch_mode{false};
 
  private:
   /** Initial primal solution */

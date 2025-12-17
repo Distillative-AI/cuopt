@@ -210,7 +210,7 @@ static int optimal_batch_size_handler(const problem_t<i_t, f_t>& op_problem, int
   // We start with batch size 100 and try to improve by either multitipling or dividing by 2 each time
   // At max we take 5 steps of search
 
-  constexpr int max_steps = 4;
+  constexpr int max_steps = 4; // 4 because we already do one step for direction
   constexpr int initial_batch_size = 100;
   constexpr int benchmark_runs = 5;
   int current_batch_size = std::min(initial_batch_size, max_batch_size);
@@ -251,18 +251,24 @@ static int optimal_batch_size_handler(const problem_t<i_t, f_t>& op_problem, int
   double right_ratio = evaluate_node<i_t, f_t>(A, A_T, primal_size, dual_size, right_node, benchmark_runs, op_problem.handle_ptr);
   int current_step = 1;
 
+#ifdef BATCH_VERBOSE_MODE
   std::cout << "Starting batch size: " << current_batch_size << " and ratio: " << current_ratio << std::endl;
   std::cout << "Left batch size: " << left_node << " and ratio: " << left_ratio << std::endl;
   std::cout << "Right batch size: " << right_node << " and ratio: " << right_ratio << std::endl;
+  #endif
 
   // Left is better, continue descreasing by dividing by 2 until we find worst
   // Then take middle and keep best found
   if (left_ratio < current_ratio)
   {
+    #ifdef BATCH_VERBOSE_MODE
     std::cout << "Left is better, continuing decreasing" << std::endl;
+    #endif
     if (left_node == 1)
     {
+      #ifdef BATCH_VERBOSE_MODE
       std::cout << "Left is already 1, returning 1" << std::endl;
+      #endif
       return 1;
     }
     current_batch_size = left_node;
@@ -271,14 +277,20 @@ static int optimal_batch_size_handler(const problem_t<i_t, f_t>& op_problem, int
     do
     {
       current_batch_size = current_batch_size / 2;
+      #ifdef BATCH_VERBOSE_MODE
       std::cout << "Evaluating left node: " << current_batch_size << std::endl;
+      #endif
       left_ratio = evaluate_node<i_t, f_t>(A, A_T, primal_size, dual_size, current_batch_size, benchmark_runs, op_problem.handle_ptr);
+      #ifdef BATCH_VERBOSE_MODE
       std::cout << "Left node ratio: " << left_ratio << std::endl;
+      #endif
       if (left_ratio < best_ratio) // Better found continue reducing
       {
         if (current_batch_size == 1)
         {
+          #ifdef BATCH_VERBOSE_MODE
           std::cout << "Left is now 1, returning 1" << std::endl;
+          #endif
           return 1;
         }
         ++current_step;
@@ -287,24 +299,34 @@ static int optimal_batch_size_handler(const problem_t<i_t, f_t>& op_problem, int
       }
       else // Worst found, stop reducing
       {
+        #ifdef BATCH_VERBOSE_MODE
         std::cout << "Left was worst, stopping decreasing" << std::endl;
+        #endif
         break;
       }
     } while (current_step < max_steps);
     // Testing one last time between the two
     const int middle_node = ((current_batch_size * 2) + current_batch_size) / 2;
     cuopt_assert(middle_node > 0, "Middle node should be greater than 0");
+    #ifdef BATCH_VERBOSE_MODE
     std::cout << "Testing one last time between the two at node: " << middle_node << std::endl;
+    #endif
     double middle_ratio = evaluate_node<i_t, f_t>(A, A_T, primal_size, dual_size, middle_node, benchmark_runs, op_problem.handle_ptr);
+    #ifdef BATCH_VERBOSE_MODE
     std::cout << "Middle node ratio: " << middle_ratio << std::endl;
+    #endif
     if (middle_ratio < best_ratio) // Middle is better, returning better
     {
+      #ifdef BATCH_VERBOSE_MODE
       std::cout << "Middle is better, returning " << middle_node << std::endl;
+      #endif
       return middle_node;
     }
     else // Middle was worst, keep previous best
     {
+      #ifdef BATCH_VERBOSE_MODE
       std::cout << "Middle was worst, keeping previous best " << optimal_batch_size << std::endl;
+      #endif
       return optimal_batch_size;
     }
   }
@@ -312,27 +334,39 @@ static int optimal_batch_size_handler(const problem_t<i_t, f_t>& op_problem, int
   // Then take middle and keep best found
   if (right_ratio < current_ratio)
   {
+    #ifdef BATCH_VERBOSE_MODE
     std::cout << "Right is better, continuing increasing" << std::endl;
+    #endif
     if (right_node == max_batch_size) // Right as already reached max, returning it
     {
+      #ifdef BATCH_VERBOSE_MODE
       std::cout << "Right is already at max, returning " << right_node << std::endl;
+      #endif
       return right_node;
     }
     optimal_batch_size = right_node;
     current_batch_size = right_node;
+    #ifdef BATCH_VERBOSE_MODE
     std::cout << "Current batch size: " << current_batch_size << std::endl;
+    #endif
     best_ratio = right_ratio;
     do
     {
       current_batch_size = std::min(current_batch_size * 2, max_batch_size);
+      #ifdef BATCH_VERBOSE_MODE
       std::cout << "Evaluating right node: " << current_batch_size << std::endl;
+      #endif
       right_ratio = evaluate_node<i_t, f_t>(A, A_T, primal_size, dual_size, current_batch_size, benchmark_runs, op_problem.handle_ptr);
+      #ifdef BATCH_VERBOSE_MODE
       std::cout << "Right node ratio: " << right_ratio << std::endl;
+      #endif
       if (right_ratio < best_ratio) // Better found continue increasing
       {
         if (current_batch_size == max_batch_size) // Right as already reached max, returning it
         {
+          #ifdef BATCH_VERBOSE_MODE
           std::cout << "Right is now at max, returning " << current_batch_size << std::endl;
+          #endif
           return current_batch_size;
         }
         ++current_step;
@@ -341,30 +375,42 @@ static int optimal_batch_size_handler(const problem_t<i_t, f_t>& op_problem, int
       }
       else // Worst found, stop increasing
       {
+        #ifdef BATCH_VERBOSE_MODE
         std::cout << "Right was worst, stopping increasing" << std::endl;
+        #endif
         break;
       }
     } while (current_step < max_steps);
     // Testing one last time between the two
     int middle_node = std::min(((current_batch_size / 2) + current_batch_size) / 2, max_batch_size);
+    #ifdef BATCH_VERBOSE_MODE
     std::cout << "Testing one last time between the two at node: " << middle_node << std::endl;
+    #endif
     double middle_ratio = evaluate_node<i_t, f_t>(A, A_T, primal_size, dual_size, middle_node, benchmark_runs, op_problem.handle_ptr);
+    #ifdef BATCH_VERBOSE_MODE
     std::cout << "Middle node ratio: " << middle_ratio << std::endl;
+    #endif
     if (middle_ratio < best_ratio) // Middle is better, returning better
     {
+      #ifdef BATCH_VERBOSE_MODE
       std::cout << "Middle is better, returning " << middle_node << std::endl;
+      #endif
       return middle_node;
     }
     else // Middle was worst, keep previous best
     {
+      #ifdef BATCH_VERBOSE_MODE
       std::cout << "Middle was worst, keeping previous best " << optimal_batch_size << std::endl;
+      #endif
       return optimal_batch_size;
     }
   }
   // Current is better -> directly return current and don't try to refine
   else
   {
+    #ifdef BATCH_VERBOSE_MODE
     std::cout << "Current is better" << std::endl;
+    #endif
     return current_batch_size;
   }
 
@@ -378,12 +424,12 @@ static size_t batch_size_handler(const problem_t<i_t, f_t>& op_problem)
   // TODO batch mode: handle if not on var bounds
   cuopt_assert(op_problem.variable_bounds.size() != 0 && op_problem.n_variables != 0, "Those should never be 0");
   int max_batch_size = op_problem.variable_bounds.size() / op_problem.n_variables;
-  int optimal_batch_size = optimal_batch_size_handler(op_problem, max_batch_size);
-  cuopt_assert(optimal_batch_size != 0 && optimal_batch_size <= max_batch_size, "Optimal batch size should be between 1 and max batch size");
-  std::cout << "Optimal batch size: " << optimal_batch_size << std::endl;
-  if (optimal_batch_size != 1)
-   exit(0);
-  return optimal_batch_size;
+  //int optimal_batch_size = optimal_batch_size_handler(op_problem, max_batch_size);
+  //cuopt_assert(optimal_batch_size != 0 && optimal_batch_size <= max_batch_size, "Optimal batch size should be between 1 and max batch size");
+  //#ifdef BATCH_VERBOSE_MODE
+  std::cout << "Max batch size: " << max_batch_size << std::endl;
+  //#endif
+  return max_batch_size;
 }
 
 template <typename i_t, typename f_t>
@@ -912,7 +958,6 @@ std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>
   cuopt_assert(is_cupdlpx, "Batch termination handling only supported with cuPDLPx restart");
   
   #ifdef BATCH_VERBOSE_MODE
-  static std::unordered_map<i_t, i_t> climber_done;
   for (size_t i = 0; i < current_termination_strategy_.get_terminations_status().size(); ++i)
   {
     const auto& term = current_termination_strategy_.get_termination_status(i);

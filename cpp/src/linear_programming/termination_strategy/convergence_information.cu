@@ -101,6 +101,7 @@ convergence_information_t<i_t, f_t>::convergence_information_t(
                        problem_ptr->constraint_upper_bounds,
                        l2_norm_primal_right_hand_side_,
                        handle_ptr_->get_stream());
+    std::cout << "l2_norm_primal_right_hand_side_: " << l2_norm_primal_right_hand_side_.value(stream_view_) << std::endl;
   }
 
   void* d_temp_storage        = NULL;

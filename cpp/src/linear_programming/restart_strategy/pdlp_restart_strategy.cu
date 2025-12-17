@@ -1211,7 +1211,7 @@ void pdlp_restart_strategy_t<i_t, f_t>::distance_squared_moved_from_last_restart
   else
   {
     cub::DeviceSegmentedReduce::Sum(
-  dot_product_storage.data(), dot_product_bytes, 
+  dot_product_storage.data(), dot_product_bytes,
   thrust::make_transform_iterator(tmp.data(),
   power_two_func_t<f_t>{}),
   distance_moved.data(), climber_strategies_.size(), size_of_solutions_h, stream_view_);
