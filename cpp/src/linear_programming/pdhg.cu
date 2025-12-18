@@ -34,7 +34,8 @@ template <typename i_t, typename f_t>
 pdhg_solver_t<i_t, f_t>::pdhg_solver_t(raft::handle_t const* handle_ptr,
                                        problem_t<i_t, f_t>& op_problem_scaled,
                                        bool is_legacy_batch_mode, // Batch mode with streams
-                                       const std::vector<pdlp_climber_strategy_t>& climber_strategies) 
+                                       const std::vector<pdlp_climber_strategy_t>& climber_strategies,
+                                       const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params) 
   : batch_mode_(climber_strategies.size() > 1),
     handle_ptr_(handle_ptr),
     stream_view_(handle_ptr_->get_stream()),
@@ -48,13 +49,13 @@ pdhg_solver_t<i_t, f_t>::pdhg_solver_t(raft::handle_t const* handle_ptr,
     potential_next_dual_solution_{(climber_strategies.size() * problem_ptr->n_constraints), stream_view_},
     total_pdhg_iterations_{0},
     dual_slack_{static_cast<size_t>(
-                  (pdlp_hyper_params::use_reflected_primal_dual) ? problem_ptr->n_variables * climber_strategies.size() : 0),
+                  (hyper_params.use_reflected_primal_dual) ? problem_ptr->n_variables * climber_strategies.size() : 0),
                 stream_view_},
     reflected_primal_{
-      static_cast<size_t>((pdlp_hyper_params::use_reflected_primal_dual) ? problem_ptr->n_variables * climber_strategies.size()
+      static_cast<size_t>((hyper_params.use_reflected_primal_dual) ? problem_ptr->n_variables * climber_strategies.size()
                                                                          : 0),
       stream_view_},
-    reflected_dual_{static_cast<size_t>((pdlp_hyper_params::use_reflected_primal_dual)
+    reflected_dual_{static_cast<size_t>((hyper_params.use_reflected_primal_dual)
                                           ? problem_ptr->n_constraints * climber_strategies.size()
                                           : 0),
                     stream_view_},
@@ -65,7 +66,8 @@ pdhg_solver_t<i_t, f_t>::pdhg_solver_t(raft::handle_t const* handle_ptr,
                    tmp_dual_,
                    potential_next_dual_solution_,
                    reflected_primal_,
-                   climber_strategies},
+                   climber_strategies,
+                   hyper_params},
     reusable_device_scalar_value_1_{1.0, stream_view_},
     reusable_device_scalar_value_0_{0.0, stream_view_},
     reusable_device_scalar_value_neg_1_{f_t(-1.0), stream_view_},
@@ -73,7 +75,8 @@ pdhg_solver_t<i_t, f_t>::pdhg_solver_t(raft::handle_t const* handle_ptr,
     graph_all{stream_view_, is_legacy_batch_mode},
     graph_prim_proj_gradient_dual{stream_view_, is_legacy_batch_mode},
     d_total_pdhg_iterations_{0, stream_view_},
-    climber_strategies_(climber_strategies)
+    climber_strategies_(climber_strategies),
+    hyper_params_(hyper_params)
 {
   thrust::fill(handle_ptr->get_thrust_policy(), tmp_primal_.data(), tmp_primal_.end(), f_t(0));
   thrust::fill(handle_ptr->get_thrust_policy(), tmp_dual_.data(), tmp_dual_.end(), f_t(0));
@@ -716,7 +719,7 @@ void pdhg_solver_t<i_t, f_t>::take_step(rmm::device_uvector<f_t>& primal_step_si
   std::cout << "Take Step:" << std::endl;
 #endif
 
-  if (!pdlp_hyper_params::use_reflected_primal_dual) {
+  if (!hyper_params_.use_reflected_primal_dual) {
     cuopt_expects(!batch_mode_, error_type_t::ValidationError, "Batch mode not supported for non reflected primal dual");
     compute_next_primal_dual_solution(primal_step_size,
                                       iterations_since_last_restart,

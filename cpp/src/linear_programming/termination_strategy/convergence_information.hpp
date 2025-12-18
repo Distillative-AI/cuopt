@@ -11,6 +11,7 @@
 #include <linear_programming/saddle_point.hpp>
 #include <linear_programming/pdlp_climber_strategy.hpp>
 
+#include <cuopt/linear_programming/pdlp/pdlp_hyper_params.cuh>
 #include <cuopt/linear_programming/pdlp/solver_settings.hpp>
 
 #include <mip/problem/problem.cuh>
@@ -31,7 +32,8 @@ class convergence_information_t {
                             cusparse_view_t<i_t, f_t>& cusparse_view,
                             i_t primal_size,
                             i_t dual_size,
-                            const std::vector<pdlp_climber_strategy_t>& climber_strategies);
+                            const std::vector<pdlp_climber_strategy_t>& climber_strategies,
+                            const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params);
 
   void compute_convergence_information(
     pdhg_solver_t<i_t, f_t>& current_pdhg_solver,
@@ -192,5 +194,6 @@ class convergence_information_t {
 
 
   const std::vector<pdlp_climber_strategy_t>& climber_strategies_;
+  const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params_;
 };
 }  // namespace cuopt::linear_programming::detail

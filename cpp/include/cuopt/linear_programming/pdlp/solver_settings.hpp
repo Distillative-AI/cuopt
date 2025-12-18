@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cuopt/linear_programming/constants.h>
+#include <cuopt/linear_programming/pdlp/pdlp_hyper_params.cuh>
 #include <cuopt/linear_programming/pdlp/pdlp_warm_start_data.hpp>
 #include <optional>
 #include <raft/core/device_span.hpp>
@@ -233,6 +234,7 @@ class pdlp_solver_settings_t {
   volatile int* concurrent_halt{nullptr};
   static constexpr f_t minimal_absolute_tolerance = 1.0e-12;
   bool use_batch_mode{false};
+  pdlp_hyper_params::pdlp_hyper_params_t hyper_params;
 
  private:
   /** Initial primal solution */

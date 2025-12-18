@@ -6,6 +6,7 @@
 /* clang-format on */
 
 #pragma once
+#include <cuopt/linear_programming/pdlp/pdlp_hyper_params.cuh>
 #include <linear_programming/cusparse_view.hpp>
 #include <linear_programming/saddle_point.hpp>
 #include <linear_programming/utilities/ping_pong_graph.cuh>
@@ -23,7 +24,7 @@ template <typename i_t, typename f_t>
 class pdhg_solver_t {
  public:
   pdhg_solver_t(raft::handle_t const* handle_ptr,
-                problem_t<i_t, f_t>& op_problem, bool is_legacy_batch_mode, const std::vector<pdlp_climber_strategy_t>& climber_strategies);
+                problem_t<i_t, f_t>& op_problem, bool is_legacy_batch_mode, const std::vector<pdlp_climber_strategy_t>& climber_strategies, const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params);
 
   saddle_point_state_t<i_t, f_t>& get_saddle_point_state();
   cusparse_view_t<i_t, f_t>& get_cusparse_view();
@@ -109,6 +110,7 @@ class pdhg_solver_t {
   rmm::device_scalar<i_t> d_total_pdhg_iterations_;
 
   const std::vector<pdlp_climber_strategy_t>& climber_strategies_;
+  const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params_;
 };
 
 }  // namespace cuopt::linear_programming::detail

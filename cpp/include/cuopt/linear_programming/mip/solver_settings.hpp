@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <cuopt/linear_programming/constants.h>
+#include <cuopt/linear_programming/pdlp/pdlp_hyper_params.cuh>
 #include <cuopt/linear_programming/utilities/internals.hpp>
 
 #include <raft/core/device_span.hpp>
@@ -94,6 +95,9 @@ class mip_solver_settings_t {
   // this is for extracting info from different places of the solver during
   // benchmarks
   benchmark_info_t* benchmark_info_ptr = nullptr;
+
+  // TODO check with Akif and Alice
+  pdlp_hyper_params::pdlp_hyper_params_t hyper_params;
 
  private:
   std::vector<internals::base_solution_callback_t*> mip_callbacks_;

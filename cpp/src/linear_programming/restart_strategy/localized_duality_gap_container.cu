@@ -16,7 +16,7 @@
 namespace cuopt::linear_programming::detail {
 template <typename i_t, typename f_t>
 localized_duality_gap_container_t<i_t, f_t>::localized_duality_gap_container_t(
-  raft::handle_t const* handle_ptr, i_t primal_size, i_t dual_size, const std::vector<pdlp_climber_strategy_t>& climber_strategies)
+  raft::handle_t const* handle_ptr, i_t primal_size, i_t dual_size, const std::vector<pdlp_climber_strategy_t>& climber_strategies, const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params)
   : primal_size_h_(primal_size),
     dual_size_h_(dual_size),
     lagrangian_value_{handle_ptr->get_stream()},
@@ -29,13 +29,13 @@ localized_duality_gap_container_t<i_t, f_t>::localized_duality_gap_container_t(
     primal_solution_{static_cast<size_t>(primal_size) * climber_strategies.size(),
                      handle_ptr->get_stream()},                                // Needed even in kkt
     dual_solution_{static_cast<size_t>(dual_size) * climber_strategies.size(), handle_ptr->get_stream()},  // Needed even in kkt
-    primal_gradient_{!is_trust_region_restart<i_t, f_t>() ? 0 : static_cast<size_t>(primal_size),
+    primal_gradient_{!is_trust_region_restart<i_t, f_t>(hyper_params) ? 0 : static_cast<size_t>(primal_size),
                      handle_ptr->get_stream()},
-    dual_gradient_{!is_trust_region_restart<i_t, f_t>() ? 0 : static_cast<size_t>(dual_size),
+    dual_gradient_{!is_trust_region_restart<i_t, f_t>(hyper_params) ? 0 : static_cast<size_t>(dual_size),
                    handle_ptr->get_stream()},
-    primal_solution_tr_{!is_trust_region_restart<i_t, f_t>() ? 0 : static_cast<size_t>(primal_size),
+    primal_solution_tr_{!is_trust_region_restart<i_t, f_t>(hyper_params) ? 0 : static_cast<size_t>(primal_size),
                         handle_ptr->get_stream()},
-    dual_solution_tr_{!is_trust_region_restart<i_t, f_t>() ? 0 : static_cast<size_t>(dual_size),
+    dual_solution_tr_{!is_trust_region_restart<i_t, f_t>(hyper_params) ? 0 : static_cast<size_t>(dual_size),
                       handle_ptr->get_stream()}
 {
   RAFT_CUDA_TRY(cudaMemsetAsync(primal_solution_.data(),

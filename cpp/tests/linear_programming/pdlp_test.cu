@@ -259,16 +259,16 @@ TEST(pdlp_class, initial_solution_test)
   // doesn't
   solver_settings.pdlp_solver_mode = cuopt::linear_programming::pdlp_solver_mode_t::Methodical1;
   solve_lp(op_problem, solver_settings);
-  EXPECT_EQ(cuopt::linear_programming::pdlp_hyper_params::initial_step_size_scaling, 1);
-  EXPECT_EQ(cuopt::linear_programming::pdlp_hyper_params::default_l_inf_ruiz_iterations, 5);
-  EXPECT_TRUE(cuopt::linear_programming::pdlp_hyper_params::do_pock_chambolle_scaling);
-  EXPECT_TRUE(cuopt::linear_programming::pdlp_hyper_params::do_ruiz_scaling);
-  EXPECT_EQ(cuopt::linear_programming::pdlp_hyper_params::default_alpha_pock_chambolle_rescaling,
+  EXPECT_EQ(solver_settings.hyper_params.initial_step_size_scaling, 1);
+  EXPECT_EQ(solver_settings.hyper_params.default_l_inf_ruiz_iterations, 5);
+  EXPECT_TRUE(solver_settings.hyper_params.do_pock_chambolle_scaling);
+  EXPECT_TRUE(solver_settings.hyper_params.do_ruiz_scaling);
+  EXPECT_EQ(solver_settings.hyper_params.default_alpha_pock_chambolle_rescaling,
             1.0);
 
-  EXPECT_FALSE(cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution);
+  EXPECT_FALSE(solver_settings.hyper_params.update_step_size_on_initial_solution);
   EXPECT_FALSE(
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution);
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution);
 
   {
     cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
@@ -322,40 +322,40 @@ TEST(pdlp_class, initial_solution_test)
   {
     cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
     auto pdlp_timer = timer_t(solver_settings.time_limit);
-    cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution = true;
+    solver_settings.hyper_params.update_step_size_on_initial_solution = true;
     solver.run_solver(pdlp_timer);
     RAFT_CUDA_TRY(cudaStreamSynchronize(handle_.get_stream()));
     EXPECT_NEAR(initial_step_size_afiro, solver.get_step_size_h(0), factor_tolerance);
     EXPECT_NEAR(initial_primal_weight_afiro, solver.get_primal_weight_h(0), factor_tolerance);
-    cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution = false;
+    solver_settings.hyper_params.update_step_size_on_initial_solution = false;
   }
   {
     cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
     auto pdlp_timer = timer_t(solver_settings.time_limit);
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = true;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = true;
     solver.run_solver(pdlp_timer);
     RAFT_CUDA_TRY(cudaStreamSynchronize(handle_.get_stream()));
     EXPECT_NEAR(initial_step_size_afiro, solver.get_step_size_h(0), factor_tolerance);
     EXPECT_NEAR(initial_primal_weight_afiro, solver.get_primal_weight_h(0), factor_tolerance);
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = false;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = false;
   }
   {
     cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
     auto pdlp_timer = timer_t(solver_settings.time_limit);
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = true;
-    cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution     = true;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = true;
+    solver_settings.hyper_params.update_step_size_on_initial_solution     = true;
     solver.run_solver(pdlp_timer);
     RAFT_CUDA_TRY(cudaStreamSynchronize(handle_.get_stream()));
     EXPECT_NEAR(initial_step_size_afiro, solver.get_step_size_h(0), factor_tolerance);
     EXPECT_NEAR(initial_primal_weight_afiro, solver.get_primal_weight_h(0), factor_tolerance);
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = false;
-    cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution     = false;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = false;
+    solver_settings.hyper_params.update_step_size_on_initial_solution     = false;
   }
 
   // Asking for initial scaling on step size with initial solution being only primal or only dual
   // should not break but not modify the step size
   {
-    cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution = true;
+    solver_settings.hyper_params.update_step_size_on_initial_solution = true;
     cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
     auto pdlp_timer = timer_t(solver_settings.time_limit);
     std::vector<double> initial_primal(op_problem.get_n_variables(), 1);
@@ -365,10 +365,10 @@ TEST(pdlp_class, initial_solution_test)
     RAFT_CUDA_TRY(cudaStreamSynchronize(handle_.get_stream()));
     EXPECT_NEAR(initial_step_size_afiro, solver.get_step_size_h(0), factor_tolerance);
     EXPECT_NEAR(initial_primal_weight_afiro, solver.get_primal_weight_h(0), factor_tolerance);
-    cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution = false;
+    solver_settings.hyper_params.update_step_size_on_initial_solution = false;
   }
   {
-    cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution = true;
+    solver_settings.hyper_params.update_step_size_on_initial_solution = true;
     cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
     auto pdlp_timer = timer_t(solver_settings.time_limit);
     std::vector<double> initial_dual(op_problem.get_n_constraints(), 1);
@@ -378,13 +378,13 @@ TEST(pdlp_class, initial_solution_test)
     RAFT_CUDA_TRY(cudaStreamSynchronize(handle_.get_stream()));
     EXPECT_NEAR(initial_step_size_afiro, solver.get_step_size_h(0), factor_tolerance);
     EXPECT_NEAR(initial_primal_weight_afiro, solver.get_primal_weight_h(0), factor_tolerance);
-    cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution = false;
+    solver_settings.hyper_params.update_step_size_on_initial_solution = false;
   }
 
   // Asking for initial scaling on primal weight with initial solution being only primal or only
   // dual should *not* break but the primal weight should not change
   {
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = true;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = true;
     cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
     auto pdlp_timer = timer_t(solver_settings.time_limit);
     std::vector<double> initial_primal(op_problem.get_n_variables(), 1);
@@ -393,10 +393,10 @@ TEST(pdlp_class, initial_solution_test)
     solver.run_solver(pdlp_timer);
     EXPECT_NEAR(initial_step_size_afiro, solver.get_step_size_h(0), factor_tolerance);
     EXPECT_NEAR(initial_primal_weight_afiro, solver.get_primal_weight_h(0), factor_tolerance);
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = false;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = false;
   }
   {
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = true;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = true;
     cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
     auto pdlp_timer = timer_t(solver_settings.time_limit);
     std::vector<double> initial_dual(op_problem.get_n_constraints(), 1);
@@ -405,13 +405,13 @@ TEST(pdlp_class, initial_solution_test)
     solver.run_solver(pdlp_timer);
     EXPECT_NEAR(initial_step_size_afiro, solver.get_step_size_h(0), factor_tolerance);
     EXPECT_NEAR(initial_primal_weight_afiro, solver.get_primal_weight_h(0), factor_tolerance);
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = false;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = false;
   }
 
   // All 0 solution when given an initial primal and dual with scale on the step size should not
   // break but not change primal weight and step size
   {
-    cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution = true;
+    solver_settings.hyper_params.update_step_size_on_initial_solution = true;
     cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
     auto pdlp_timer = timer_t(solver_settings.time_limit);
     std::vector<double> initial_primal(op_problem.get_n_variables(), 0);
@@ -423,13 +423,13 @@ TEST(pdlp_class, initial_solution_test)
     solver.run_solver(pdlp_timer);
     EXPECT_NEAR(initial_step_size_afiro, solver.get_step_size_h(0), factor_tolerance);
     EXPECT_NEAR(initial_primal_weight_afiro, solver.get_primal_weight_h(0), factor_tolerance);
-    cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution = false;
+    solver_settings.hyper_params.update_step_size_on_initial_solution = false;
   }
 
   // All 0 solution when given an initial primal and/or dual with scale on the primal weight is
   // *not* an error but should not change primal weight and step size
   {
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = true;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = true;
     cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
     auto pdlp_timer = timer_t(solver_settings.time_limit);
     std::vector<double> initial_primal(op_problem.get_n_variables(), 0);
@@ -438,10 +438,10 @@ TEST(pdlp_class, initial_solution_test)
     solver.run_solver(pdlp_timer);
     EXPECT_NEAR(initial_step_size_afiro, solver.get_step_size_h(0), factor_tolerance);
     EXPECT_NEAR(initial_primal_weight_afiro, solver.get_primal_weight_h(0), factor_tolerance);
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = false;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = false;
   }
   {
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = true;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = true;
     cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
     auto pdlp_timer = timer_t(solver_settings.time_limit);
     std::vector<double> initial_dual(op_problem.get_n_constraints(), 0);
@@ -450,10 +450,10 @@ TEST(pdlp_class, initial_solution_test)
     solver.run_solver(pdlp_timer);
     EXPECT_NEAR(initial_step_size_afiro, solver.get_step_size_h(0), factor_tolerance);
     EXPECT_NEAR(initial_primal_weight_afiro, solver.get_primal_weight_h(0), factor_tolerance);
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = false;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = false;
   }
   {
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = true;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = true;
     cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
     auto pdlp_timer = timer_t(solver_settings.time_limit);
     std::vector<double> initial_primal(op_problem.get_n_variables(), 0);
@@ -465,13 +465,13 @@ TEST(pdlp_class, initial_solution_test)
     solver.run_solver(pdlp_timer);
     EXPECT_NEAR(initial_step_size_afiro, solver.get_step_size_h(0), factor_tolerance);
     EXPECT_NEAR(initial_primal_weight_afiro, solver.get_primal_weight_h(0), factor_tolerance);
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = false;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = false;
   }
 
   // A non-all-0 vector for both initial primal and dual set should trigger a modification in primal
   // weight and step size
   {
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = true;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = true;
     cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
     auto pdlp_timer = timer_t(solver_settings.time_limit);
     std::vector<double> initial_primal(op_problem.get_n_variables(), 1);
@@ -483,10 +483,10 @@ TEST(pdlp_class, initial_solution_test)
     solver.run_solver(pdlp_timer);
     EXPECT_NEAR(initial_step_size_afiro, solver.get_step_size_h(0), factor_tolerance);
     EXPECT_NOT_NEAR(initial_primal_weight_afiro, solver.get_primal_weight_h(0), factor_tolerance);
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = false;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = false;
   }
   {
-    cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution = true;
+    solver_settings.hyper_params.update_step_size_on_initial_solution = true;
     cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
     auto pdlp_timer = timer_t(solver_settings.time_limit);
     std::vector<double> initial_primal(op_problem.get_n_variables(), 1);
@@ -498,11 +498,11 @@ TEST(pdlp_class, initial_solution_test)
     solver.run_solver(pdlp_timer);
     EXPECT_NOT_NEAR(initial_step_size_afiro, solver.get_step_size_h(0), factor_tolerance);
     EXPECT_NEAR(initial_primal_weight_afiro, solver.get_primal_weight_h(0), factor_tolerance);
-    cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution = false;
+    solver_settings.hyper_params.update_step_size_on_initial_solution = false;
   }
   {
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = true;
-    cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution     = true;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = true;
+    solver_settings.hyper_params.update_step_size_on_initial_solution     = true;
     cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
     auto pdlp_timer = timer_t(solver_settings.time_limit);
     std::vector<double> initial_primal(op_problem.get_n_variables(), 1);
@@ -514,8 +514,8 @@ TEST(pdlp_class, initial_solution_test)
     solver.run_solver(pdlp_timer);
     EXPECT_NOT_NEAR(initial_step_size_afiro, solver.get_step_size_h(0), factor_tolerance);
     EXPECT_NOT_NEAR(initial_primal_weight_afiro, solver.get_primal_weight_h(0), factor_tolerance);
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = false;
-    cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution     = false;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = false;
+    solver_settings.hyper_params.update_step_size_on_initial_solution     = false;
   }
 }
 
@@ -537,9 +537,9 @@ TEST(pdlp_class, initial_primal_weight_step_size_test)
   solver_settings.method          = cuopt::linear_programming::method_t::PDLP;
   // Select the default/legacy solver with no action upon the initial scaling on initial solution
   solver_settings.pdlp_solver_mode = cuopt::linear_programming::pdlp_solver_mode_t::Methodical1;
-  EXPECT_FALSE(cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution);
+  EXPECT_FALSE(solver_settings.hyper_params.update_step_size_on_initial_solution);
   EXPECT_FALSE(
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution);
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution);
 
   // Check setting an initial primal weight and step size
   {
@@ -559,8 +559,8 @@ TEST(pdlp_class, initial_primal_weight_step_size_test)
   // an initial primal / dual is indeed different
   {
     // Launching without an inital step size / primal weight and query the value
-    cuopt::linear_programming::pdlp_hyper_params::update_primal_weight_on_initial_solution = true;
-    cuopt::linear_programming::pdlp_hyper_params::update_step_size_on_initial_solution     = true;
+    solver_settings.hyper_params.update_primal_weight_on_initial_solution = true;
+    solver_settings.hyper_params.update_step_size_on_initial_solution     = true;
     cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
     auto pdlp_timer = timer_t(solver_settings.time_limit);
     std::vector<double> initial_primal(op_problem.get_n_variables(), 1);

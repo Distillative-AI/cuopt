@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <cuopt/linear_programming/pdlp/pdlp_hyper_params.cuh>
 #include <linear_programming/pdhg.hpp>
 
 #include <mip/solution/solution.cuh>
@@ -49,6 +50,7 @@ class pdlp_initial_scaling_strategy_t {
                                   rmm::device_uvector<i_t>& A_T_offsets,
                                   rmm::device_uvector<i_t>& A_T_indices,
                                   pdhg_solver_t<i_t, f_t>* pdhg_solver_ptr,
+                                  const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params,
                                   bool running_mip = false);
 
   void scale_problem();
@@ -110,6 +112,7 @@ class pdlp_initial_scaling_strategy_t {
   rmm::device_uvector<f_t>& A_T_;
   rmm::device_uvector<i_t>& A_T_offsets_;
   rmm::device_uvector<i_t>& A_T_indices_;
+  const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params_;
   bool running_mip_;
 };
 }  // namespace cuopt::linear_programming::detail

@@ -39,16 +39,6 @@
 
 namespace cuopt::linear_programming::detail {
 
-void set_pdlp_hyper_parameters(rmm::cuda_stream_view stream_view)
-{
-  RAFT_CUDA_TRY(cudaMemcpyToSymbolAsync(pdlp_hyper_params::primal_importance,
-                                        &pdlp_hyper_params::host_primal_importance,
-                                        sizeof(double),
-                                        0,
-                                        cudaMemcpyHostToDevice,
-                                        stream_view));
-}
-
 template <typename i_t, typename f_t>
 struct SpMM_benchmarks_context_t
 {
@@ -452,17 +442,18 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(problem_t<i_t, f_t>& op_problem,
     primal_weight_{climber_strategies_.size(), stream_view_},
     best_primal_weight_{climber_strategies_.size(), stream_view_},
     step_size_{climber_strategies_.size(), stream_view_},
-    step_size_strategy_{handle_ptr_, &primal_weight_, &step_size_, is_legacy_batch_mode, op_problem.n_variables, op_problem.n_constraints, climber_strategies_},
-    pdhg_solver_{handle_ptr_, op_problem_scaled_, is_legacy_batch_mode, climber_strategies_},
+    step_size_strategy_{handle_ptr_, &primal_weight_, &step_size_, is_legacy_batch_mode, op_problem.n_variables, op_problem.n_constraints, climber_strategies_, settings.hyper_params},
+    pdhg_solver_{handle_ptr_, op_problem_scaled_, is_legacy_batch_mode, climber_strategies_, settings.hyper_params},
     settings_(settings),
     initial_scaling_strategy_{handle_ptr_,
                               op_problem_scaled_,
-                              pdlp_hyper_params::default_l_inf_ruiz_iterations,
-                              (f_t)pdlp_hyper_params::default_alpha_pock_chambolle_rescaling,
+                              settings_.hyper_params.default_l_inf_ruiz_iterations,
+                              (f_t)settings_.hyper_params.default_alpha_pock_chambolle_rescaling,
                               op_problem_scaled_.reverse_coefficients,
                               op_problem_scaled_.reverse_offsets,
                               op_problem_scaled_.reverse_constraints,
-                              &pdhg_solver_},
+                              &pdhg_solver_,
+                              settings.hyper_params},
     average_op_problem_evaluation_cusparse_view_{handle_ptr_,
                                                  op_problem,
                                                  unscaled_primal_avg_solution_,
@@ -474,7 +465,8 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(problem_t<i_t, f_t>& op_problem,
                                                  op_problem.reverse_coefficients,
                                                  op_problem.reverse_offsets,
                                                  op_problem.reverse_constraints,
-                                                 climber_strategies_},
+                                                 climber_strategies_,
+                                                 settings.hyper_params},
     current_op_problem_evaluation_cusparse_view_{handle_ptr_,
                                                  op_problem,
                                                  pdhg_solver_.get_primal_solution(),
@@ -486,14 +478,16 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(problem_t<i_t, f_t>& op_problem,
                                                  op_problem.reverse_coefficients,
                                                  op_problem.reverse_offsets,
                                                  op_problem.reverse_constraints,
-                                                 climber_strategies_},
+                                                 climber_strategies_,
+                                                 settings.hyper_params},
     restart_strategy_{handle_ptr_,
                       op_problem,
                       average_op_problem_evaluation_cusparse_view_,
                       primal_size_h_,
                       dual_size_h_,
                       is_legacy_batch_mode,
-                      climber_strategies_},
+                      climber_strategies_,
+                      settings.hyper_params},
     average_termination_strategy_{handle_ptr_,
                                   op_problem,
                                   op_problem_scaled_,
@@ -522,7 +516,7 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(problem_t<i_t, f_t>& op_problem,
 {
   // Set step_size initial scaling
   thrust::fill(
-    handle_ptr_->get_thrust_policy(), step_size_.data(), step_size_.end(), (f_t)pdlp_hyper_params::initial_step_size_scaling);
+    handle_ptr_->get_thrust_policy(), step_size_.data(), step_size_.end(), (f_t)settings_.hyper_params.initial_step_size_scaling);
 
   if (settings.has_initial_primal_solution()) {
     auto& primal_sol = settings.get_initial_primal_solution();
@@ -686,10 +680,10 @@ std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>
     return current_termination_strategy_.fill_return_problem_solution(
       internal_solver_iterations_,
       pdhg_solver_,
-      (pdlp_hyper_params::use_adaptive_step_size_strategy)
+      (settings_.hyper_params.use_adaptive_step_size_strategy)
         ? pdhg_solver_.get_primal_solution()
         : pdhg_solver_.get_potential_next_primal_solution(),
-      (pdlp_hyper_params::use_adaptive_step_size_strategy)
+      (settings_.hyper_params.use_adaptive_step_size_strategy)
         ? pdhg_solver_.get_dual_solution()
         : pdhg_solver_.get_potential_next_dual_solution(),
       get_filled_warmed_start_data(),
@@ -714,10 +708,10 @@ std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>
     return current_termination_strategy_.fill_return_problem_solution(
       internal_solver_iterations_,
       pdhg_solver_,
-      (pdlp_hyper_params::use_adaptive_step_size_strategy)
+      (settings_.hyper_params.use_adaptive_step_size_strategy)
         ? pdhg_solver_.get_primal_solution()
         : pdhg_solver_.get_potential_next_primal_solution(),
-      (pdlp_hyper_params::use_adaptive_step_size_strategy)
+      (settings_.hyper_params.use_adaptive_step_size_strategy)
         ? pdhg_solver_.get_dual_solution()
         : pdhg_solver_.get_potential_next_dual_solution(),
       get_filled_warmed_start_data(),
@@ -734,10 +728,10 @@ std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>
     return current_termination_strategy_.fill_return_problem_solution(
       internal_solver_iterations_,
       pdhg_solver_,
-      (pdlp_hyper_params::use_adaptive_step_size_strategy)
+      (settings_.hyper_params.use_adaptive_step_size_strategy)
         ? pdhg_solver_.get_primal_solution()
         : pdhg_solver_.get_potential_next_primal_solution(),
-      (pdlp_hyper_params::use_adaptive_step_size_strategy)
+      (settings_.hyper_params.use_adaptive_step_size_strategy)
         ? pdhg_solver_.get_dual_solution()
         : pdhg_solver_.get_potential_next_dual_solution(),
       get_filled_warmed_start_data(),
@@ -954,7 +948,7 @@ std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>
   const timer_t& timer)
 {
   // Forced to do it in two lines because of macro template interaction
-  [[maybe_unused]] const bool is_cupdlpx = is_cupdlpx_restart<i_t, f_t>();
+  [[maybe_unused]] const bool is_cupdlpx = is_cupdlpx_restart<i_t, f_t>(settings_.hyper_params);
   cuopt_assert(is_cupdlpx, "Batch termination handling only supported with cuPDLPx restart");
   
   #ifdef BATCH_VERBOSE_MODE
@@ -1008,10 +1002,10 @@ std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>
   // after for kkt restart
   current_termination_strategy_.evaluate_termination_criteria(
       pdhg_solver_,
-      (pdlp_hyper_params::use_adaptive_step_size_strategy)
+      (settings_.hyper_params.use_adaptive_step_size_strategy)
         ? pdhg_solver_.get_primal_solution()
         : pdhg_solver_.get_potential_next_primal_solution(),
-      (pdlp_hyper_params::use_adaptive_step_size_strategy)
+      (settings_.hyper_params.use_adaptive_step_size_strategy)
         ? pdhg_solver_.get_dual_solution()
         : pdhg_solver_.get_potential_next_dual_solution(),
       pdhg_solver_.get_dual_slack(),
@@ -1028,7 +1022,7 @@ pdhg_solver_.get_saddle_point_state().get_delta_primal(),
 #endif
 
   // Check both average and current solution
-  if (!pdlp_hyper_params::never_restart_to_average)
+  if (!settings_.hyper_params.never_restart_to_average)
   {
     average_termination_strategy_.evaluate_termination_criteria(
           pdhg_solver_,
@@ -1043,7 +1037,7 @@ pdhg_solver_.get_saddle_point_state().get_delta_primal(),
   }
 
   #ifdef PDLP_VERBOSE_MODE
-  if (!pdlp_hyper_params::never_restart_to_average)
+  if (!settings_.hyper_params.never_restart_to_average)
   {
     RAFT_CUDA_TRY(cudaDeviceSynchronize());
     std::cout << "Termination criteria average:" << std::endl;
@@ -1091,10 +1085,10 @@ pdhg_solver_.get_saddle_point_state().get_delta_primal(),
         return current_termination_strategy_.fill_return_problem_solution(
           internal_solver_iterations_,
           pdhg_solver_,
-          (pdlp_hyper_params::use_adaptive_step_size_strategy)
+          (settings_.hyper_params.use_adaptive_step_size_strategy)
             ? pdhg_solver_.get_primal_solution()
             : pdhg_solver_.get_potential_next_primal_solution(),
-          (pdlp_hyper_params::use_adaptive_step_size_strategy)
+          (settings_.hyper_params.use_adaptive_step_size_strategy)
             ? pdhg_solver_.get_dual_solution()
             : pdhg_solver_.get_potential_next_dual_solution(),
           get_filled_warmed_start_data(),
@@ -1113,10 +1107,10 @@ pdhg_solver_.get_saddle_point_state().get_delta_primal(),
       return current_termination_strategy_.fill_return_problem_solution(
         internal_solver_iterations_,
         pdhg_solver_,
-        (pdlp_hyper_params::use_adaptive_step_size_strategy)
+        (settings_.hyper_params.use_adaptive_step_size_strategy)
           ? pdhg_solver_.get_primal_solution()
           : pdhg_solver_.get_potential_next_primal_solution(),
-        (pdlp_hyper_params::use_adaptive_step_size_strategy)
+        (settings_.hyper_params.use_adaptive_step_size_strategy)
           ? pdhg_solver_.get_dual_solution()
           : pdhg_solver_.get_potential_next_dual_solution(),
         get_filled_warmed_start_data(),
@@ -1159,10 +1153,10 @@ pdhg_solver_.get_saddle_point_state().get_delta_primal(),
       return current_termination_strategy_.fill_return_problem_solution(
         internal_solver_iterations_,
         pdhg_solver_,
-        (pdlp_hyper_params::use_adaptive_step_size_strategy)
+        (settings_.hyper_params.use_adaptive_step_size_strategy)
           ? pdhg_solver_.get_primal_solution()
           : pdhg_solver_.get_potential_next_primal_solution(),
-        (pdlp_hyper_params::use_adaptive_step_size_strategy)
+        (settings_.hyper_params.use_adaptive_step_size_strategy)
           ? pdhg_solver_.get_dual_solution()
           : pdhg_solver_.get_potential_next_dual_solution(),
         get_filled_warmed_start_data(),
@@ -1216,10 +1210,10 @@ pdhg_solver_.get_saddle_point_state().get_delta_primal(),
     return current_termination_strategy_.fill_return_problem_solution(
       internal_solver_iterations_,
       pdhg_solver_,
-      (pdlp_hyper_params::use_adaptive_step_size_strategy)
+      (settings_.hyper_params.use_adaptive_step_size_strategy)
         ? pdhg_solver_.get_primal_solution()
         : pdhg_solver_.get_potential_next_primal_solution(),
-      (pdlp_hyper_params::use_adaptive_step_size_strategy)
+      (settings_.hyper_params.use_adaptive_step_size_strategy)
         ? pdhg_solver_.get_dual_solution()
         : pdhg_solver_.get_potential_next_dual_solution(),
       get_filled_warmed_start_data(),
@@ -1234,7 +1228,7 @@ pdhg_solver_.get_saddle_point_state().get_delta_primal(),
   if (settings_.detect_infeasibility)
   {
     // TODO batch mode: handle part of the batch being done
-    if (settings_.strict_infeasibility || pdlp_hyper_params::never_restart_to_average) {
+    if (settings_.strict_infeasibility || settings_.hyper_params.never_restart_to_average) {
       if (termination_current == pdlp_termination_status_t::PrimalInfeasible ||
           termination_current == pdlp_termination_status_t::DualInfeasible) {
   #ifdef PDLP_VERBOSE_MODE
@@ -1246,10 +1240,10 @@ pdhg_solver_.get_saddle_point_state().get_delta_primal(),
         return current_termination_strategy_.fill_return_problem_solution(
           internal_solver_iterations_,
           pdhg_solver_,
-          (pdlp_hyper_params::use_adaptive_step_size_strategy)
+          (settings_.hyper_params.use_adaptive_step_size_strategy)
             ? pdhg_solver_.get_primal_solution()
             : pdhg_solver_.get_potential_next_primal_solution(),
-          (pdlp_hyper_params::use_adaptive_step_size_strategy)
+          (settings_.hyper_params.use_adaptive_step_size_strategy)
             ? pdhg_solver_.get_dual_solution()
             : pdhg_solver_.get_potential_next_dual_solution(),
           std::move(current_termination_strategy_.get_terminations_status()));
@@ -1285,10 +1279,10 @@ pdhg_solver_.get_saddle_point_state().get_delta_primal(),
         return current_termination_strategy_.fill_return_problem_solution(
           internal_solver_iterations_,
           pdhg_solver_,
-          (pdlp_hyper_params::use_adaptive_step_size_strategy)
+          (settings_.hyper_params.use_adaptive_step_size_strategy)
             ? pdhg_solver_.get_primal_solution()
             : pdhg_solver_.get_potential_next_primal_solution(),
-          (pdlp_hyper_params::use_adaptive_step_size_strategy)
+          (settings_.hyper_params.use_adaptive_step_size_strategy)
             ? pdhg_solver_.get_dual_solution()
             : pdhg_solver_.get_potential_next_dual_solution(),
           std::move(current_termination_strategy_.get_terminations_status()));
@@ -1401,7 +1395,7 @@ void pdlp_solver_t<i_t, f_t>::update_primal_dual_solutions(
 
   // Handle initial step size if needed
 
-  if (pdlp_hyper_params::update_step_size_on_initial_solution) {
+  if (settings_.hyper_params.update_step_size_on_initial_solution) {
 #ifdef PDLP_DEBUG_MODE
     std::cout << "    Updating initial step size on initial solution" << std::endl;
 #endif
@@ -1446,7 +1440,7 @@ void pdlp_solver_t<i_t, f_t>::update_primal_dual_solutions(
                                     stream_view_));
 
       // Scale if should compute initial step size after scaling
-      if (!pdlp_hyper_params::compute_initial_step_size_before_scaling) {
+      if (!settings_.hyper_params.compute_initial_step_size_before_scaling) {
 #ifdef PDLP_DEBUG_MODE
         std::cout << "      Scaling before computing initial step size" << std::endl;
 #endif
@@ -1462,7 +1456,7 @@ void pdlp_solver_t<i_t, f_t>::update_primal_dual_solutions(
       --pdhg_solver_.total_pdhg_iterations_;
 
       // Else scale after computing initial step size
-      if (pdlp_hyper_params::compute_initial_step_size_before_scaling) {
+      if (settings_.hyper_params.compute_initial_step_size_before_scaling) {
 #ifdef PDLP_DEBUG_MODE
         std::cout << "      Scaling after computing initial step size" << std::endl;
 #endif
@@ -1480,7 +1474,7 @@ void pdlp_solver_t<i_t, f_t>::update_primal_dual_solutions(
   // compute_initial_primal_weight_before_scaling is true
 
   // Scale if should compute primal weight after scaling
-  if (!pdlp_hyper_params::compute_initial_primal_weight_before_scaling) {
+  if (!settings_.hyper_params.compute_initial_primal_weight_before_scaling) {
 #ifdef PDLP_DEBUG_MODE
     std::cout << "      Scaling before computing initial primal weight:" << std::endl;
 #endif
@@ -1489,7 +1483,7 @@ void pdlp_solver_t<i_t, f_t>::update_primal_dual_solutions(
   }
 
   // If only primal or dual is set, the primal weight wont (as it can't) be updated
-  if (pdlp_hyper_params::update_primal_weight_on_initial_solution) {
+  if (settings_.hyper_params.update_primal_weight_on_initial_solution) {
 #ifdef PDLP_DEBUG_MODE
     std::cout << "      Updating the initial primal weight on initial solution" << std::endl;
 #endif
@@ -1498,7 +1492,7 @@ void pdlp_solver_t<i_t, f_t>::update_primal_dual_solutions(
   }
 
   // We scale here because it was not done previously
-  if (pdlp_hyper_params::compute_initial_primal_weight_before_scaling) {
+  if (settings_.hyper_params.compute_initial_primal_weight_before_scaling) {
     initial_scaling_strategy_.scale_solutions(pdhg_solver_.get_primal_solution(),
                                               pdhg_solver_.get_dual_solution());
   }
@@ -1675,14 +1669,14 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
 #endif
 
   // TODO handle that properly
-  if (pdlp_hyper_params::compute_initial_step_size_before_scaling && !settings_.get_initial_step_size().has_value()) compute_initial_step_size();
-  if (pdlp_hyper_params::compute_initial_primal_weight_before_scaling && !settings_.get_initial_primal_weight().has_value())
+  if (settings_.hyper_params.compute_initial_step_size_before_scaling && !settings_.get_initial_step_size().has_value()) compute_initial_step_size();
+  if (settings_.hyper_params.compute_initial_primal_weight_before_scaling && !settings_.get_initial_primal_weight().has_value())
     compute_initial_primal_weight();
 
   initial_scaling_strategy_.scale_problem();
 
-  if (!pdlp_hyper_params::compute_initial_step_size_before_scaling && !settings_.get_initial_step_size().has_value()) compute_initial_step_size();
-  if (!pdlp_hyper_params::compute_initial_primal_weight_before_scaling && !settings_.get_initial_primal_weight().has_value())
+  if (!settings_.hyper_params.compute_initial_step_size_before_scaling && !settings_.get_initial_step_size().has_value()) compute_initial_step_size();
+  if (!settings_.hyper_params.compute_initial_primal_weight_before_scaling && !settings_.get_initial_primal_weight().has_value())
     compute_initial_primal_weight();
 
 #ifdef PDLP_DEBUG_MODE
@@ -1696,7 +1690,7 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
   if (settings_.get_initial_primal_weight().has_value())
   {
     thrust::uninitialized_fill(handle_ptr_->get_thrust_policy(), primal_weight_.begin(), primal_weight_.end(), settings_.get_initial_primal_weight().value());
-    if (is_cupdlpx_restart<i_t, f_t>())
+    if (is_cupdlpx_restart<i_t, f_t>(settings_.hyper_params))
       thrust::uninitialized_fill(handle_ptr_->get_thrust_policy(), best_primal_weight_.begin(), best_primal_weight_.end(), settings_.get_initial_primal_weight().value());
   }
   if (initial_k_.has_value()) {
@@ -1723,7 +1717,7 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
   }
 
   // Project initial primal solution
-  if (pdlp_hyper_params::project_initial_primal) {
+  if (settings_.hyper_params.project_initial_primal) {
     // TODO batch mode: handle different variable bounds
     using f_t2 = typename type_2<f_t>::type;
     cub::DeviceTransform::Transform(
@@ -1733,7 +1727,7 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
       pdhg_solver_.get_primal_solution().size(),
       clamp<f_t, f_t2>(),
       stream_view_);
-    if (!pdlp_hyper_params::never_restart_to_average)
+    if (!settings_.hyper_params.never_restart_to_average)
     {
       cuopt_expects(!batch_mode_, cuopt::error_type_t::ValidationError, "Restart to average not supported in batch mode");
       cub::DeviceTransform::Transform(
@@ -1783,17 +1777,17 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
     printf("Step: %d\n", total_pdlp_iterations_);
 #endif
     bool is_major_iteration =
-      (((total_pdlp_iterations_) % pdlp_hyper_params::major_iteration == 0) &&
+      (((total_pdlp_iterations_) % settings_.hyper_params.major_iteration == 0) &&
        (total_pdlp_iterations_ > 0)) ||
-      (total_pdlp_iterations_ <= pdlp_hyper_params::min_iteration_restart);
+      (total_pdlp_iterations_ <= settings_.hyper_params.min_iteration_restart);
     bool error_occured                      = (step_size_strategy_.get_valid_step_size() == -1);
     bool artificial_restart_check_main_loop = false;
     std::vector<int> has_restarted(climber_strategies_.size(), 0);
     bool is_conditional_major =
-      (pdlp_hyper_params::use_conditional_major)
+      (settings_.hyper_params.use_conditional_major)
         ? (total_pdlp_iterations_ % conditional_major<i_t>(total_pdlp_iterations_)) == 0
         : false;
-    if (pdlp_hyper_params::artificial_restart_in_main_loop)
+    if (settings_.hyper_params.artificial_restart_in_main_loop)
       artificial_restart_check_main_loop =
         restart_strategy_.should_do_artificial_restart(total_pdlp_iterations_);
     if (is_major_iteration || artificial_restart_check_main_loop || error_occured ||
@@ -1808,7 +1802,7 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
       }
 
       // If a warm start is given and it's the first step, the average solutions were already filled
-      bool no_rescale_average = (internal_solver_iterations_ == 0 && warm_start_was_given) || pdlp_hyper_params::never_restart_to_average;
+      bool no_rescale_average = (internal_solver_iterations_ == 0 && warm_start_was_given) || settings_.hyper_params.never_restart_to_average;
 
       if (!no_rescale_average) {
         // Average in PDLP is scaled then unscaled which can create numerical innacuracies (a * x /
@@ -1848,7 +1842,7 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
         initial_scaling_strategy_.unscale_solutions(unscaled_primal_avg_solution_,
                                                     unscaled_dual_avg_solution_);
       }
-      if (pdlp_hyper_params::use_adaptive_step_size_strategy) {
+      if (settings_.hyper_params.use_adaptive_step_size_strategy) {
         initial_scaling_strategy_.unscale_solutions(pdhg_solver_.get_primal_solution(),
                                                     pdhg_solver_.get_dual_solution());
       } else {
@@ -1869,13 +1863,13 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
 
       if (solution.has_value()) { return std::move(solution.value()); }
 
-      if (pdlp_hyper_params::rescale_for_restart) {
-        if (pdlp_hyper_params::never_restart_to_average)
+      if (settings_.hyper_params.rescale_for_restart) {
+        if (settings_.hyper_params.never_restart_to_average)
         {
           initial_scaling_strategy_.scale_solutions(unscaled_primal_avg_solution_,
                                                   unscaled_dual_avg_solution_);
         }
-        if (pdlp_hyper_params::use_adaptive_step_size_strategy) {
+        if (settings_.hyper_params.use_adaptive_step_size_strategy) {
           initial_scaling_strategy_.scale_solutions(pdhg_solver_.get_primal_solution(),
                                                     pdhg_solver_.get_dual_solution());
         } else {
@@ -1886,7 +1880,7 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
         }
       }
 
-      if (pdlp_hyper_params::restart_strategy !=
+      if (settings_.hyper_params.restart_strategy !=
             static_cast<int>(
               detail::pdlp_restart_strategy_t<i_t, f_t>::restart_strategy_t::NO_RESTART) &&
           (is_major_iteration || artificial_restart_check_main_loop)) {
@@ -1906,12 +1900,12 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
         );
       }
 
-      if (!pdlp_hyper_params::rescale_for_restart) {
+      if (!settings_.hyper_params.rescale_for_restart) {
         // We don't need to rescale average because what matters is weighted_average_solution
         // getting the scaled accumulation
         // During the next iteration, unscaled_avg_solution will be overwritten again through
         // get_average_solutions
-        if (pdlp_hyper_params::use_adaptive_step_size_strategy) {
+        if (settings_.hyper_params.use_adaptive_step_size_strategy) {
           initial_scaling_strategy_.scale_solutions(pdhg_solver_.get_primal_solution(),
                                                     pdhg_solver_.get_dual_solution());
         } else {
@@ -1924,14 +1918,14 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
     }
 
 #ifdef CUPDLP_DEBUG_MODE
-    printf("Is Major %d\n", (total_pdlp_iterations_ + 1) % pdlp_hyper_params::major_iteration == 0);
+    printf("Is Major %d\n", (total_pdlp_iterations_ + 1) % settings_.hyper_params.major_iteration == 0);
 #endif
     take_step(total_pdlp_iterations_,
-              (total_pdlp_iterations_ + 1) % pdlp_hyper_params::major_iteration == 0);
+              (total_pdlp_iterations_ + 1) % settings_.hyper_params.major_iteration == 0);
 
-    if (pdlp_hyper_params::use_reflected_primal_dual) {
-      if (pdlp_hyper_params::use_fixed_point_error &&
-            ((total_pdlp_iterations_ + 1) % pdlp_hyper_params::major_iteration == 0 ||
+    if (settings_.hyper_params.use_reflected_primal_dual) {
+      if (settings_.hyper_params.use_fixed_point_error &&
+            ((total_pdlp_iterations_ + 1) % settings_.hyper_params.major_iteration == 0 ||
           std::any_of(has_restarted.begin(), has_restarted.end(), [](int restarted){ return restarted == 1; })))
         {
           // TODO batch mode: remove this once you have per solution score
@@ -1944,7 +1938,7 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
 
     ++total_pdlp_iterations_;
     ++internal_solver_iterations_;
-    if (pdlp_hyper_params::never_restart_to_average)
+    if (settings_.hyper_params.never_restart_to_average)
       restart_strategy_.increment_iteration_since_last_restart();
   }
   return optimization_problem_solution_t<i_t, f_t>{pdlp_termination_status_t::NumericalError,
@@ -2017,7 +2011,7 @@ void pdlp_solver_t<i_t, f_t>::halpern_update()
                           restart_strategy_.last_restart_duality_gap_.primal_solution_.data()),
     pdhg_solver_.get_saddle_point_state().get_primal_solution().data(),
     pdhg_solver_.get_saddle_point_state().get_primal_solution().size(),
-    [weight, reflection_coefficient = pdlp_hyper_params::reflection_coefficient] __device__(
+    [weight, reflection_coefficient = settings_.hyper_params.reflection_coefficient] __device__(
       f_t reflected_primal, f_t current_primal, f_t initial_primal) {
       const f_t reflected = reflection_coefficient * reflected_primal +
                             (f_t(1.0) - reflection_coefficient) * current_primal;
@@ -2039,7 +2033,7 @@ void pdlp_solver_t<i_t, f_t>::halpern_update()
                           restart_strategy_.last_restart_duality_gap_.dual_solution_.data()),
     pdhg_solver_.get_saddle_point_state().get_dual_solution().data(),
     pdhg_solver_.get_saddle_point_state().get_dual_solution().size(),
-    [weight, reflection_coefficient = pdlp_hyper_params::reflection_coefficient] __device__(
+    [weight, reflection_coefficient = settings_.hyper_params.reflection_coefficient] __device__(
       f_t reflected_dual, f_t current_dual, f_t initial_dual) {
       const f_t reflected = reflection_coefficient * reflected_dual +
                             (f_t(1.0) - reflection_coefficient) * current_dual;
@@ -2058,7 +2052,7 @@ template <typename i_t, typename f_t>
 void pdlp_solver_t<i_t, f_t>::take_step([[maybe_unused]] i_t total_pdlp_iterations,
                                         [[maybe_unused]] bool is_major_iteration)
 {
-  if (pdlp_hyper_params::use_adaptive_step_size_strategy) {
+  if (settings_.hyper_params.use_adaptive_step_size_strategy) {
     cuopt_expects(climber_strategies_.size() == 1, error_type_t::ValidationError, "Batch mode not supported for use_adaptive_step_size_strategy mode");
     take_adaptive_step(total_pdlp_iterations, is_major_iteration);
   } else {
@@ -2078,7 +2072,7 @@ void pdlp_solver_t<i_t, f_t>::compute_initial_step_size()
 {
   raft::common::nvtx::range fun_scope("compute_initial_step_size");
 
-  if (!pdlp_hyper_params::initial_step_size_max_singular_value) {
+  if (!settings_.hyper_params.initial_step_size_max_singular_value) {
     // set stepsize relative to maximum absolute value of A
     rmm::device_scalar<f_t> abs_max_element{0.0, stream_view_};
     void* d_temp_storage      = NULL;
@@ -2233,7 +2227,8 @@ __global__ void compute_weights_initial_primal_weight_from_squared_norms(const f
                                                                          const f_t* c_vec_norm,
                                                                          raft::device_span<f_t> primal_weight,
                                                                          raft::device_span<f_t> best_primal_weight,
-                                                                         int batch_size)
+                                                                         int batch_size,
+                                                                         const pdlp_hyper_params::pdlp_hyper_params_t hyper_params)
 {
   const int id = threadIdx.x + blockIdx.x * blockDim.x;
   if (id >= batch_size) { return; }
@@ -2245,13 +2240,13 @@ __global__ void compute_weights_initial_primal_weight_from_squared_norms(const f
     printf("b_vec_norm_ %lf c_vec_norm_ %lf primal_importance %lf\n",
            b_vec_norm_,
            c_vec_norm_,
-           pdlp_hyper_params::primal_importance);
+           hyper_params.primal_importance);
 #endif
     // TODO WARNING NECESSARY BUT WILL BREAK BACKWARD COMPATIBLITY
-    primal_weight[id]      = pdlp_hyper_params::primal_importance * (c_vec_norm_ + (f_t(1.0))) / (b_vec_norm_ + f_t(1.0));
+    primal_weight[id]      = hyper_params.primal_importance * (c_vec_norm_ + (f_t(1.0))) / (b_vec_norm_ + f_t(1.0));
     best_primal_weight[id] = primal_weight[id];
   } else {
-    primal_weight[id]      = pdlp_hyper_params::primal_importance;
+    primal_weight[id]      = hyper_params.primal_importance;
     best_primal_weight[id] = primal_weight[id];
   }
 }
@@ -2268,20 +2263,20 @@ void pdlp_solver_t<i_t, f_t>::compute_initial_primal_weight()
                                               op_problem_scaled_.combined_bounds);
   rmm::device_scalar<f_t> c_vec_norm{0.0, stream_view_};
   detail::my_l2_weighted_norm<i_t, f_t>(op_problem_scaled_.objective_coefficients,
-                                        pdlp_hyper_params::initial_primal_weight_c_scaling,
+                                        settings_.hyper_params.initial_primal_weight_c_scaling,
                                         c_vec_norm,
                                         stream_view_);
 
   rmm::device_scalar<f_t> b_vec_norm{0.0, stream_view_};
-  if (pdlp_hyper_params::initial_primal_weight_combined_bounds) {
+  if (settings_.hyper_params.initial_primal_weight_combined_bounds) {
     // => same as sqrt(dot(b,b))
     detail::my_l2_weighted_norm<i_t, f_t>(op_problem_scaled_.combined_bounds,
-                                          pdlp_hyper_params::initial_primal_weight_b_scaling,
+                                          settings_.hyper_params.initial_primal_weight_b_scaling,
                                           b_vec_norm,
                                           stream_view_);
 
   } else {
-    if (pdlp_hyper_params::bound_objective_rescaling) {
+    if (settings_.hyper_params.bound_objective_rescaling) {
     constexpr f_t one = f_t(1.0);
     thrust::uninitialized_fill(
     handle_ptr_->get_thrust_policy(), primal_weight_.begin(), primal_weight_.end(), one);
@@ -2289,7 +2284,7 @@ void pdlp_solver_t<i_t, f_t>::compute_initial_primal_weight()
     handle_ptr_->get_thrust_policy(), best_primal_weight_.begin(), best_primal_weight_.end(), one);
       return;
     } else {
-      cuopt_expects(pdlp_hyper_params::initial_primal_weight_b_scaling == 1,
+      cuopt_expects(settings_.hyper_params.initial_primal_weight_b_scaling == 1,
                     error_type_t::ValidationError,
                     "Passing a scaling is not supported for now");
 
@@ -2303,7 +2298,7 @@ void pdlp_solver_t<i_t, f_t>::compute_initial_primal_weight()
     const auto [grid_size, block_size] = kernel_config_from_batch_size(climber_strategies_.size());
   compute_weights_initial_primal_weight_from_squared_norms<i_t, f_t>
     <<<grid_size, block_size, 0, stream_view_>>>
-    (b_vec_norm.data(), c_vec_norm.data(), make_span(primal_weight_), make_span(best_primal_weight_), climber_strategies_.size());
+    (b_vec_norm.data(), c_vec_norm.data(), make_span(primal_weight_), make_span(best_primal_weight_), climber_strategies_.size(), settings_.hyper_params);
   RAFT_CUDA_TRY(cudaPeekAtLastError());
 
   // Sync since we are using local variable
@@ -2345,7 +2340,8 @@ template __global__ void compute_weights_initial_primal_weight_from_squared_norm
   const float* c_vec_norm,
   raft::device_span<float> primal_weight,
   raft::device_span<float> best_primal_weight,
-  int batch_size);
+  int batch_size,
+  const pdlp_hyper_params::pdlp_hyper_params_t hyper_params);
 #endif
 
 #if MIP_INSTANTIATE_DOUBLE
@@ -2356,7 +2352,8 @@ template __global__ void compute_weights_initial_primal_weight_from_squared_norm
   const double* c_vec_norm,
   raft::device_span<double> primal_weight,
   raft::device_span<double> best_primal_weight,
-int batch_size);
+int batch_size,
+const pdlp_hyper_params::pdlp_hyper_params_t hyper_params);
 #endif
 
 }  // namespace cuopt::linear_programming::detail

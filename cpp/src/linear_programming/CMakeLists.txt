@@ -14,7 +14,6 @@ set(LP_CORE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/solver_solution.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/saddle_point.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cusparse_view.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/pdlp_hyper_params.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/pdlp_warm_start_data.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/initial_scaling_strategy/initial_scaling.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/step_size_strategy/adaptive_step_size_strategy.cu
