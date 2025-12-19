@@ -108,32 +108,17 @@ class node_queue_t {
     diving_heap.push(entry);
   }
 
-  // In the current implementation, we are use the active number of subtree to decide
-  // when to stop the execution. We need to increment the counter at the same
-  // time as we pop a node from the queue to avoid some threads exiting
-  // the main loop thinking that the solver has already finished.
-  // This will be not needed in the master-worker model.
-  std::optional<mip_node_t<i_t, f_t>*> pop_best_first(omp_atomic_t<i_t>& active_subtree)
+  std::optional<mip_node_t<i_t, f_t>*> pop_best_first()
   {
     std::lock_guard<omp_mutex_t> lock(mutex);
     auto entry = best_first_heap.pop();
 
-    if (entry.has_value()) {
-      active_subtree++;
-      return std::exchange(entry.value()->node, nullptr);
-    }
+    if (entry.has_value()) { return std::exchange(entry.value()->node, nullptr); }
 
     return std::nullopt;
   }
 
-  // In the current implementation, multiple threads can pop the nodes
-  // from the queue, so we need to pass the lower and upper bound here
-  // to avoid other thread fathoming the node (i.e., deleting) before we can read
-  // the variable bounds from the tree.
-  // This will be not needed in the master-worker model.
-  std::optional<mip_node_t<i_t, f_t>> pop_diving(std::vector<f_t>& lower,
-                                                 std::vector<f_t>& upper,
-                                                 std::vector<bool>& bounds_changed)
+  std::optional<mip_node_t<i_t, f_t>*> pop_diving()
   {
     std::lock_guard<omp_mutex_t> lock(mutex);
 
@@ -141,10 +126,7 @@ class node_queue_t {
       auto entry = diving_heap.pop();
 
       if (entry.has_value()) {
-        if (auto node_ptr = entry.value()->node; node_ptr != nullptr) {
-          node_ptr->get_variable_bounds(lower, upper, bounds_changed);
-          return node_ptr->detach_copy();
-        }
+        if (auto node_ptr = entry.value()->node; node_ptr != nullptr) { return node_ptr; }
       }
     }
 
@@ -167,6 +149,12 @@ class node_queue_t {
   {
     std::lock_guard<omp_mutex_t> lock(mutex);
     return best_first_heap.empty() ? inf : best_first_heap.top()->lower_bound;
+  }
+
+  mip_node_t<i_t, f_t>* bfs_top()
+  {
+    std::lock_guard<omp_mutex_t> lock(mutex);
+    return best_first_heap.empty() ? nullptr : best_first_heap.top()->node;
   }
 };
 

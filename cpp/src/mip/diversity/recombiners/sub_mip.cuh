@@ -105,11 +105,11 @@ class sub_mip_recombiner_t : public recombiner_t<i_t, f_t> {
 
       // In the future, let SubMIP use all the diving heuristics. For now,
       // restricting to guided diving.
-      branch_and_bound_settings.bnb_task_settings[dual_simplex::PSEUDOCOST_DIVING].is_enabled =
+      branch_and_bound_settings.bnb_worker_settings[dual_simplex::PSEUDOCOST_DIVING].is_enabled =
         false;
-      branch_and_bound_settings.bnb_task_settings[dual_simplex::LINE_SEARCH_DIVING].is_enabled =
+      branch_and_bound_settings.bnb_worker_settings[dual_simplex::LINE_SEARCH_DIVING].is_enabled =
         false;
-      branch_and_bound_settings.bnb_task_settings[dual_simplex::COEFFICIENT_DIVING].is_enabled =
+      branch_and_bound_settings.bnb_worker_settings[dual_simplex::COEFFICIENT_DIVING].is_enabled =
         false;
       branch_and_bound_settings.set_bnb_tasks(2);
 

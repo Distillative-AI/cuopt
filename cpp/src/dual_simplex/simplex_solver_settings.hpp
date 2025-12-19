@@ -20,12 +20,12 @@
 
 namespace cuopt::linear_programming::dual_simplex {
 
-// Indicate the search and variable selection algorithms used by each task
+// Indicate the search and variable selection algorithms used by each worker
 // in B&B (See [1]).
 //
 // [1] T. Achterberg, “Constraint Integer Programming,” PhD, Technischen Universität Berlin,
 // Berlin, 2007. doi: 10.14279/depositonce-1634.
-enum bnb_task_type_t {
+enum bnb_worker_type_t {
   EXPLORATION        = 0,  // Best-First + Plunging.
   PSEUDOCOST_DIVING  = 1,  // Pseudocost diving (9.2.5)
   LINE_SEARCH_DIVING = 2,  // Line search diving (9.2.4)
@@ -33,37 +33,39 @@ enum bnb_task_type_t {
   COEFFICIENT_DIVING = 4  // Coefficient diving (9.2.1)
 };
 
-// Settings for each task type in B&B.
+// Settings for each worker in B&B.
 template <typename i_t, typename f_t>
-struct bnb_task_settings_t {
-  // Type of the task.
-  bnb_task_type_t type;
+struct bnb_worker_settings_t {
+  // Type of the worker.
+  bnb_worker_type_t type;
 
-  // Is this type of task enabled?
+  // Is this worker enabled?
   // This will be ignored if `type == EXPLORATION`.
   bool is_enabled;
 
-  // Number of tasks of this type.
-  i_t num_tasks;
+  // Number of workers of this type.
+  i_t num_workers;
 
-  // Minimum node depth to start this task
+  // Minimum node depth to start this worker
   // This will be ignored if `type == EXPLORATION`.
   i_t min_node_depth;
 
-  // Maximum number of nodes explored in this task.
+  // Maximum number of nodes explored in this worker.
   i_t node_limit;
 
-  // Maximum fraction of the number of simplex iterations for this task
+  // Maximum fraction of the number of simplex iterations for this worker
   // compared to the number of simplex iterations for normal exploration.
+  // This will be ignored if `type == EXPLORATION`.
   f_t iteration_limit_factor;
 
   // Number of nodes that it allows to backtrack when
   // reaching the bottom of a given branch of the tree.
+  // This will be ignored if `type == EXPLORATION`.
   i_t backtrack;
 };
 
 template <typename i_t, typename f_t>
-bnb_task_settings_t<i_t, f_t> get_default_diving_settings(bnb_task_type_t type);
+bnb_worker_settings_t<i_t, f_t> get_default_diving_settings(bnb_worker_type_t type);
 
 template <typename i_t, typename f_t>
 struct simplex_solver_settings_t {
@@ -121,23 +123,24 @@ struct simplex_solver_settings_t {
       heuristic_preemption_callback(nullptr),
       concurrent_halt(nullptr)
   {
-    bnb_task_settings[EXPLORATION] =
-      bnb_task_settings_t<i_t, f_t>{.type                   = EXPLORATION,
-                                    .is_enabled             = true,
-                                    .num_tasks              = -1,
-                                    .min_node_depth         = 0,
-                                    .node_limit             = std::numeric_limits<i_t>::max(),
-                                    .iteration_limit_factor = std::numeric_limits<f_t>::max(),
-                                    .backtrack              = 1};
+    bnb_worker_settings[EXPLORATION] =
+      bnb_worker_settings_t<i_t, f_t>{.type                   = EXPLORATION,
+                                      .is_enabled             = true,
+                                      .num_workers            = -1,
+                                      .min_node_depth         = 0,
+                                      .node_limit             = std::numeric_limits<i_t>::max(),
+                                      .iteration_limit_factor = std::numeric_limits<f_t>::max(),
+                                      .backtrack              = 1};
 
-    bnb_task_settings[PSEUDOCOST_DIVING] = get_default_diving_settings<i_t, f_t>(PSEUDOCOST_DIVING);
+    bnb_worker_settings[PSEUDOCOST_DIVING] =
+      get_default_diving_settings<i_t, f_t>(PSEUDOCOST_DIVING);
 
-    bnb_task_settings[LINE_SEARCH_DIVING] =
+    bnb_worker_settings[LINE_SEARCH_DIVING] =
       get_default_diving_settings<i_t, f_t>(LINE_SEARCH_DIVING);
 
-    bnb_task_settings[GUIDED_DIVING] = get_default_diving_settings<i_t, f_t>(GUIDED_DIVING);
+    bnb_worker_settings[GUIDED_DIVING] = get_default_diving_settings<i_t, f_t>(GUIDED_DIVING);
 
-    bnb_task_settings[COEFFICIENT_DIVING] =
+    bnb_worker_settings[COEFFICIENT_DIVING] =
       get_default_diving_settings<i_t, f_t>(COEFFICIENT_DIVING);
 
     set_bnb_tasks(omp_get_max_threads() - 1);
@@ -145,26 +148,26 @@ struct simplex_solver_settings_t {
 
   void set_bnb_tasks(i_t num_threads)
   {
-    this->num_threads                        = num_threads;
-    bnb_task_settings[EXPLORATION].num_tasks = std::max(1, num_threads / 4);
+    this->num_threads                            = num_threads;
+    bnb_worker_settings[EXPLORATION].num_workers = std::max(1, num_threads / 2);
 
-    i_t diving_tasks = num_threads - bnb_task_settings[EXPLORATION].num_tasks;
+    i_t diving_tasks = num_threads - bnb_worker_settings[EXPLORATION].num_workers;
     i_t num_enabled  = 0;
 
-    for (size_t i = 1; i < bnb_task_settings.size(); ++i) {
-      num_enabled += static_cast<i_t>(bnb_task_settings[i].is_enabled);
+    for (size_t i = 1; i < bnb_worker_settings.size(); ++i) {
+      num_enabled += static_cast<i_t>(bnb_worker_settings[i].is_enabled);
     }
 
-    for (size_t i = 1, k = 0; i < bnb_task_settings.size(); ++i) {
+    for (size_t i = 1, k = 0; i < bnb_worker_settings.size(); ++i) {
       i_t start = (double)k * diving_tasks / num_enabled;
       i_t end   = (double)(k + 1) * diving_tasks / num_enabled;
 
-      if (bnb_task_settings[i].is_enabled) {
-        bnb_task_settings[i].num_tasks = end - start;
+      if (bnb_worker_settings[i].is_enabled) {
+        bnb_worker_settings[i].num_workers = 2 * (end - start);
         ++k;
 
       } else {
-        bnb_task_settings[i].num_tasks = 0;
+        bnb_worker_settings[i].num_workers = 0;
       }
     }
   }
@@ -230,7 +233,7 @@ struct simplex_solver_settings_t {
 
   // Indicate the settings used by each task
   // The position in the array is indicated by the `bnb_task_type_t`.
-  std::array<bnb_task_settings_t<i_t, f_t>, 5> bnb_task_settings;
+  std::array<bnb_worker_settings_t<i_t, f_t>, 5> bnb_worker_settings;
 
   i_t inside_mip;  // 0 if outside MIP, 1 if inside MIP at root node, 2 if inside MIP at leaf node
   std::function<void(std::vector<f_t>&, f_t)> solution_callback;

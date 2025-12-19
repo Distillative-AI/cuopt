@@ -21,7 +21,7 @@ struct branch_variable_t {
 };
 
 template <typename i_t, typename f_t>
-bnb_task_settings_t<i_t, f_t> get_default_diving_settings(bnb_task_type_t type);
+bnb_worker_settings_t<i_t, f_t> get_default_diving_settings(bnb_worker_type_t type);
 
 template <typename i_t, typename f_t>
 branch_variable_t<i_t> line_search_diving(const std::vector<i_t>& fractional,
