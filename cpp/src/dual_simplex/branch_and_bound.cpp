@@ -1541,7 +1541,7 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
                        settings_.diving_settings.num_diving_tasks);
 
   settings_.log.printf(
-    " | Explored | Unexplored |    Objective    |     Bound     | Depth | Iter/Node |   Gap    "
+    "  | Explored | Unexplored |    Objective    |     Bound     | Depth | Iter/Node |   Gap    "
     "|  Time  |\n");
 
   exploration_stats_.nodes_explored       = 1;
