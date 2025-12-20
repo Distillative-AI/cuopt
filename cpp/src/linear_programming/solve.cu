@@ -302,7 +302,7 @@ void set_pdlp_solver_mode(pdlp_solver_settings_t<i_t, f_t>& settings)
     set_Stable3(settings.hyper_params);
 }
 
-volatile int global_concurrent_halt;
+std::atomic<int> global_concurrent_halt{0};
 
 template <typename i_t, typename f_t>
 optimization_problem_solution_t<i_t, f_t> convert_dual_simplex_sol(
