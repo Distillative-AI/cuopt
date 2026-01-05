@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -146,6 +146,7 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
     return sol;
   }
 
+  context.work_unit_scheduler_.verbose = true;
   context.work_unit_scheduler_.register_context(context.gpu_heur_loop);
 
   namespace dual_simplex = cuopt::linear_programming::dual_simplex;
@@ -164,7 +165,10 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
     branch_and_bound_solution.resize(branch_and_bound_problem.num_cols);
 
     // Fill in the settings for branch and bound
-    branch_and_bound_settings.time_limit           = timer_.remaining_time();
+    branch_and_bound_settings.time_limit = timer_.remaining_time();
+    if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
+      branch_and_bound_settings.time_limit = std::numeric_limits<f_t>::infinity();
+    }
     branch_and_bound_settings.print_presolve_stats = false;
     branch_and_bound_settings.absolute_mip_gap_tol = context.settings.tolerances.absolute_mip_gap;
     branch_and_bound_settings.relative_mip_gap_tol = context.settings.tolerances.relative_mip_gap;

@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -200,6 +200,7 @@ mip_solution_t<i_t, f_t> solve_mip(optimization_problem_t<i_t, f_t>& op_problem,
 
     if (!run_presolve) { CUOPT_LOG_INFO("Presolve is disabled, skipping"); }
 
+    auto constexpr const dual_postsolve = false;
     if (run_presolve) {
       detail::sort_csr(op_problem);
       // allocate not more than 10% of the time limit to presolve.
@@ -208,9 +209,8 @@ mip_solution_t<i_t, f_t> solve_mip(optimization_problem_t<i_t, f_t>& op_problem,
       if (settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
         presolve_time_limit = std::numeric_limits<double>::infinity();
       }
-      const bool dual_postsolve = false;
-      presolver                 = std::make_unique<detail::third_party_presolve_t<i_t, f_t>>();
-      auto result               = presolver->apply(op_problem,
+      presolver   = std::make_unique<detail::third_party_presolve_t<i_t, f_t>>();
+      auto result = presolver->apply(op_problem,
                                      cuopt::linear_programming::problem_category_t::MIP,
                                      dual_postsolve,
                                      settings.tolerances.absolute_tolerance,
@@ -254,6 +254,7 @@ mip_solution_t<i_t, f_t> solve_mip(optimization_problem_t<i_t, f_t>& op_problem,
                       reduced_costs,
                       cuopt::linear_programming::problem_category_t::MIP,
                       status_to_skip,
+                      dual_postsolve,
                       op_problem.get_handle_ptr()->get_stream());
       if (!status_to_skip) {
         thrust::fill(rmm::exec_policy(op_problem.get_handle_ptr()->get_stream()),

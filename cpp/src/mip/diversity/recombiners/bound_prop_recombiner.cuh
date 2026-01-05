@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -9,6 +9,7 @@
 
 #include "recombiner.cuh"
 
+#include <thrust/pair.h>
 #include <mip/local_search/rounding/constraint_prop.cuh>
 #include <mip/relaxed_lp/relaxed_lp.cuh>
 #include <mip/solution/solution.cuh>

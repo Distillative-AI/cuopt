@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -284,7 +284,7 @@ void bounds_repair_t<i_t, f_t>::compute_damages(problem_t<i_t, f_t>& problem, i_
                       sort_iterator + n_candidates,
                       thrust::make_zip_iterator(thrust::make_tuple(
                         candidates.bound_shift.data(), candidates.variable_index.data())),
-                      [] __device__(auto tuple1, auto tuple2) {
+                      [] __device__(auto tuple1, auto tuple2) -> bool {
                         if (thrust::get<0>(tuple1) < thrust::get<0>(tuple2)) {
                           return true;
                         } else if (thrust::get<0>(tuple1) == thrust::get<0>(tuple2) &&
@@ -307,7 +307,7 @@ i_t bounds_repair_t<i_t, f_t>::find_cutoff_index(const candidates_t<i_t, f_t>& c
     handle_ptr->get_thrust_policy(),
     iterator,
     iterator + n_candidates,
-    [best_cstr_delta, best_damage] __device__(auto tuple) {
+    [best_cstr_delta, best_damage] __device__(auto tuple) -> bool {
       if (thrust::get<0>(tuple) == best_cstr_delta && thrust::get<1>(tuple) <= best_damage) {
         return true;
       }

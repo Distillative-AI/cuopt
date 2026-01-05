@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -559,7 +559,7 @@ void fj_t<i_t, f_t>::climber_init(i_t climber_idx, const rmm::cuda_stream_view& 
   cuopt_assert(thrust::all_of(rmm::exec_policy(climber_stream),
                               thrust::counting_iterator<i_t>(0),
                               thrust::counting_iterator<i_t>(cstr_coeff_reciprocal.size()),
-                              [v = view] __device__(i_t offset) {
+                              [v = view] __device__(i_t offset) -> bool {
                                 return v.cstr_coeff_reciprocal[offset] != 0 &&
                                        isfinite(v.cstr_coeff_reciprocal[offset]);
                               }),

@@ -1,12 +1,13 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
 
 #pragma once
 
+#include <thrust/pair.h>
 #include <mip/local_search/rounding/bounds_repair.cuh>
 #include <mip/presolve/bounds_presolve.cuh>
 #include <mip/presolve/conditional_bound_strengthening.cuh>
