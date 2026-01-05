@@ -988,21 +988,11 @@ optimization_problem_solution_t<i_t, f_t> solve_lp(
                       reduced_costs,
                       cuopt::linear_programming::problem_category_t::LP,
                       status_to_skip,
+                      settings.dual_postsolve,
                       op_problem.get_handle_ptr()->get_stream());
 
-      thrust::fill(rmm::exec_policy(op_problem.get_handle_ptr()->get_stream()),
-                   dual_solution.data(),
-                   dual_solution.data() + dual_solution.size(),
-                   std::numeric_limits<f_t>::signaling_NaN());
-      thrust::fill(rmm::exec_policy(op_problem.get_handle_ptr()->get_stream()),
-                   reduced_costs.data(),
-                   reduced_costs.data() + reduced_costs.size(),
-                   std::numeric_limits<f_t>::signaling_NaN());
-
-      std::vector<pdlp_termination_status_t> term_vec =
-    solution.get_terminations_status();
-
-      std::vector<typename optimization_problem_solution_t<i_t, f_t>::additional_termination_information_t> full_stats = solution.get_additional_termination_informations();
+      std::vector<typename optimization_problem_solution_t<i_t, f_t>::additional_termination_information_t> term_vec = solution.get_additional_termination_informations();
+      std::vector<pdlp_termination_status_t> status_vec = solution.get_terminations_status();
 
       // Create a new solution with the full problem solution
       solution = optimization_problem_solution_t<i_t, f_t>(primal_solution,
@@ -1012,8 +1002,8 @@ optimization_problem_solution_t<i_t, f_t> solve_lp(
                                                            op_problem.get_objective_name(),
                                                            op_problem.get_variable_names(),
                                                            op_problem.get_row_names(),
-                                                           std::move(full_stats),
-                                                           std::move(term_vec));
+                                                           std::move(term_vec),
+                                                           std::move(status_vec));
     }
 
     if (settings.sol_file != "") {
