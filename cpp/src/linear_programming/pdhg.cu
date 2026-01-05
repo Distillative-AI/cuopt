@@ -690,23 +690,23 @@ void pdhg_solver_t<i_t, f_t>::compute_next_primal_dual_solution_reflected(
           primal_reflected_major_projection_batch<f_t>(),
           stream_view_);
 
-        if (new_bounds_idx_.size() != 0) {
-          const auto [grid_size, block_size] =
-            kernel_config_from_batch_size(climber_strategies_.size());
-          refine_primal_projection_major_batch_kernel<<<grid_size, block_size, 0, stream_view_>>>(
-            (i_t)climber_strategies_.size(),
-            problem_ptr->n_variables,
-            new_bounds_idx_.data(),
-            new_bounds_lower_.data(),
-            new_bounds_upper_.data(),
-            current_saddle_point_state_.get_primal_solution().data(),
-            problem_ptr->objective_coefficients.data(),
-            current_saddle_point_state_.get_current_AtY().data(),
-            primal_step_size.data(),
-            potential_next_primal_solution_.data(),
-            dual_slack_.data(),
-            reflected_primal_.data());
-        }
+      }
+      if (new_bounds_idx_.size() != 0) {
+        const auto [grid_size, block_size] =
+          kernel_config_from_batch_size(climber_strategies_.size());
+        refine_primal_projection_major_batch_kernel<<<grid_size, block_size, 0, stream_view_>>>(
+          (i_t)climber_strategies_.size(),
+          problem_ptr->n_variables,
+          new_bounds_idx_.data(),
+          new_bounds_lower_.data(),
+          new_bounds_upper_.data(),
+          current_saddle_point_state_.get_primal_solution().data(),
+          problem_ptr->objective_coefficients.data(),
+          current_saddle_point_state_.get_current_AtY().data(),
+          primal_step_size.data(),
+          potential_next_primal_solution_.data(),
+          dual_slack_.data(),
+          reflected_primal_.data());
       }
 #ifdef CUPDLP_DEBUG_MODE
       print("potential_next_primal_solution_", potential_next_primal_solution_);
@@ -797,21 +797,21 @@ print("current_saddle_point_state_.get_current_AtY()", current_saddle_point_stat
           primal_reflected_projection_batch<f_t>(),
           stream_view_);
 
-        if (new_bounds_idx_.size() != 0) {
-          const auto [grid_size, block_size] =
-            kernel_config_from_batch_size(climber_strategies_.size());
-          refine_primal_projection_batch_kernel<<<grid_size, block_size, 0, stream_view_>>>(
-            (i_t)climber_strategies_.size(),
-            problem_ptr->n_variables,
-            new_bounds_idx_.data(),
-            new_bounds_lower_.data(),
-            new_bounds_upper_.data(),
-            current_saddle_point_state_.get_primal_solution().data(),
-            problem_ptr->objective_coefficients.data(),
-            current_saddle_point_state_.get_current_AtY().data(),
-            primal_step_size.data(),
-            reflected_primal_.data());
-        }
+      }
+      if (new_bounds_idx_.size() != 0) {
+        const auto [grid_size, block_size] =
+          kernel_config_from_batch_size(climber_strategies_.size());
+        refine_primal_projection_batch_kernel<<<grid_size, block_size, 0, stream_view_>>>(
+          (i_t)climber_strategies_.size(),
+          problem_ptr->n_variables,
+          new_bounds_idx_.data(),
+          new_bounds_lower_.data(),
+          new_bounds_upper_.data(),
+          current_saddle_point_state_.get_primal_solution().data(),
+          problem_ptr->objective_coefficients.data(),
+          current_saddle_point_state_.get_current_AtY().data(),
+          primal_step_size.data(),
+          reflected_primal_.data());
       }
 #ifdef CUPDLP_DEBUG_MODE
 print("reflected_primal_", reflected_primal_);
