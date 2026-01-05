@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2023-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 # Dependency list for https://github.com/rapidsai/dependency-file-generator
@@ -295,7 +295,7 @@ dependencies:
     common:
       - output_types: conda
         packages:
-          - boost
+          - libboost-devel
           - cpp-argparse
           - librmm==26.2.*,>=0.0.0a0
           - libraft-headers==26.2.*,>=0.0.0a0
@@ -332,7 +332,7 @@ dependencies:
     common:
       - output_types: [conda, requirements, pyproject]
         packages:
-          - pytest<8
+          - pytest<9.0
           - pytest-cov
   test_python_cuopt:
     common:
@@ -742,7 +742,6 @@ dependencies:
           - numpydoc
           - pyrsistent
           - breathe
-          - exhale
           - sphinx
           - sphinx-copybutton
           - sphinx-markdown-tables
@@ -752,7 +751,7 @@ dependencies:
           - sphinx-design
           - pip:
             - swagger-plugin-for-sphinx
-            - nvidia_sphinx_theme
+            - nvidia-sphinx-theme
 
   notebooks:
     common:
