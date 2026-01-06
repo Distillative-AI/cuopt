@@ -274,7 +274,8 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
   rmm::device_uvector<f_t>& _tmp_dual,
   rmm::device_uvector<f_t>& _potential_next_dual_solution,
   rmm::device_uvector<f_t>& _reflected_primal_solution,
-  const std::vector<pdlp_climber_strategy_t>& climber_strategies)
+  const std::vector<pdlp_climber_strategy_t>& climber_strategies,
+  const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params)
   : batch_mode_(climber_strategies.size() > 1),
     handle_ptr_(handle_ptr),
     A{},
@@ -347,7 +348,9 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
                        current_saddle_point_state.get_dual_solution().data());
 
   // TODO batch mdoe: convert those to RAII views
-  if (batch_mode_ && is_cupdlpx_restart<i_t, f_t>()) {
+  if (batch_mode_) {
+    [[maybe_unused]] const bool is_cupdlpx = is_cupdlpx_restart<i_t, f_t>(hyper_params);
+    cuopt_assert(is_cupdlpx, "Batch mode only supported with cuPDLPx restart");
     RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
       &batch_dual_solutions,
       op_problem_scaled.n_constraints,
@@ -492,7 +495,7 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(
 
   tmp_primal.create(op_problem_scaled.n_variables, _tmp_primal.data());
   tmp_dual.create(op_problem_scaled.n_constraints, _tmp_dual.data());
-  if (pdlp_hyper_params::use_reflected_primal_dual) {
+  if (hyper_params.use_reflected_primal_dual) {
     cuopt_assert(_reflected_primal_solution.size() > 0, "Reflected primal solution empty");
     reflected_primal_solution.create(op_problem_scaled.n_variables,
                                      _reflected_primal_solution.data());
@@ -616,8 +619,9 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(raft::handle_t const* handle_ptr,
                                            rmm::device_uvector<f_t>& _potential_next_dual,
                                            const rmm::device_uvector<f_t>& _A_T,
                                            const rmm::device_uvector<i_t>& _A_T_offsets,
-                                           const rmm::device_uvector<i_t>& _A_T_indices,
-                                           const std::vector<pdlp_climber_strategy_t>& climber_strategies)
+  const rmm::device_uvector<i_t>& _A_T_indices,
+  const std::vector<pdlp_climber_strategy_t>& climber_strategies,
+  const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params)
   : batch_mode_(climber_strategies.size() > 1),
     handle_ptr_(handle_ptr),
     A{},
@@ -674,7 +678,7 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(raft::handle_t const* handle_ptr,
 
   c.create(op_problem.n_variables, const_cast<f_t*>(op_problem.objective_coefficients.data()));
 
-  if (!pdlp_hyper_params::use_adaptive_step_size_strategy) {
+  if (!hyper_params.use_adaptive_step_size_strategy) {
     primal_solution.create(op_problem.n_variables, _potential_next_primal.data());
     dual_solution.create(op_problem.n_constraints, _potential_next_dual.data());
   } else {
@@ -685,7 +689,9 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(raft::handle_t const* handle_ptr,
   tmp_primal.create(op_problem.n_variables, _tmp_primal.data());
   tmp_dual.create(op_problem.n_constraints, _tmp_dual.data());
 
-  if (batch_mode_ && is_cupdlpx_restart<i_t, f_t>()) {
+  if (batch_mode_) {
+    [[maybe_unused]] const bool is_cupdlpx = is_cupdlpx_restart<i_t, f_t>(hyper_params);
+    cuopt_assert(is_cupdlpx, "Batch mode only supported with cuPDLPx restart");
     // TODO batch mode: also use container
     RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednmat(
       &batch_primal_solutions,

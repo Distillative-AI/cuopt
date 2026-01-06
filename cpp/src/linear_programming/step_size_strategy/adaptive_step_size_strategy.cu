@@ -38,7 +38,8 @@ adaptive_step_size_strategy_t<i_t, f_t>::adaptive_step_size_strategy_t(
   bool is_legacy_batch_mode,
   i_t primal_size,
   i_t dual_size,
-  const std::vector<pdlp_climber_strategy_t>& climber_strategies)
+  const std::vector<pdlp_climber_strategy_t>& climber_strategies,
+  const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params)
   : batch_mode_(climber_strategies.size() > 1),
     stream_pool_(parallel_stream_computation),
     dot_delta_X_(cudaEventDisableTiming),
@@ -58,7 +59,8 @@ adaptive_step_size_strategy_t<i_t, f_t>::adaptive_step_size_strategy_t(
     reusable_device_scalar_value_0_{f_t(0.0), stream_view_},
     dot_product_storage(0, stream_view_),
     graph(stream_view_, is_legacy_batch_mode),
-    climber_strategies_(climber_strategies)
+    climber_strategies_(climber_strategies),
+    hyper_params_(hyper_params)
 {
   valid_step_size_[0] = 0;
 
@@ -91,33 +93,6 @@ adaptive_step_size_strategy_t<i_t, f_t>::adaptive_step_size_strategy_t(
   }
 }
 
-void set_adaptive_step_size_hyper_parameters(rmm::cuda_stream_view stream_view)
-{
-  RAFT_CUDA_TRY(cudaMemcpyToSymbolAsync(pdlp_hyper_params::default_reduction_exponent,
-                                        &pdlp_hyper_params::host_default_reduction_exponent,
-                                        sizeof(double),
-                                        0,
-                                        cudaMemcpyHostToDevice,
-                                        stream_view));
-  RAFT_CUDA_TRY(cudaMemcpyToSymbolAsync(pdlp_hyper_params::default_growth_exponent,
-                                        &pdlp_hyper_params::host_default_growth_exponent,
-                                        sizeof(double),
-                                        0,
-                                        cudaMemcpyHostToDevice,
-                                        stream_view));
-  RAFT_CUDA_TRY(cudaMemcpyToSymbolAsync(pdlp_hyper_params::primal_distance_smoothing,
-                                        &pdlp_hyper_params::host_primal_distance_smoothing,
-                                        sizeof(double),
-                                        0,
-                                        cudaMemcpyHostToDevice,
-                                        stream_view));
-  RAFT_CUDA_TRY(cudaMemcpyToSymbolAsync(pdlp_hyper_params::dual_distance_smoothing,
-                                        &pdlp_hyper_params::host_dual_distance_smoothing,
-                                        sizeof(double),
-                                        0,
-                                        cudaMemcpyHostToDevice,
-                                        stream_view));
-}
 
 template <typename i_t, typename f_t>
 __global__ void compute_step_sizes_from_movement_and_interaction(
@@ -132,9 +107,9 @@ __global__ void compute_step_sizes_from_movement_and_interaction(
 
   const f_t primal_weight = step_size_strategy_view.primal_weight[0];
 
-  const f_t movement = pdlp_hyper_params::primal_distance_smoothing * primal_weight *
+  const f_t movement = step_size_strategy_view.hyper_params.primal_distance_smoothing * primal_weight *
                    *step_size_strategy_view.norm_squared_delta_primal +
-                 (pdlp_hyper_params::dual_distance_smoothing / primal_weight) *
+                 (step_size_strategy_view.hyper_params.dual_distance_smoothing / primal_weight) *
                    *step_size_strategy_view.norm_squared_delta_dual;
 
 #ifdef PDLP_DEBUG_MODE
@@ -180,25 +155,25 @@ __global__ void compute_step_sizes_from_movement_and_interaction(
   // We have two candidates of which we take the smaller to retry taking a step
   const f_t potential_new_step_size_1 =
     (f_t(1.0) - raft::pow<f_t>(iteration_coefficient_ + f_t(1.0),
-                               -pdlp_hyper_params::default_reduction_exponent)) *
+                               -step_size_strategy_view.hyper_params.reduction_exponent)) *
     step_size_limit;
   const f_t potential_new_step_size_2 =
     (f_t(1.0) + raft::pow<f_t>(iteration_coefficient_ + f_t(1.0),
-                               -pdlp_hyper_params::default_growth_exponent)) *
+                               -step_size_strategy_view.hyper_params.growth_exponent)) *
     step_size;
 
 #ifdef PDLP_DEBUG_MODE
   printf(
     "Compute adaptative step size: iteration_coefficient_=%lf "
-    "-pdlp_hyper_params::default_reduction_exponent=%lf step_size_limit=%lf\n",
+    "-hyper_params.reduction_exponent=%lf step_size_limit=%lf\n",
     iteration_coefficient_,
-    -pdlp_hyper_params::default_reduction_exponent,
+    -step_size_strategy_view.hyper_params.reduction_exponent,
     step_size_limit);
   printf(
     "Compute adaptative step size: iteration_coefficient_=%lf "
-    "-pdlp_hyper_params::default_growth_exponent=%lf step_size_=%lf\n",
+    "-hyper_params.growth_exponent=%lf step_size_=%lf\n",
     iteration_coefficient_,
-    -pdlp_hyper_params::default_growth_exponent,
+    -step_size_strategy_view.hyper_params.growth_exponent,
     step_size);
   printf(
     "Compute adaptative step size: potential_new_step_size_1=%lf potential_new_step_size_2=%lf\n",
@@ -531,6 +506,8 @@ adaptive_step_size_strategy_t<i_t, f_t>::view()
 
   v.norm_squared_delta_primal = norm_squared_delta_primal_.data();
   v.norm_squared_delta_dual   = norm_squared_delta_dual_.data();
+
+  v.hyper_params = hyper_params_;
 
   return v;
 }

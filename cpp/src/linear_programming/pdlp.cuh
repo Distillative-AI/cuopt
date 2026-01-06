@@ -31,7 +31,6 @@
 #include "linear_programming/termination_strategy/convergence_information.hpp"
 
 namespace cuopt::linear_programming::detail {
-void set_pdlp_hyper_parameters(rmm::cuda_stream_view stream_view);
 /**
  * @brief Solver for an optimization problem (Currently only linear program) to be solved,
  * pdlp_parameters and pdlp_internal_state
@@ -128,6 +127,10 @@ class pdlp_solver_t {
 
   raft::handle_t const* handle_ptr_;
   rmm::cuda_stream_view stream_view_;
+
+  #ifdef BATCH_VERBOSE_MODE
+  std::unordered_map<i_t, i_t> climber_done;
+  #endif
 
   problem_t<i_t, f_t>* problem_ptr;
   // Combined bounds in op_problem_scaled_ will only be scaled if

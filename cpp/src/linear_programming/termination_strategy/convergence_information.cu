@@ -37,7 +37,8 @@ convergence_information_t<i_t, f_t>::convergence_information_t(
   cusparse_view_t<i_t, f_t>& cusparse_view,
   i_t primal_size,
   i_t dual_size,
-  const std::vector<pdlp_climber_strategy_t>& climber_strategies)
+  const std::vector<pdlp_climber_strategy_t>& climber_strategies,
+  const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params)
   : batch_mode_(climber_strategies.size() > 1),
     handle_ptr_(handle_ptr),
     stream_view_(handle_ptr_->get_stream()),
@@ -59,17 +60,18 @@ convergence_information_t<i_t, f_t>::convergence_information_t(
     abs_objective_{climber_strategies.size(), stream_view_},
     primal_residual_{climber_strategies.size() * dual_size_h_, stream_view_},
     dual_residual_{climber_strategies.size() * primal_size_h_, stream_view_},
-    reduced_cost_{static_cast<size_t>(primal_size_h_), stream_view_},
+    reduced_cost_{climber_strategies.size() * primal_size_h_, stream_view_},
     bound_value_{static_cast<size_t>(std::max(primal_size_h_, dual_size_h_)), stream_view_},
     primal_slack_{
-      (pdlp_hyper_params::use_reflected_primal_dual) ? static_cast<size_t>(dual_size_h_ * climber_strategies.size()) : 0,
+      (hyper_params.use_reflected_primal_dual) ? static_cast<size_t>(dual_size_h_ * climber_strategies.size()) : 0,
       stream_view_},
     reusable_device_scalar_value_1_{1.0, stream_view_},
     reusable_device_scalar_value_0_{0.0, stream_view_},
     reusable_device_scalar_value_neg_1_{-1.0, stream_view_},
     dual_dot_{climber_strategies.size(), stream_view_},
     sum_primal_slack_{climber_strategies.size(), stream_view_},
-    climber_strategies_(climber_strategies)
+    climber_strategies_(climber_strategies),
+    hyper_params_(hyper_params)
 {
   RAFT_CUDA_TRY(cudaMemsetAsync(primal_objective_.data(), 0, sizeof(f_t) * primal_objective_.size(), stream_view_));
   RAFT_CUDA_TRY(cudaMemsetAsync(dual_objective_.data(), 0, sizeof(f_t) * dual_objective_.size(), stream_view_));
@@ -90,7 +92,7 @@ convergence_information_t<i_t, f_t>::convergence_information_t(
   my_l2_norm<i_t, f_t>(
     problem_ptr->objective_coefficients, l2_norm_primal_linear_objective_, handle_ptr_);
 
-  if (pdlp_hyper_params::initial_primal_weight_combined_bounds)
+  if (hyper_params_.initial_primal_weight_combined_bounds)
   {
     cuopt_expects(!batch_mode_, error_type_t::ValidationError, "Batch mode not supported with initial_primal_weight_combined_bounds");
     my_l2_norm<i_t, f_t>(primal_residual_, l2_norm_primal_right_hand_side_, handle_ptr_);
@@ -403,7 +405,7 @@ void convergence_information_t<i_t, f_t>::compute_primal_residual(
     }
   }
 
-  if (!pdlp_hyper_params::use_reflected_primal_dual) {
+  if (!hyper_params_.use_reflected_primal_dual) {
     // The constraint bound violations for the first part of the residual
     cuopt_expects(!(climber_strategies_.size() > 1), error_type_t::ValidationError, "Batch mode not supported for !use_reflected_primal_dual");
 
@@ -502,7 +504,8 @@ void convergence_information_t<i_t, f_t>::compute_dual_residual(
   [[maybe_unused]] const rmm::device_uvector<f_t>& dual_slack)
 {
   cuopt_assert(tmp_primal.size() == primal_solution.size(), "tmp_primal size must be equal to primal_solution size");
-  cuopt_assert(tmp_primal.size() == dual_slack.size(), "tmp_primal size must be equal to primal_solution size");
+  if (hyper_params_.use_reflected_primal_dual)
+    cuopt_assert(tmp_primal.size() == dual_slack.size(), "tmp_primal size must be equal to primal_solution size");
   cuopt_assert(dual_residual_.size() == primal_solution.size(), "dual_residual_ size must be equal to primal_solution size");
 
   raft::common::nvtx::range fun_scope("compute_dual_residual");
@@ -566,7 +569,7 @@ void convergence_information_t<i_t, f_t>::compute_dual_residual(
                                     cuda::std::minus<>{},
                                     stream_view_);
 
-  if (pdlp_hyper_params::use_reflected_primal_dual) {
+  if (hyper_params_.use_reflected_primal_dual) {
     cub::DeviceTransform::Transform(cuda::std::make_tuple(tmp_primal.data(), dual_slack.data()),
                                     dual_residual_.data(),
                                     dual_residual_.size(),
@@ -600,7 +603,7 @@ void convergence_information_t<i_t, f_t>::compute_dual_objective(
   // the value of y term in the objective of the dual problem, see[]
   //  (l^c)^T[y]_+ − (u^c)^T[y]_− in the dual objective
 
-  if (!pdlp_hyper_params::use_reflected_primal_dual) {
+  if (!hyper_params_.use_reflected_primal_dual) {
     cuopt_expects(!(climber_strategies_.size() > 1), error_type_t::ValidationError, "Batch mode not supported for !use_reflected_primal_dual");
 
     raft::linalg::ternaryOp(bound_value_.data(),
@@ -698,7 +701,7 @@ void convergence_information_t<i_t, f_t>::compute_reduced_cost_from_primal_gradi
     bound_value_gradient<f_t, f_t2>(),
     stream_view_);
 
-  if (pdlp_hyper_params::handle_some_primal_gradients_on_finite_bounds_as_residuals) {
+  if (hyper_params_.handle_some_primal_gradients_on_finite_bounds_as_residuals) {
     raft::linalg::ternaryOp(reduced_cost_.data(),
                             primal_solution.data(),
                             bound_value_.data(),

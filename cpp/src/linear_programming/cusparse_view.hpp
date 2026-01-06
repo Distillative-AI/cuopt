@@ -6,6 +6,7 @@
 /* clang-format on */
 #pragma once
 
+#include <cuopt/linear_programming/pdlp/pdlp_hyper_params.cuh>
 #include <linear_programming/saddle_point.hpp>
 #include <linear_programming/pdlp_climber_strategy.hpp>
 
@@ -88,7 +89,8 @@ class cusparse_view_t {
                   rmm::device_uvector<f_t>& _tmp_dual,
                   rmm::device_uvector<f_t>& _potential_next_dual_solution,
                   rmm::device_uvector<f_t>& _reflected_primal_solution,
-                  const std::vector<pdlp_climber_strategy_t>& climber_strategies);
+                  const std::vector<pdlp_climber_strategy_t>& climber_strategies,
+                  const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params);
 
   cusparse_view_t(raft::handle_t const* handle_ptr,
                   const problem_t<i_t, f_t>& op_problem,
@@ -101,7 +103,8 @@ class cusparse_view_t {
                   const rmm::device_uvector<f_t>& _A_T,
                   const rmm::device_uvector<i_t>& _A_T_offsets,
                   const rmm::device_uvector<i_t>& _A_T_indices,
-                  const std::vector<pdlp_climber_strategy_t>& climber_strategies);
+                  const std::vector<pdlp_climber_strategy_t>& climber_strategies,
+                  const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params);
 
   cusparse_view_t(raft::handle_t const* handle_ptr,
                   const problem_t<i_t, f_t>& op_problem,

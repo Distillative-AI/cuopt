@@ -11,6 +11,7 @@
 #include <linear_programming/saddle_point.hpp>
 #include <linear_programming/initial_scaling_strategy/initial_scaling.cuh>
 
+#include <cuopt/linear_programming/pdlp/pdlp_hyper_params.cuh>
 #include <cuopt/linear_programming/utilities/segmented_sum_handler.cuh>
 
 #include <mip/problem/problem.cuh>
@@ -35,7 +36,8 @@ class infeasibility_information_t {
                               i_t dual_size,
                               const pdlp_initial_scaling_strategy_t<i_t, f_t>& scaling_strategy, // Only used for cuPDLPx infeasibility detection 
                               bool infeasibility_detection,
-                              const std::vector<pdlp_climber_strategy_t>& climber_strategies);
+                              const std::vector<pdlp_climber_strategy_t>& climber_strategies,
+                              const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params);
 
   void compute_infeasibility_information(pdhg_solver_t<i_t, f_t>& current_pdhg_solver,
                                          rmm::device_uvector<f_t>& primal_ray,
@@ -130,5 +132,6 @@ class infeasibility_information_t {
 
   segmented_sum_handler_t<i_t, f_t> segmented_sum_handler_;
   const std::vector<pdlp_climber_strategy_t>& climber_strategies_;
+  const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params_;
 };
 }  // namespace cuopt::linear_programming::detail

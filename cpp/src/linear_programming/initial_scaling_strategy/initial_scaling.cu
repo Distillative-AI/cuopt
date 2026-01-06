@@ -11,6 +11,7 @@
 
 #include <cuopt/linear_programming/pdlp/pdlp_hyper_params.cuh>
 #include <linear_programming/initial_scaling_strategy/initial_scaling.cuh>
+#include <linear_programming/pdlp_constants.hpp>
 #include <linear_programming/utils.cuh>
 #include <mip/mip_constants.hpp>
 
@@ -35,6 +36,7 @@ pdlp_initial_scaling_strategy_t<i_t, f_t>::pdlp_initial_scaling_strategy_t(
   rmm::device_uvector<i_t>& A_T_offsets,
   rmm::device_uvector<i_t>& A_T_indices,
   pdhg_solver_t<i_t, f_t>* pdhg_solver_ptr,
+  const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params,
   bool running_mip)
   : handle_ptr_(handle_ptr),
     stream_view_(handle_ptr_->get_stream()),
@@ -45,6 +47,7 @@ pdlp_initial_scaling_strategy_t<i_t, f_t>::pdlp_initial_scaling_strategy_t(
     A_T_(A_T),
     A_T_offsets_(A_T_offsets),
     A_T_indices_(A_T_indices),
+    hyper_params_(hyper_params),
     running_mip_(running_mip),
     iteration_constraint_matrix_scaling_{static_cast<size_t>(dual_size_h_), stream_view_},
     iteration_variable_scaling_{static_cast<size_t>(primal_size_h_), stream_view_},
@@ -84,8 +87,8 @@ void pdlp_initial_scaling_strategy_t<i_t, f_t>::compute_scaling_vectors(
 {
   raft::common::nvtx::range fun_scope("compute_scaling_vectors");
 
-  if (pdlp_hyper_params::do_ruiz_scaling) { ruiz_inf_scaling(number_of_ruiz_iterations); }
-  if (pdlp_hyper_params::do_pock_chambolle_scaling) { pock_chambolle_scaling(alpha); }
+  if (hyper_params_.do_ruiz_scaling) { ruiz_inf_scaling(number_of_ruiz_iterations); }
+  if (hyper_params_.do_pock_chambolle_scaling) { pock_chambolle_scaling(alpha); }
 }
 
 template <typename i_t, typename f_t>
@@ -133,7 +136,7 @@ void pdlp_initial_scaling_strategy_t<i_t, f_t>::bound_objective_rescaling()
   bound_rescaling_.set_value_async(h_bound_rescaling, stream_view_);
 
   detail::my_l2_weighted_norm<i_t, f_t>(op_problem_scaled_.objective_coefficients,
-                                        pdlp_hyper_params::initial_primal_weight_c_scaling,
+                                        hyper_params_.initial_primal_weight_c_scaling,
                                         objective_rescaling_,
                                         stream_view_);
 
@@ -450,6 +453,25 @@ void pdlp_initial_scaling_strategy_t<i_t, f_t>::scale_problem()
                                   divide_check_zero<f_t, f_t2>(),
                                   stream_view_);
 
+  if (pdhg_solver_ptr_ && pdhg_solver_ptr_->get_new_bounds_idx().size() != 0) {
+    cub::DeviceTransform::Transform(
+      cuda::std::make_tuple(
+        pdhg_solver_ptr_->get_new_bounds_lower().data(),
+        pdhg_solver_ptr_->get_new_bounds_upper().data(),
+        thrust::make_permutation_iterator(cummulative_variable_scaling_.data(),
+                                          pdhg_solver_ptr_->get_new_bounds_idx().data())),
+      thrust::make_zip_iterator(pdhg_solver_ptr_->get_new_bounds_lower().data(),
+                                pdhg_solver_ptr_->get_new_bounds_upper().data()),
+      pdhg_solver_ptr_->get_new_bounds_idx().size(),
+      [] __device__(f_t lower, f_t upper, f_t s) -> thrust::tuple<f_t, f_t> {
+        if (s != f_t(0)) {
+          return {lower / s, upper / s};
+        }
+        return {lower, upper};
+      },
+      stream_view_);
+  }
+
   // TODO batch mode: handle different constraints bounds
   raft::linalg::eltwiseMultiply(
     const_cast<rmm::device_uvector<f_t>&>(op_problem_scaled_.constraint_lower_bounds).data(),
@@ -464,7 +486,7 @@ void pdlp_initial_scaling_strategy_t<i_t, f_t>::scale_problem()
     dual_size_h_,
     stream_view_);
 
-  if (pdlp_hyper_params::bound_objective_rescaling && !running_mip_) {
+  if (hyper_params_.bound_objective_rescaling && !running_mip_) {
     // Coefficients are computed on the already scaled values
     bound_objective_rescaling();
 
@@ -496,6 +518,20 @@ void pdlp_initial_scaling_strategy_t<i_t, f_t>::scale_problem()
           return {variable_bounds.x * *bound_rescaling, variable_bounds.y * *bound_rescaling};
         },
         stream_view_);
+
+    if (pdhg_solver_ptr_ && pdhg_solver_ptr_->get_new_bounds_idx().size() != 0) {
+      cub::DeviceTransform::Transform(
+        cuda::std::make_tuple(pdhg_solver_ptr_->get_new_bounds_lower().data(),
+                              pdhg_solver_ptr_->get_new_bounds_upper().data()),
+        thrust::make_zip_iterator(pdhg_solver_ptr_->get_new_bounds_lower().data(),
+                                  pdhg_solver_ptr_->get_new_bounds_upper().data()),
+        pdhg_solver_ptr_->get_new_bounds_idx().size(),
+        [bound_rescaling = bound_rescaling_.data()] __device__(f_t lower, f_t upper)
+          -> thrust::tuple<f_t, f_t> {
+          return {lower * *bound_rescaling, upper * *bound_rescaling};
+        },
+        stream_view_);
+    }
 
     cub::DeviceTransform::Transform(
                     op_problem_scaled_.objective_coefficients.data(),
@@ -543,7 +579,7 @@ void pdlp_initial_scaling_strategy_t<i_t, f_t>::scale_solutions(
                           batch_safe_div<f_t>(),
                           stream_view_);
 
-    if (pdlp_hyper_params::bound_objective_rescaling && !running_mip_) {
+    if (hyper_params_.bound_objective_rescaling && !running_mip_) {
       
       cub::DeviceTransform::Transform(primal_solution.data(),
                           primal_solution.data(),
@@ -568,7 +604,7 @@ void pdlp_initial_scaling_strategy_t<i_t, f_t>::scale_solutions(
                                        batch_safe_div<f_t>(),
                                         stream_view_);
 
-    if (pdlp_hyper_params::bound_objective_rescaling && !running_mip_) {
+    if (hyper_params_.bound_objective_rescaling && !running_mip_) {
 
       cub::DeviceTransform::Transform(dual_solution.data(),
                           dual_solution.data(),
@@ -594,7 +630,7 @@ void pdlp_initial_scaling_strategy_t<i_t, f_t>::scale_solutions(
                           cuda::std::multiplies<>{},
                           stream_view_);
 
-    if (pdlp_hyper_params::bound_objective_rescaling && !running_mip_) {
+    if (hyper_params_.bound_objective_rescaling && !running_mip_) {
 
       cub::DeviceTransform::Transform(dual_slack.data(),
                           dual_slack.data(),
@@ -660,7 +696,7 @@ void pdlp_initial_scaling_strategy_t<i_t, f_t>::unscale_solutions(
                           cuda::std::multiplies<>{},
                           stream_view_);
 
-    if (pdlp_hyper_params::bound_objective_rescaling && !running_mip_) {
+    if (hyper_params_.bound_objective_rescaling && !running_mip_) {
       cuopt_assert(h_bound_rescaling != f_t(0),
                    "Numerical error: bound_rescaling_ should never equal 0");
       cub::DeviceTransform::Transform(primal_solution.data(),
@@ -686,7 +722,7 @@ void pdlp_initial_scaling_strategy_t<i_t, f_t>::unscale_solutions(
                                        dual_solution.size(),
                                        cuda::std::multiplies<>{},
                                         stream_view_);
-    if (pdlp_hyper_params::bound_objective_rescaling && !running_mip_) {
+    if (hyper_params_.bound_objective_rescaling && !running_mip_) {
       cuopt_assert(h_bound_rescaling != f_t(0),
                    "Numerical error: bound_rescaling_ should never equal 0");
       cub::DeviceTransform::Transform(dual_solution.data(),
@@ -710,7 +746,7 @@ void pdlp_initial_scaling_strategy_t<i_t, f_t>::unscale_solutions(
                           dual_slack.size(),
                           batch_safe_div<f_t>(),
                           stream_view_);
-    if (pdlp_hyper_params::bound_objective_rescaling && !running_mip_) {
+    if (hyper_params_.bound_objective_rescaling && !running_mip_) {
       cuopt_assert(h_bound_rescaling != f_t(0),
                    "Numerical error: bound_rescaling_ should never equal 0");
       cub::DeviceTransform::Transform(dual_slack.data(),

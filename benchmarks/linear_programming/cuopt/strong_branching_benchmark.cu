@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -65,6 +65,12 @@ std::pair<cuopt::mps_parser::mps_data_model_t<int, double>, std::vector<cuopt::m
   // Create the problem batch to solve them individually
 
   const int total_size = no_init_lower ? batch_size : batch_size * 2;
+  if (no_init_lower)
+    std::cout << "Running strong branching with only lower bounds" << std::endl;
+  else
+    std::cout << "Running strong branching with lower and upper bounds" << std::endl;
+
+  std::cout << "Runnning strong branching on " << total_size << " problems" << std::endl;
 
   std::vector<cuopt::mps_parser::mps_data_model_t<int, double>> problems(total_size, op_problem);
 
@@ -122,7 +128,8 @@ void bench(
   bool deterministic, // For now useless, need 13.1 for cuSparse deterministic
   bool init_primal_dual,
   bool init_step_size,
-  bool init_primal_weight)
+  bool init_primal_weight,
+  bool use_optimal_batch_size)
 {
   // Important that those 2 are created before the sols
 
@@ -133,6 +140,8 @@ void bench(
   double initial_step_size = std::numeric_limits<double>::signaling_NaN();
   double initial_primal_weight = std::numeric_limits<double>::signaling_NaN();
 
+  // store solve time for solving original problem if warm_start is used
+  double warm_start_time = 0.0;
   bool needs_warm_start_solution =
       init_primal_dual || init_step_size || init_primal_weight;
 
@@ -157,6 +166,8 @@ void bench(
     if (init_primal_weight) {
       initial_primal_weight = original_solution.get_pdlp_warm_start_data().initial_primal_weight_;
     }
+    // Store the solve time for the original PDLP (for time correction)
+    warm_start_time = original_solution.get_additional_termination_information().solve_time;
   }
 
   auto start = std::chrono::steady_clock::now();
@@ -188,7 +199,10 @@ void bench(
       sols.emplace_back(cuopt::linear_programming::solve_lp(&handle, problems[i], settings_local, true, true/*, "batch_instances/custom_" + std::to_string(i) + ".mps"*/));
       std::cout << "Version " << i << " solved " << sols[i].get_termination_status_string() << " using " << sols[i].get_additional_termination_information().number_of_steps_taken << std::endl;
     }
-    std::cout << "All solved in " << since(start).count() / 1000.0 << std::endl;
+    double total_time_sec = since(start).count() / 1000.0;
+    if (needs_warm_start_solution)
+      total_time_sec += warm_start_time;
+    std::cout << "All solved in " << total_time_sec << std::endl;
   }
 
   // Should not be necessary but weird behavior with conccurent halt is making things crash/mer
@@ -210,11 +224,15 @@ void bench(
   {
     settings_local.set_initial_primal_weight(initial_primal_weight);
   }
+  
+  settings_local.use_batch_mode = use_optimal_batch_size;
 
-  cuopt::linear_programming::optimization_problem_solution_t<int, double> batch_solution =
-  cuopt::linear_programming::solve_lp(&handle, batch_problem, settings_local);
+  cuopt::linear_programming::optimization_problem_solution_t<int, double> batch_solution = cuopt::linear_programming::solve_lp(&handle, batch_problem, settings_local);
 
   std::cout << "Batch problem solved in " << batch_solution.get_additional_termination_information().solve_time << " using " << batch_solution.get_additional_termination_information().number_of_steps_taken << std::endl;
+  if (needs_warm_start_solution) {
+    std::cout << "Total (including warm start original PDLP solve) batch solve time: " << batch_solution.get_additional_termination_information().solve_time + warm_start_time << " seconds" << std::endl;
+  }
 
   if (compare_with_baseline)
   {
@@ -243,10 +261,13 @@ int main(int argc, char* argv[])
   rmm::mr::set_current_device_resource(memory_resource.get());
 
 
-  std::vector<std::string> problem_list = {"app1-1"};//{"afiro_original"};//{"scpj4scip"};//;
+  //std::vector<std::string> problem_list = {"scpj4scip", "neos8", "cod105"};//{"afiro_original"};//{"app1-1"};//;
+  
+  // Take problem name from command line
+  std::string problem_name = argv[1];
 
   bool compare_with_baseline = false;
-  for (const auto& problem_name : problem_list)
+  //for (const auto& problem_name : problem_list)
   {
     // Parse MPS file
     cuopt::mps_parser::mps_data_model_t<int, double> op_problem =
@@ -280,7 +301,8 @@ int main(int argc, char* argv[])
 
     // Primal dual + primal weight + step size + iteration count (the fullest warm start)
     //bench(handle_, op_problem, batch_problem, problems, compare_with_baseline, false /*deterministic*/, true /*primal dual*/, false /*step size*/, false /*primal weight*/);
-    bench(handle_, op_problem, batch_problem, problems, compare_with_baseline, false /*deterministic*/, true /*primal dual*/, true /*step size*/, false /*primal weight*/);
+    //bench(handle_, op_problem, batch_problem, problems, compare_with_baseline, false /*deterministic*/, true /*primal dual*/, true /*step size*/, false /*primal weight*/, false /*use optimal batch size*/);
+    bench(handle_, op_problem, batch_problem, problems, compare_with_baseline, false /*deterministic*/, true /*primal dual*/, true /*step size*/, false /*primal weight*/, true /*use optimal batch size*/);
     //bench(handle_, op_problem, batch_problem, problems, compare_with_baseline, false /*deterministic*/, true /*primal dual*/, true /*step size*/, true /*primal weight*/);
   }
 

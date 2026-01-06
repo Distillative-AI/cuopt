@@ -50,14 +50,6 @@ static void init_handler(const raft::handle_t* handle_ptr)
     handle_ptr->get_cusparse_handle(), CUSPARSE_POINTER_MODE_DEVICE, handle_ptr->get_stream()));
 }
 
-static void setup_device_symbols(rmm::cuda_stream_view stream_view)
-{
-  raft::common::nvtx::range fun_scope("Setting device symbol");
-  detail::set_adaptive_step_size_hyper_parameters(stream_view);
-  detail::set_restart_hyper_parameters(stream_view);
-  detail::set_pdlp_hyper_parameters(stream_view);
-}
-
 template <typename i_t, typename f_t>
 mip_solution_t<i_t, f_t> run_mip(detail::problem_t<i_t, f_t>& problem,
                                  mip_solver_settings_t<i_t, f_t> const& settings,
@@ -66,8 +58,10 @@ mip_solution_t<i_t, f_t> run_mip(detail::problem_t<i_t, f_t>& problem,
   raft::common::nvtx::range fun_scope("run_mip");
   auto constexpr const running_mip = true;
 
-  pdlp_hyper_params::update_primal_weight_on_initial_solution = false;
-  pdlp_hyper_params::update_step_size_on_initial_solution     = true;
+  // TODO ask Akif and Alice how was this passed down?
+  auto hyper_params = settings.hyper_params;
+  hyper_params.update_primal_weight_on_initial_solution = false;
+  hyper_params.update_step_size_on_initial_solution     = true;
   // if the input problem is empty: early exit
   if (problem.empty) {
     detail::solution_t<i_t, f_t> solution(problem);
@@ -101,12 +95,13 @@ mip_solution_t<i_t, f_t> run_mip(detail::problem_t<i_t, f_t>& problem,
   detail::pdlp_initial_scaling_strategy_t<i_t, f_t> scaling(
     scaled_problem.handle_ptr,
     scaled_problem,
-    pdlp_hyper_params::default_l_inf_ruiz_iterations,
-    (f_t)pdlp_hyper_params::default_alpha_pock_chambolle_rescaling,
+    hyper_params.default_l_inf_ruiz_iterations,
+    (f_t)hyper_params.default_alpha_pock_chambolle_rescaling,
     scaled_problem.reverse_coefficients,
     scaled_problem.reverse_offsets,
     scaled_problem.reverse_constraints,
     nullptr,
+    hyper_params,
     running_mip);
 
   cuopt_func_call(auto saved_problem = scaled_problem);
@@ -195,12 +190,12 @@ mip_solution_t<i_t, f_t> solve_mip(optimization_problem_t<i_t, f_t>& op_problem,
 
     if (!run_presolve) { CUOPT_LOG_INFO("Presolve is disabled, skipping"); }
 
+    auto constexpr const dual_postsolve = false;
     if (run_presolve) {
       detail::sort_csr(op_problem);
       // allocate not more than 10% of the time limit to presolve.
       // Note that this is not the presolve time, but the time limit for presolve.
       const double presolve_time_limit = std::min(0.1 * time_limit, 60.0);
-      const bool dual_postsolve        = false;
       presolver   = std::make_unique<detail::third_party_presolve_t<i_t, f_t>>();
       auto result = presolver->apply(op_problem,
                                      cuopt::linear_programming::problem_category_t::MIP,
@@ -229,9 +224,6 @@ mip_solution_t<i_t, f_t> solve_mip(optimization_problem_t<i_t, f_t>& op_problem,
       op_problem.write_to_mps(settings.user_problem_file);
     }
 
-    // this is for PDLP, i think this should be part of pdlp solver
-    setup_device_symbols(op_problem.get_handle_ptr()->get_stream());
-
     auto sol = run_mip(problem, settings, timer);
 
     if (run_presolve) {
@@ -246,6 +238,7 @@ mip_solution_t<i_t, f_t> solve_mip(optimization_problem_t<i_t, f_t>& op_problem,
                       reduced_costs,
                       cuopt::linear_programming::problem_category_t::MIP,
                       status_to_skip,
+                      dual_postsolve,
                       op_problem.get_handle_ptr()->get_stream());
       if (!status_to_skip) {
         thrust::fill(rmm::exec_policy(op_problem.get_handle_ptr()->get_stream()),

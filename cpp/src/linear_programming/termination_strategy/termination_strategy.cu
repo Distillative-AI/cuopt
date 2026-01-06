@@ -34,7 +34,7 @@ pdlp_termination_strategy_t<i_t, f_t>::pdlp_termination_strategy_t(
   : handle_ptr_(handle_ptr),
     stream_view_(handle_ptr_->get_stream()),
     problem_ptr(&op_problem),
-    convergence_information_{handle_ptr_, op_problem, cusparse_view, primal_size, dual_size, climber_strategies},
+    convergence_information_{handle_ptr_, op_problem, cusparse_view, primal_size, dual_size, climber_strategies, settings.hyper_params},
     infeasibility_information_{handle_ptr_,
                               op_problem,
                               scaled_op_problem,
@@ -44,7 +44,8 @@ pdlp_termination_strategy_t<i_t, f_t>::pdlp_termination_strategy_t(
                               dual_size,
                               scaling_strategy,
                               settings.detect_infeasibility,
-                              climber_strategies},
+                              climber_strategies,
+                              settings.hyper_params},
     termination_status_(climber_strategies.size()),
     settings_(settings),
     climber_strategies_(climber_strategies)
@@ -138,8 +139,8 @@ void pdlp_termination_strategy_t<i_t, f_t>::evaluate_termination_criteria(
                                                            settings_);
   if (settings_.detect_infeasibility) {
     // TODO PDLP infeasible: looks like he is not checking as often as we do
-    if (pdlp_hyper_params::use_reflected_primal_dual) {
-      if (total_pdlp_iterations != 0 && total_pdlp_iterations % pdlp_hyper_params::major_iteration == 0 && total_pdlp_iterations < 3 * pdlp_hyper_params::major_iteration)
+    if (settings_.hyper_params.use_reflected_primal_dual) {
+      if (total_pdlp_iterations != 0 && total_pdlp_iterations % settings_.hyper_params.major_iteration == 0 && total_pdlp_iterations < 3 * settings_.hyper_params.major_iteration)
       {
         infeasibility_information_.compute_infeasibility_information(
         current_pdhg_solver,

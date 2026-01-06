@@ -47,42 +47,6 @@ namespace cg = cooperative_groups;
 
 namespace cuopt::linear_programming::detail {
 
-void set_restart_hyper_parameters(rmm::cuda_stream_view stream_view)
-{
-  RAFT_CUDA_TRY(
-    cudaMemcpyToSymbolAsync(pdlp_hyper_params::default_primal_weight_update_smoothing,
-                            &pdlp_hyper_params::host_default_primal_weight_update_smoothing,
-                            sizeof(double),
-                            0,
-                            cudaMemcpyHostToDevice,
-                            stream_view));
-  RAFT_CUDA_TRY(
-    cudaMemcpyToSymbolAsync(pdlp_hyper_params::default_sufficient_reduction_for_restart,
-                            &pdlp_hyper_params::host_default_sufficient_reduction_for_restart,
-                            sizeof(double),
-                            0,
-                            cudaMemcpyHostToDevice,
-                            stream_view));
-  RAFT_CUDA_TRY(
-    cudaMemcpyToSymbolAsync(pdlp_hyper_params::default_necessary_reduction_for_restart,
-                            &pdlp_hyper_params::host_default_necessary_reduction_for_restart,
-                            sizeof(double),
-                            0,
-                            cudaMemcpyHostToDevice,
-                            stream_view));
-  RAFT_CUDA_TRY(cudaMemcpyToSymbolAsync(pdlp_hyper_params::primal_distance_smoothing,
-                                        &pdlp_hyper_params::host_primal_distance_smoothing,
-                                        sizeof(double),
-                                        0,
-                                        cudaMemcpyHostToDevice,
-                                        stream_view));
-  RAFT_CUDA_TRY(cudaMemcpyToSymbolAsync(pdlp_hyper_params::dual_distance_smoothing,
-                                        &pdlp_hyper_params::host_dual_distance_smoothing,
-                                        sizeof(double),
-                                        0,
-                                        cudaMemcpyHostToDevice,
-                                        stream_view));
-}
 
 template <typename i_t, typename f_t, int BLOCK_SIZE>
 __global__ void solve_bound_constrained_trust_region_kernel(
@@ -103,7 +67,8 @@ pdlp_restart_strategy_t<i_t, f_t>::pdlp_restart_strategy_t(
   const i_t primal_size,
   const i_t dual_size,
   bool is_legacy_batch_mode,
-const std::vector<pdlp_climber_strategy_t>& climber_strategies)
+  const std::vector<pdlp_climber_strategy_t>& climber_strategies,
+  const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params)
   : handle_ptr_(handle_ptr),
     stream_view_(handle_ptr_->get_stream()),
     batch_mode_(climber_strategies.size() > 1),
@@ -112,19 +77,19 @@ const std::vector<pdlp_climber_strategy_t>& climber_strategies)
     dual_size_h_(dual_size),
     problem_ptr(&op_problem),
     primal_norm_weight_{stream_view_},
-    weights_{(!is_trust_region_restart<i_t, f_t>())
+    weights_{(!is_trust_region_restart<i_t, f_t>(hyper_params))
                ? 0
                : static_cast<size_t>(primal_size_h_ + dual_size_h_),
              stream_view_},
     dual_norm_weight_{stream_view_},
     restart_triggered_{0, stream_view_},
     candidate_is_avg_{0, stream_view_},
-    avg_duality_gap_{handle_ptr_, is_cupdlpx_restart<i_t, f_t>() ? 0 : primal_size, is_cupdlpx_restart<i_t, f_t>() ? 0 : dual_size, climber_strategies},
-    current_duality_gap_{handle_ptr_, is_cupdlpx_restart<i_t, f_t>() ? 0 : primal_size, is_cupdlpx_restart<i_t, f_t>() ? 0 : dual_size, climber_strategies},
-    last_restart_duality_gap_{handle_ptr_, primal_size, dual_size, climber_strategies}, // Only this one is also used in cuPDLPx so also in batch mode
+    avg_duality_gap_{handle_ptr_, is_cupdlpx_restart<i_t, f_t>(hyper_params) ? 0 : primal_size, is_cupdlpx_restart<i_t, f_t>(hyper_params) ? 0 : dual_size, climber_strategies, hyper_params},
+    current_duality_gap_{handle_ptr_, is_cupdlpx_restart<i_t, f_t>(hyper_params) ? 0 : primal_size, is_cupdlpx_restart<i_t, f_t>(hyper_params) ? 0 : dual_size, climber_strategies, hyper_params},
+    last_restart_duality_gap_{handle_ptr_, primal_size, dual_size, climber_strategies, hyper_params}, // Only this one is also used in cuPDLPx so also in batch mode
     // If KKT restart, call the empty cusparse_view constructor
     avg_duality_gap_cusparse_view_{
-      (!is_trust_region_restart<i_t, f_t>())
+      (!is_trust_region_restart<i_t, f_t>(hyper_params))
         ? cusparse_view_t<i_t, f_t>(handle_ptr_, cusparse_view.A_, cusparse_view.A_indices_, climber_strategies)
         : cusparse_view_t<i_t, f_t>(handle_ptr_,
                                     op_problem,
@@ -134,7 +99,7 @@ const std::vector<pdlp_climber_strategy_t>& climber_strategies)
                                     avg_duality_gap_.primal_gradient_.data(),
                                     avg_duality_gap_.dual_gradient_.data())},
     current_duality_gap_cusparse_view_{
-      (!is_trust_region_restart<i_t, f_t>())
+      (!is_trust_region_restart<i_t, f_t>(hyper_params))
         ? cusparse_view_t<i_t, f_t>(handle_ptr_, cusparse_view.A_, cusparse_view.A_indices_, climber_strategies)
         : cusparse_view_t<i_t, f_t>(handle_ptr_,
                                     op_problem,
@@ -144,7 +109,7 @@ const std::vector<pdlp_climber_strategy_t>& climber_strategies)
                                     current_duality_gap_.primal_gradient_.data(),
                                     current_duality_gap_.dual_gradient_.data())},
     last_restart_duality_gap_cusparse_view_{
-      (!is_trust_region_restart<i_t, f_t>())
+      (!is_trust_region_restart<i_t, f_t>(hyper_params))
         ? cusparse_view_t<i_t, f_t>(handle_ptr_, cusparse_view.A_, cusparse_view.A_indices_, climber_strategies)
         : cusparse_view_t<i_t, f_t>(handle_ptr_,
                                     op_problem,
@@ -157,33 +122,33 @@ const std::vector<pdlp_climber_strategy_t>& climber_strategies)
     last_restart_length_{0},
     // If KKT restart, don't need to init all of those
     center_point_{
-      (!is_trust_region_restart<i_t, f_t>()) ? 0 : static_cast<size_t>(primal_size_h_ + dual_size_h_),
+      (!is_trust_region_restart<i_t, f_t>(hyper_params)) ? 0 : static_cast<size_t>(primal_size_h_ + dual_size_h_),
       stream_view_},
     objective_vector_{
-      (!is_trust_region_restart<i_t, f_t>()) ? 0 : static_cast<size_t>(primal_size_h_ + dual_size_h_),
+      (!is_trust_region_restart<i_t, f_t>(hyper_params)) ? 0 : static_cast<size_t>(primal_size_h_ + dual_size_h_),
       stream_view_},
     unsorted_direction_full_{
-      (!is_trust_region_restart<i_t, f_t>()) ? 0 : static_cast<size_t>(primal_size_h_ + dual_size_h_),
+      (!is_trust_region_restart<i_t, f_t>(hyper_params)) ? 0 : static_cast<size_t>(primal_size_h_ + dual_size_h_),
       stream_view_},
     direction_full_{
-      (!is_trust_region_restart<i_t, f_t>()) ? 0 : static_cast<size_t>(primal_size_h_ + dual_size_h_),
+      (!is_trust_region_restart<i_t, f_t>(hyper_params)) ? 0 : static_cast<size_t>(primal_size_h_ + dual_size_h_),
       stream_view_},
     threshold_{
-      (!is_trust_region_restart<i_t, f_t>()) ? 0 : static_cast<size_t>(primal_size_h_ + dual_size_h_),
+      (!is_trust_region_restart<i_t, f_t>(hyper_params)) ? 0 : static_cast<size_t>(primal_size_h_ + dual_size_h_),
       stream_view_},
     lower_bound_{
-      (!is_trust_region_restart<i_t, f_t>()) ? 0 : static_cast<size_t>(primal_size_h_ + dual_size_h_),
+      (!is_trust_region_restart<i_t, f_t>(hyper_params)) ? 0 : static_cast<size_t>(primal_size_h_ + dual_size_h_),
       stream_view_},
     upper_bound_{
-      (!is_trust_region_restart<i_t, f_t>()) ? 0 : static_cast<size_t>(primal_size_h_ + dual_size_h_),
+      (!is_trust_region_restart<i_t, f_t>(hyper_params)) ? 0 : static_cast<size_t>(primal_size_h_ + dual_size_h_),
       stream_view_},
     test_point_{
-      (!is_trust_region_restart<i_t, f_t>()) ? 0 : static_cast<size_t>(primal_size_h_ + dual_size_h_),
+      (!is_trust_region_restart<i_t, f_t>(hyper_params)) ? 0 : static_cast<size_t>(primal_size_h_ + dual_size_h_),
       stream_view_},
     transformed_constraint_lower_bounds_{
-      (!is_trust_region_restart<i_t, f_t>()) ? 0 : static_cast<size_t>(dual_size_h_), stream_view_},
+      (!is_trust_region_restart<i_t, f_t>(hyper_params)) ? 0 : static_cast<size_t>(dual_size_h_), stream_view_},
     transformed_constraint_upper_bounds_{
-      (!is_trust_region_restart<i_t, f_t>()) ? 0 : static_cast<size_t>(dual_size_h_), stream_view_},
+      (!is_trust_region_restart<i_t, f_t>(hyper_params)) ? 0 : static_cast<size_t>(dual_size_h_), stream_view_},
     shared_live_kernel_accumulator_{0, stream_view_},
     target_threshold_{stream_view_},
     low_radius_squared_{stream_view_},
@@ -192,9 +157,9 @@ const std::vector<pdlp_climber_strategy_t>& climber_strategies)
     test_radius_squared_{stream_view_},
     testing_range_low_{stream_view_},
     testing_range_high_{stream_view_},
-    reusable_device_scalar_value_1_{1.0, stream_view_},
-    reusable_device_scalar_value_0_{0.0, stream_view_},
-    reusable_device_scalar_value_0_i_t_{0, stream_view_},
+    reusable_device_scalar_value_1_{f_t(1.0), stream_view_},
+    reusable_device_scalar_value_0_{f_t(0.0), stream_view_},
+    reusable_device_scalar_value_0_i_t_{i_t(0), stream_view_},
     reusable_device_scalar_value_neg_1_{f_t(-1.0), stream_view_},
     dot_product_storage(0, stream_view_),
     dot_product_bytes{0},
@@ -208,7 +173,8 @@ const std::vector<pdlp_climber_strategy_t>& climber_strategies)
     primal_weight_error_sum_(climber_strategies.size()),
     primal_weight_last_error_(climber_strategies.size()),
     best_primal_dual_residual_gap_(climber_strategies.size()),
-    climber_strategies_(climber_strategies)
+    climber_strategies_(climber_strategies),
+    hyper_params_(hyper_params)
 {
   raft::common::nvtx::range fun_scope("Initializing restart strategy");
 
@@ -219,12 +185,12 @@ const std::vector<pdlp_climber_strategy_t>& climber_strategies)
                                 stream_view_));
   RAFT_CUDA_TRY(cudaMemsetAsync(last_restart_duality_gap_.dual_solution_.data(),
                                 0.0,
-                                sizeof(f_t) * last_restart_duality_gap_.primal_solution_.size(),
+                                sizeof(f_t) * last_restart_duality_gap_.dual_solution_.size(),
                                 stream_view_));
 
   // Trigger the costly (costly for ms instances) GetDeviceProperty only if need trust region
   // restart
-  if (pdlp_hyper_params::restart_strategy ==
+  if (hyper_params_.restart_strategy ==
       static_cast<int>(restart_strategy_t::TRUST_REGION_RESTART)) {
     raft::linalg::binaryOp(transformed_constraint_lower_bounds_.data(),
                            problem_ptr->constraint_lower_bounds.data(),
@@ -368,7 +334,7 @@ bool pdlp_restart_strategy_t<i_t, f_t>::run_trust_region_restart(
 #ifdef PDLP_VERBOSE_MODE
     std::cout << "    Doing a trust Region Restart" << std::endl;
 #endif
-    if (restart_to_average_h && !pdlp_hyper_params::never_restart_to_average) {
+    if (restart_to_average_h && !hyper_params_.never_restart_to_average) {
 #ifdef PDLP_VERBOSE_MODE
       std::cout << "    Trust Region Restart To Average" << std::endl;
 #endif
@@ -384,7 +350,7 @@ bool pdlp_restart_strategy_t<i_t, f_t>::run_trust_region_restart(
     } else
       set_last_restart_was_average(false);
 
-    if (pdlp_hyper_params::compute_last_restart_before_new_primal_weight) {
+    if (hyper_params_.compute_last_restart_before_new_primal_weight) {
       update_last_restart_information(*candidate_duality_gap_, primal_weight);
       compute_new_primal_weight(
         *candidate_duality_gap_, primal_weight, step_size, primal_step_size, dual_step_size);
@@ -449,12 +415,12 @@ bool pdlp_restart_strategy_t<i_t, f_t>::kkt_decay(f_t candidate_kkt_score)
   std::cout << "last_restart_kkt_score=" << last_restart_kkt_score << std::endl;
 #endif
   if (candidate_kkt_score <
-      pdlp_hyper_params::host_default_sufficient_reduction_for_restart * last_restart_kkt_score) {
+      hyper_params_.sufficient_reduction_for_restart * last_restart_kkt_score) {
 #ifdef PDLP_DEBUG_MODE
     std::cout << "kkt_sufficient_decay restart" << std::endl;
 #endif
     return true;
-  } else if (candidate_kkt_score < pdlp_hyper_params::host_default_necessary_reduction_for_restart *
+  } else if (candidate_kkt_score < hyper_params_.necessary_reduction_for_restart *
                                      last_restart_kkt_score &&
              candidate_kkt_score > last_candidate_kkt_score) {
 #ifdef PDLP_DEBUG_MODE
@@ -590,7 +556,7 @@ bool pdlp_restart_strategy_t<i_t, f_t>::run_kkt_restart(
     // Set which localized_duality_gap_container will be used for candidate
     // (We could save the container copy but compute_distance_traveled_from_last_restart works with
     // containers)
-    if (restart_to_average && !pdlp_hyper_params::never_restart_to_average) {
+    if (restart_to_average && !hyper_params_.never_restart_to_average) {
 #ifdef PDLP_DEBUG_MODE
       RAFT_CUDA_TRY(cudaDeviceSynchronize());
       std::cout << "    KKT restart to average" << std::endl;
@@ -627,7 +593,7 @@ bool pdlp_restart_strategy_t<i_t, f_t>::run_kkt_restart(
                                                 pdhg_solver.get_primal_tmp_resource(),
                                                 pdhg_solver.get_dual_tmp_resource());
 
-    if (restart_to_average && !pdlp_hyper_params::never_restart_to_average) {
+    if (restart_to_average && !hyper_params_.never_restart_to_average) {
       // Candidate is pointing to the average
       raft::copy(pdhg_solver.get_primal_solution().data(),
                  candidate_duality_gap_->primal_solution_.data(),
@@ -641,7 +607,7 @@ bool pdlp_restart_strategy_t<i_t, f_t>::run_kkt_restart(
     } else
       set_last_restart_was_average(false);
 
-    if (pdlp_hyper_params::compute_last_restart_before_new_primal_weight) {
+    if (hyper_params_.compute_last_restart_before_new_primal_weight) {
       // Save last restart data (primal/dual solution and distance traveled)
       update_last_restart_information(*candidate_duality_gap_, primal_weight);
       compute_new_primal_weight(
@@ -682,13 +648,13 @@ void pdlp_restart_strategy_t<i_t, f_t>::should_cupdlpx_restart(i_t total_number_
 {
   std::fill(should_restart.begin(), should_restart.end(), 0);
 
-  if (total_number_of_iterations == pdlp_hyper_params::major_iteration) {
+  if (total_number_of_iterations == hyper_params_.major_iteration) {
 #ifdef CUPDLP_DEBUG_MODE
     printf("forced restart at first major\n");
 #endif
     std::fill(should_restart.begin(), should_restart.end(), 1);
     return;
-  } else if (total_number_of_iterations > pdlp_hyper_params::major_iteration) {
+  } else if (total_number_of_iterations > hyper_params_.major_iteration) {
     /* For now will do a simpler method 
     for (size_t i = 0; i < climber_strategies_.size(); ++i)
     {
@@ -696,14 +662,14 @@ void pdlp_restart_strategy_t<i_t, f_t>::should_cupdlpx_restart(i_t total_number_
                   "Numerical error: initial_fixed_point_error_ should not be at nan at this stage");
       cuopt_assert(fixed_point_error_[i] != std::numeric_limits<f_t>::signaling_NaN(),
                   "Numerical error: fixed_point_error_ should not be at nan at this stage");
-      if (fixed_point_error_[i] <= pdlp_hyper_params::host_default_sufficient_reduction_for_restart *
+      if (fixed_point_error_[i] <= hyper_params_.sufficient_reduction_for_restart *
                                   initial_fixed_point_error_[i]) {
         #ifdef CUPDLP_DEBUG_MODE
           printf("sufficient restart\n");
         #endif
         should_restart[i] = 1;
       } else if (fixed_point_error_[i] <=
-                   pdlp_hyper_params::host_default_necessary_reduction_for_restart *
+                   hyper_params_.necessary_reduction_for_restart *
                      initial_fixed_point_error_[i] &&
                  fixed_point_error_[i] > last_trial_fixed_point_error_[i]) {
   #ifdef CUPDLP_DEBUG_MODE
@@ -733,14 +699,14 @@ void pdlp_restart_strategy_t<i_t, f_t>::should_cupdlpx_restart(i_t total_number_
     cuopt_assert(average_fixed_point_error != std::numeric_limits<f_t>::signaling_NaN(), "Numerical error: average_fixed_point_error should not be at nan at this stage");
     cuopt_assert(average_initial_fixed_point_error != std::numeric_limits<f_t>::signaling_NaN(), "Numerical error: average_initial_fixed_point_error should not be at nan at this stage");
 
-    if (average_fixed_point_error <= pdlp_hyper_params::host_default_sufficient_reduction_for_restart *
+    if (average_fixed_point_error <= hyper_params_.sufficient_reduction_for_restart *
                                 average_initial_fixed_point_error) {
 #ifdef CUPDLP_DEBUG_MODE
       printf("sufficient restart\n");
 #endif
       std::fill(should_restart.begin(), should_restart.end(), 1);
     } else if (average_fixed_point_error <=
-                pdlp_hyper_params::host_default_necessary_reduction_for_restart *
+                hyper_params_.necessary_reduction_for_restart *
                   average_initial_fixed_point_error &&
               average_fixed_point_error > average_last_trial_fixed_point_error) {
 #ifdef CUPDLP_DEBUG_MODE
@@ -863,10 +829,10 @@ __global__ void kernel_compute_next_cupdlpx_primal_weight(typename pdlp_restart_
     &view.new_primal_step_size[index],
     &view.new_dual_step_size[index],
     &view.best_primal_dual_residual_gap[index],
-    view.restart_k_p,
-    view.restart_k_i,
-    view.restart_k_d,
-    view.restart_i_smooth);
+    view. hyper_params.restart_k_p,
+    view.hyper_params.restart_k_i,
+    view.hyper_params.restart_k_d,
+    view.hyper_params.restart_i_smooth);
 }
 
 template <typename i_t, typename f_t>
@@ -940,10 +906,10 @@ void pdlp_restart_strategy_t<i_t, f_t>::cupdlpx_restart(
       &primal_step_size_value,
       &dual_step_size_value,
       &view.best_primal_dual_residual_gap[0],
-      view.restart_k_p,
-      view.restart_k_i,
-      view.restart_k_d,
-      view.restart_i_smooth);
+      hyper_params_.restart_k_p,
+      hyper_params_.restart_k_i,
+      hyper_params_.restart_k_d,
+      hyper_params_.restart_i_smooth);
     primal_weight.set_element_async(0, primal_weight_value, stream_view_);
     primal_step_size.set_element_async(0, primal_step_size_value, stream_view_);
     dual_step_size.set_element_async(0, dual_step_size_value, stream_view_);
@@ -1032,7 +998,7 @@ void pdlp_restart_strategy_t<i_t, f_t>::compute_restart(
 {
   raft::common::nvtx::range fun_scope("compute_restart");
 
-  if (pdlp_hyper_params::restart_strategy ==
+  if (hyper_params_.restart_strategy ==
              static_cast<int>(restart_strategy_t::KKT_RESTART)) {
     cuopt_expects(climber_strategies_.size() == 1, cuopt::error_type_t::ValidationError, "KKT restart not supported for batch mode");
     if (run_kkt_restart(pdhg_solver,
@@ -1048,7 +1014,7 @@ void pdlp_restart_strategy_t<i_t, f_t>::compute_restart(
                            {
                             has_restarted[0] = 1;
                            }
-  } else if (pdlp_hyper_params::restart_strategy ==
+  } else if (hyper_params_.restart_strategy ==
              static_cast<int>(restart_strategy_t::TRUST_REGION_RESTART)) {
     cuopt_expects(climber_strategies_.size() == 1, cuopt::error_type_t::ValidationError, "Trust Region not supported for batch mode");
     if (run_trust_region_restart(pdhg_solver,
@@ -1062,7 +1028,7 @@ void pdlp_restart_strategy_t<i_t, f_t>::compute_restart(
                                     {
                                       has_restarted[0] = 1;
                                     }
-  } else if (pdlp_hyper_params::restart_strategy ==
+  } else if (hyper_params_.restart_strategy ==
              static_cast<int>(restart_strategy_t::CUPDLPX_RESTART)) {
     // Has restarted is filled inside
     run_cupdlpx_restart(current_convergence_information,
@@ -1117,9 +1083,9 @@ __global__ void compute_new_primal_weight_kernel(
   f_t new_primal_weight_estimate = dual_distance / primal_distance;
 
   f_t log_primal_weight =
-    pdlp_hyper_params::default_primal_weight_update_smoothing *
+    duality_gap_view.hyper_params.primal_weight_update_smoothing *
       raft::myLog(new_primal_weight_estimate) +
-    (1 - pdlp_hyper_params::default_primal_weight_update_smoothing) * raft::myLog(*primal_weight);
+    (1 - duality_gap_view.hyper_params.primal_weight_update_smoothing) * raft::myLog(*primal_weight);
 
   *primal_weight = raft::myExp(log_primal_weight);
   cuopt_assert(!isnan(*primal_weight), "primal weight can't be nan");
@@ -1211,7 +1177,7 @@ void pdlp_restart_strategy_t<i_t, f_t>::distance_squared_moved_from_last_restart
   else
   {
     cub::DeviceSegmentedReduce::Sum(
-  dot_product_storage.data(), dot_product_bytes, 
+  dot_product_storage.data(), dot_product_bytes,
   thrust::make_transform_iterator(tmp.data(),
   power_two_func_t<f_t>{}),
   distance_moved.data(), climber_strategies_.size(), size_of_solutions_h, stream_view_);
@@ -1229,9 +1195,9 @@ __global__ void compute_distance_traveled_last_restart_kernel(
   f_t primal_weight_ = *primal_weight;
 
   *distance_traveled = raft::sqrt(duality_gap_view.primal_distance_traveled[0] *
-                                    pdlp_hyper_params::primal_distance_smoothing * primal_weight_ +
+                                    duality_gap_view.hyper_params.primal_distance_smoothing * primal_weight_ +
                                   duality_gap_view.dual_distance_traveled[0] *
-                                    (pdlp_hyper_params::dual_distance_smoothing / primal_weight_));
+                                    (duality_gap_view.hyper_params.dual_distance_smoothing / primal_weight_));
 }
 
 template <typename i_t, typename f_t>
@@ -1309,8 +1275,8 @@ __global__ void adaptive_restart_triggered(
 
   f_t gap_reduction_ratio =
     *candidate_duality_gap_view.normalized_gap / *last_restart_duality_gap_view.normalized_gap;
-  if (gap_reduction_ratio < pdlp_hyper_params::default_necessary_reduction_for_restart &&
-      (gap_reduction_ratio < pdlp_hyper_params::default_sufficient_reduction_for_restart ||
+  if (gap_reduction_ratio < restart_strategy_view.hyper_params.necessary_reduction_for_restart &&
+      (gap_reduction_ratio < restart_strategy_view.hyper_params.sufficient_reduction_for_restart ||
        gap_reduction_ratio > *restart_strategy_view.gap_reduction_ratio_last_trial)) {
     *restart_strategy_view.restart_triggered = 1;
   }
@@ -1364,11 +1330,11 @@ i_t pdlp_restart_strategy_t<i_t, f_t>::should_do_artificial_restart(
             << "    iterations_since_last_restart="
             << weighted_average_solution_.get_iterations_since_last_restart() << "\n"
             << "    total_number_of_iteration=" << total_number_of_iterations << "\n"
-            << "    pdlp_hyper_params::default_artificial_restart_threshold="
-            << pdlp_hyper_params::default_artificial_restart_threshold << std::endl;
+            << "    hyper_params_.default_artificial_restart_threshold="
+            << hyper_params_.default_artificial_restart_threshold << std::endl;
 #endif
   if (weighted_average_solution_.get_iterations_since_last_restart() >=
-      pdlp_hyper_params::default_artificial_restart_threshold * total_number_of_iterations) {
+      hyper_params_.default_artificial_restart_threshold * total_number_of_iterations) {
 #ifdef PDLP_VERBOSE_MODE
     std::cout << "    Doing artifical restart" << std::endl;
 #endif
@@ -2373,6 +2339,8 @@ typename pdlp_restart_strategy_t<i_t, f_t>::view_t pdlp_restart_strategy_t<i_t, 
   v.shared_live_kernel_accumulator = raft::device_span<f_t>{shared_live_kernel_accumulator_.data(),
                                                             shared_live_kernel_accumulator_.size()};
 
+  v.hyper_params = hyper_params_;
+
   return v;
 }
 
@@ -2403,10 +2371,7 @@ pdlp_restart_strategy_t<i_t, f_t>::make_cupdlpx_restart_view(
   v.new_primal_step_size = make_span(primal_step_size);
   v.new_dual_step_size = make_span(dual_step_size);
   v.best_primal_dual_residual_gap = make_span(best_primal_dual_residual_gap_);
-  v.restart_k_p = static_cast<f_t>(pdlp_hyper_params::restart_k_p);
-  v.restart_k_i = static_cast<f_t>(pdlp_hyper_params::restart_k_i);
-  v.restart_k_d = static_cast<f_t>(pdlp_hyper_params::restart_k_d);
-  v.restart_i_smooth = static_cast<f_t>(pdlp_hyper_params::restart_i_smooth);
+  v.hyper_params = hyper_params_;
   return v;
 }
 

@@ -276,10 +276,10 @@ void inline compute_sum_bounds(const rmm::device_uvector<f_t>& constraint_lower_
 {
   rmm::device_buffer d_temp_storage;
   size_t bytes = 0;
-  auto main_op = [] HD(const thrust::tuple<f_t, f_t> t) {
+  auto main_op = [] HD (const thrust::tuple<f_t, f_t> t) {
     const f_t lower = thrust::get<0>(t);
     const f_t upper = thrust::get<1>(t);
-    f_t sum         = 0;
+    f_t sum         = f_t(0);
     if (isfinite(lower) && (lower != upper)) sum += lower * lower;
     if (isfinite(upper)) sum += upper * upper;
     return sum;

@@ -36,7 +36,8 @@ infeasibility_information_t<i_t, f_t>::infeasibility_information_t(
   i_t dual_size,
   const pdlp_initial_scaling_strategy_t<i_t, f_t>& scaling_strategy,
   bool infeasibility_detection,
-  const std::vector<pdlp_climber_strategy_t>& climber_strategies)
+  const std::vector<pdlp_climber_strategy_t>& climber_strategies,
+  const pdlp_hyper_params::pdlp_hyper_params_t& hyper_params)
   : handle_ptr_(handle_ptr),
     stream_view_(handle_ptr_->get_stream()),
     primal_size_h_(primal_size),
@@ -71,10 +72,10 @@ infeasibility_information_t<i_t, f_t>::infeasibility_information_t(
     homogenous_dual_upper_bounds_{
       (!infeasibility_detection) ? 0 : static_cast<size_t>(dual_size_h_), stream_view_},
     primal_slack_{
-      (is_cupdlpx_restart<i_t, f_t>()) ? static_cast<size_t>(dual_size_h_ * climber_strategies.size()) : 0,
+      (is_cupdlpx_restart<i_t, f_t>(hyper_params)) ? static_cast<size_t>(dual_size_h_ * climber_strategies.size()) : 0,
       stream_view_},
     dual_slack_{
-      (is_cupdlpx_restart<i_t, f_t>()) ? static_cast<size_t>(primal_size_h_ * climber_strategies.size()) : 0,
+      (is_cupdlpx_restart<i_t, f_t>(hyper_params)) ? static_cast<size_t>(primal_size_h_ * climber_strategies.size()) : 0,
       stream_view_},
     sum_primal_slack_{climber_strategies.size(), stream_view_},
     sum_dual_slack_{climber_strategies.size(), stream_view_},
@@ -82,7 +83,8 @@ infeasibility_information_t<i_t, f_t>::infeasibility_information_t(
     reusable_device_scalar_value_0_{0.0, stream_view_},
     reusable_device_scalar_value_neg_1_{-1.0, stream_view_},
     scaling_strategy_(scaling_strategy),
-    climber_strategies_(climber_strategies)
+    climber_strategies_(climber_strategies),
+    hyper_params_(hyper_params)
 {
   if (infeasibility_detection) {
     RAFT_CUDA_TRY(cudaMemsetAsync(homogenous_primal_residual_.data(),
@@ -210,10 +212,10 @@ void infeasibility_information_t<i_t, f_t>::compute_infeasibility_information(
   raft::common::nvtx::range fun_scope("compute_infeasibility_information");
   using f_t2                = typename type_2<f_t>::type;
 
-  if (is_cupdlpx_restart<i_t, f_t>())
+  if (is_cupdlpx_restart<i_t, f_t>(hyper_params_))
   {
-    const f_t bound_rescaling = (pdlp_hyper_params::bound_objective_rescaling) ? scaling_strategy_.get_h_bound_rescaling() : f_t(1.0);
-    const f_t objective_rescaling = (pdlp_hyper_params::bound_objective_rescaling) ? scaling_strategy_.get_h_objective_rescaling() : f_t(1.0);
+    const f_t bound_rescaling = (hyper_params_.bound_objective_rescaling) ? scaling_strategy_.get_h_bound_rescaling() : f_t(1.0);
+    const f_t objective_rescaling = (hyper_params_.bound_objective_rescaling) ? scaling_strategy_.get_h_objective_rescaling() : f_t(1.0);
     
 #ifdef CUPDLP_DEBUG_MODE
     print("delta_primal_solution after scale before mod", primal_ray);
@@ -652,7 +654,7 @@ void infeasibility_information_t<i_t, f_t>::compute_reduced_cost_from_primal_gra
     bound_value_gradient<f_t, f_t2>(),
     stream_view_);
 
-  if (pdlp_hyper_params::handle_some_primal_gradients_on_finite_bounds_as_residuals) {
+  if (hyper_params_.handle_some_primal_gradients_on_finite_bounds_as_residuals) {
     raft::linalg::ternaryOp(reduced_cost_.data(),
                             primal_ray.data(),
                             bound_value_.data(),
