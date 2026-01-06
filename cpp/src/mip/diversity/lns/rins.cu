@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights
  * reserved. SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -265,9 +265,15 @@ void rins_t<i_t, f_t>::run_rins()
   branch_and_bound_settings.diving_settings.num_diving_tasks           = 1;
   branch_and_bound_settings.diving_settings.disable_line_search_diving = true;
   branch_and_bound_settings.diving_settings.disable_coefficient_diving = true;
-  branch_and_bound_settings.diving_settings.disable_pseudocost_diving  = true;
-  branch_and_bound_settings.log.log                                    = false;
-  branch_and_bound_settings.log.log_prefix                             = "[RINS] ";
+
+  if (context.settings.disable_guided_diving) {
+    branch_and_bound_settings.diving_settings.disable_guided_diving = true;
+  } else {
+    branch_and_bound_settings.diving_settings.disable_pseudocost_diving = true;
+  }
+
+  branch_and_bound_settings.log.log           = false;
+  branch_and_bound_settings.log.log_prefix    = "[RINS] ";
   branch_and_bound_settings.solution_callback = [this, &rins_solution_queue](
                                                   std::vector<f_t>& solution, f_t objective) {
     rins_solution_queue.push_back(solution);

@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -640,7 +640,11 @@ node_solve_info_t branch_and_bound_t<i_t, f_t>::solve_node(
 
   // If there is no incumbent, use pseudocost diving instead of guided diving
   if (upper_bound == inf && thread_type == bnb_thread_type_t::GUIDED_DIVING) {
-    thread_type = bnb_thread_type_t::PSEUDOCOST_DIVING;
+    if (settings_.diving_settings.disable_pseudocost_diving) {
+      thread_type = bnb_thread_type_t::COEFFICIENT_DIVING;
+    } else {
+      thread_type = bnb_thread_type_t::PSEUDOCOST_DIVING;
+    }
   }
 
   lp_solution_t<i_t, f_t> leaf_solution(leaf_problem.num_rows, leaf_problem.num_cols);

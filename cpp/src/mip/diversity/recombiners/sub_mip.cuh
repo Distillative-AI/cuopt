@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -110,7 +110,12 @@ class sub_mip_recombiner_t : public recombiner_t<i_t, f_t> {
       branch_and_bound_settings.diving_settings.num_diving_tasks           = 1;
       branch_and_bound_settings.diving_settings.disable_line_search_diving = true;
       branch_and_bound_settings.diving_settings.disable_coefficient_diving = true;
-      branch_and_bound_settings.diving_settings.disable_pseudocost_diving  = true;
+
+      if (context.settings.disable_guided_diving) {
+        branch_and_bound_settings.diving_settings.disable_guided_diving = true;
+      } else {
+        branch_and_bound_settings.diving_settings.disable_pseudocost_diving = true;
+      }
 
       branch_and_bound_settings.solution_callback = [this](std::vector<f_t>& solution,
                                                            f_t objective) {
