@@ -1693,13 +1693,22 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
       print("after scale potential next dual", pdhg_solver_.get_potential_next_dual_solution());
       #endif
 
+      #ifdef PDLP_DEBUG_MODE
+      print("before check termination primal", pdhg_solver_.get_primal_solution());
+      print("before check termination dual", pdhg_solver_.get_dual_solution());
+      if (!settings_.hyper_params.never_restart_to_average) {
+        print("before check termination average primal", unscaled_primal_avg_solution_);
+        print("before check termination average dual", unscaled_dual_avg_solution_);
+      }
+      #endif
+
       // Check for termination
       std::optional<optimization_problem_solution_t<i_t, f_t>> solution = check_termination(timer);
 
       if (solution.has_value()) { return std::move(solution.value()); }
 
       if (settings_.hyper_params.rescale_for_restart) {
-        if (settings_.hyper_params.never_restart_to_average)
+        if (!settings_.hyper_params.never_restart_to_average)
         {
           initial_scaling_strategy_.scale_solutions(unscaled_primal_avg_solution_,
                                                   unscaled_dual_avg_solution_);
@@ -2096,10 +2105,11 @@ __global__ void compute_weights_initial_primal_weight_from_squared_norms(const f
            c_vec_norm_,
            hyper_params.primal_importance);
 #endif
-    // TODO WARNING NECESSARY BUT WILL BREAK BACKWARD COMPATIBLITY
-    primal_weight[id]      = hyper_params.primal_importance * (c_vec_norm_ + (f_t(1.0))) / (b_vec_norm_ + f_t(1.0));
+    primal_weight[id]      = hyper_params.primal_importance * (c_vec_norm_ / b_vec_norm_);
     best_primal_weight[id] = primal_weight[id];
   } else {
+    // It may be better to use this formula instead: primal_weight[id]      = hyper_params.primal_importance * (c_vec_norm_ + (f_t(1.0))) / (b_vec_norm_ + f_t(1.0));
+    // Not doing so currently not to break backward compatibility and lack of examples to experiment with it
     primal_weight[id]      = hyper_params.primal_importance;
     best_primal_weight[id] = primal_weight[id];
   }

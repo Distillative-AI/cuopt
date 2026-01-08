@@ -117,7 +117,6 @@ void optimization_problem_t<i_t, f_t>::set_objective_coefficients(const f_t* c, 
 {
   cuopt_expects(c != nullptr, error_type_t::ValidationError, "c cannot be null");
   c_.resize(size, stream_view_);
-  // TODO batch mode: handle this
   n_vars_ = size;
   raft::copy(c_.data(), c, size, stream_view_);
 }
@@ -211,6 +210,7 @@ void optimization_problem_t<i_t, f_t>::set_variable_lower_bounds(const f_t* vari
                   error_type_t::ValidationError,
                   "variable_lower_bounds cannot be null");
   }
+  n_vars_ = size;
   variable_lower_bounds_.resize(size, stream_view_);
   raft::copy(variable_lower_bounds_.data(), variable_lower_bounds, size, stream_view_);
 }
@@ -224,6 +224,7 @@ void optimization_problem_t<i_t, f_t>::set_variable_upper_bounds(const f_t* vari
                   error_type_t::ValidationError,
                   "variable_upper_bounds cannot be null");
   }
+  n_vars_ = size;
   variable_upper_bounds_.resize(size, stream_view_);
   raft::copy(variable_upper_bounds_.data(), variable_upper_bounds, size, stream_view_);
 }

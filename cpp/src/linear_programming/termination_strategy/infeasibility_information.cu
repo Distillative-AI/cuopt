@@ -156,8 +156,8 @@ __global__ void compute_remaining_stats_kernel(
 
 #ifdef PDLP_DEBUG_MODE
   printf("    Before max_dual_ray_infeasibility=%lf dual_ray_linear_objective=%lf\n",
-         *infeasibility_information_view.max_dual_ray_infeasibility,
-         *infeasibility_information_view.dual_ray_linear_objective);
+         infeasibility_information_view.max_dual_ray_infeasibility[0],
+         infeasibility_information_view.dual_ray_linear_objective[0]);
 #endif
   if (scaling_factor < 0.0 || scaling_factor > 0.0) {
     infeasibility_information_view.max_dual_ray_infeasibility[0] =
@@ -170,8 +170,8 @@ __global__ void compute_remaining_stats_kernel(
   }
 #ifdef PDLP_DEBUG_MODE
   printf("    After max_dual_ray_infeasibility=%lf dual_ray_linear_objective=%lf\n",
-         *infeasibility_information_view.max_dual_ray_infeasibility,
-         *infeasibility_information_view.dual_ray_linear_objective);
+         infeasibility_information_view.max_dual_ray_infeasibility[0],
+         infeasibility_information_view.dual_ray_linear_objective[0]);
   printf("    primal_ray_inf_norm=%lf\n", *infeasibility_information_view.primal_ray_inf_norm);
 #endif
   // Update primal max ray infeasibility
@@ -179,15 +179,15 @@ __global__ void compute_remaining_stats_kernel(
     infeasibility_information_view.max_primal_ray_infeasibility[0] =
       raft::max(infeasibility_information_view.max_primal_ray_infeasibility[0],
                 *infeasibility_information_view.primal_ray_max_violation) /
-      *infeasibility_information_view.primal_ray_inf_norm;
+      infeasibility_information_view.primal_ray_inf_norm[0];
   } else {
     infeasibility_information_view.max_primal_ray_infeasibility[0] = f_t(0.0);
     infeasibility_information_view.primal_ray_linear_objective[0]  = f_t(0.0);
   }
 #ifdef PDLP_DEBUG_MODE
   printf("    max_primal_ray_infeasibility=%lf primal_ray_linear_objective=%lf\n",
-         *infeasibility_information_view.max_primal_ray_infeasibility,
-         *infeasibility_information_view.primal_ray_linear_objective);
+         infeasibility_information_view.max_primal_ray_infeasibility[0],
+         infeasibility_information_view.primal_ray_linear_objective[0]);
 #endif
 }
 
@@ -624,7 +624,7 @@ void infeasibility_information_t<i_t, f_t>::compute_homogenous_dual_objective(
 #ifdef PDLP_DEBUG_MODE
   std::cout << "-compute_homogenous_dual_objective:\n"
             << "  dual_ray_linear_objective_ before="
-            << dual_ray_linear_objective_.value(stream_view_) << std::endl;
+            << dual_ray_linear_objective_.element(0, stream_view_) << std::endl;
 #endif
 
   compute_reduced_costs_dual_objective_contribution();
@@ -638,7 +638,7 @@ void infeasibility_information_t<i_t, f_t>::compute_homogenous_dual_objective(
   std::cout << "  reduced_cost_dual_objective_=" << reduced_cost_dual_objective_.value(stream_view_)
             << std::endl;
   std::cout << "  dual_ray_linear_objective_ after="
-            << dual_ray_linear_objective_.value(stream_view_) << std::endl;
+            << dual_ray_linear_objective_.element(0, stream_view_) << std::endl;
 #endif
 }
 

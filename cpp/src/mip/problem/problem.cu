@@ -124,7 +124,6 @@ problem_t<i_t, f_t>::problem_t(
                             problem_.get_handle_ptr()->get_stream()),
     constraint_upper_bounds(problem_.get_constraint_upper_bounds(),
                             problem_.get_handle_ptr()->get_stream()),
-    // TODO batch mode: is this ok?
     combined_bounds(problem_.get_n_constraints(), problem_.get_handle_ptr()->get_stream()),
     variable_types(0, problem_.get_handle_ptr()->get_stream()),
     integer_indices(0, problem_.get_handle_ptr()->get_stream()),
@@ -521,10 +520,9 @@ void problem_t<i_t, f_t>::check_problem_representation(bool check_transposed,
 
   // Check variable bounds are set and with the correct size
   if (!empty) { cuopt_assert(!variable_bounds.is_empty(), "Variable bounds must be set."); }
-  // TODO batch mode: is that how we handle to handle it?
-  cuopt_assert(variable_bounds.size() % objective_coefficients.size() == 0,
+  cuopt_assert(variable_bounds.size() == objective_coefficients.size(),
                "Sizes for vectors related to the variables are not the same.");
-  cuopt_assert(variable_bounds.size() % (std::size_t)n_variables == 0,
+  cuopt_assert(variable_bounds.size() == (std::size_t)n_variables,
                "Sizes for vectors related to the variables are not the same.");
 
   cuopt_assert(variable_types.size() == (std::size_t)n_variables,

@@ -254,13 +254,13 @@ TEST(pdlp_class, initial_solution_test)
   cuopt::linear_programming::detail::problem_t<int, double> problem(op_problem);
 
   auto solver_settings = pdlp_solver_settings_t<int, double>{};
-  // We are just testing initial scaling on initial solution scheme so we don't care about solver
-  solver_settings.iteration_limit = 0;
-  solver_settings.method          = cuopt::linear_programming::method_t::PDLP;
-  // Empty call solve to set the parameters and init the handler since calling pdlp object directly
-  // doesn't
+    // We are just testing initial scaling on initial solution scheme so we don't care about solver
+    solver_settings.iteration_limit = 0;
+    solver_settings.method          = cuopt::linear_programming::method_t::PDLP;
+    // Empty call solve to set the parameters and init the handler since calling pdlp object directly
+    // doesn't
   solver_settings.pdlp_solver_mode = cuopt::linear_programming::pdlp_solver_mode_t::Methodical1;
-  solve_lp(op_problem, solver_settings);
+  set_pdlp_solver_mode(solver_settings);
   EXPECT_EQ(solver_settings.hyper_params.initial_step_size_scaling, 1);
   EXPECT_EQ(solver_settings.hyper_params.default_l_inf_ruiz_iterations, 5);
   EXPECT_TRUE(solver_settings.hyper_params.do_pock_chambolle_scaling);

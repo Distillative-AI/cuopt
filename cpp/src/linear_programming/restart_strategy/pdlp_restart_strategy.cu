@@ -1139,6 +1139,8 @@ void pdlp_restart_strategy_t<i_t, f_t>::distance_squared_moved_from_last_restart
 #ifdef PDLP_DEBUG_MODE
   rmm::device_scalar<f_t> debuga{stream_view_};
   rmm::device_scalar<f_t> debugb{stream_view_};
+  print("Old solution", old_solution);
+  print("New solution", new_solution);
   RAFT_CUBLAS_TRY(raft::linalg::detail::cublasdot(handle_ptr_->get_cublas_handle(),
                                                   size_of_solutions_h,
                                                   old_solution.data(),
