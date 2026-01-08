@@ -823,6 +823,7 @@ void pdlp_restart_strategy_t<i_t, f_t>::cupdlpx_restart(
   weighted_average_solution_.iterations_since_last_restart_ = 0;
   last_trial_fixed_point_error_                             = std::numeric_limits<f_t>::infinity();
 }
+
 template <typename i_t, typename f_t>
 bool pdlp_restart_strategy_t<i_t, f_t>::run_cupdlpx_restart(
   const convergence_information_t<i_t, f_t>& current_convergence_information,
