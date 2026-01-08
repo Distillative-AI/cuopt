@@ -1,6 +1,6 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights
+ * reserved. SPDX-License-Identifier: Apache-2.0
  */
 
 #pragma once
@@ -167,6 +167,12 @@ class node_queue_t {
   {
     std::lock_guard<omp_mutex_t> lock(mutex);
     return best_first_heap.empty() ? inf : best_first_heap.top()->lower_bound;
+  }
+
+  mip_node_t<i_t, f_t>* bfs_top()
+  {
+    std::lock_guard<omp_mutex_t> lock(mutex);
+    return best_first_heap.empty() ? nullptr : best_first_heap.top()->node;
   }
 };
 
