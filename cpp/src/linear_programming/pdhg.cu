@@ -28,8 +28,6 @@
 #include <cub/cub.cuh>
 
 #include <cusparse_v2.h>
-#include <thrust/for_each.h>
-#include <thrust/iterator/counting_iterator.h>
 
 namespace cuopt::linear_programming::detail {
 
@@ -200,64 +198,17 @@ void pdhg_solver_t<i_t, f_t>::compute_At_y()
   }
   else
   {
-    if (!deterministic_batch_pdlp)
-    {
-      // When using row row we need to transpose the input / output before / after the SpMM
-      if (use_row_row)
-      {
-        /*RAFT_CUBLAS_TRY( cublasDgeam(handle_ptr_->get_cublas_handle(), CUBLAS_OP_T, CUBLAS_OP_N,
-                                  climber_strategies_.size(), // B_NUM_ROWS <=> climber_strategies_.size()
-                                  problem_ptr->n_constraints, // B_ROWS <=> A_NUM_COLS (A_NUM_ROW if A transposed, here yes) <=> n_constraints
-                                  reusable_device_scalar_value_1_.data(), // alpha <=> 1.0
-                                  current_saddle_point_state_.get_dual_solution().data(), // Input dual sol we want to transpose
-                                  problem_ptr->n_constraints, // B_ROWS <=> A_NUM_COLS (A_NUM_ROW if A transposed, here yes) <=> n_constraints
-                                  reusable_device_scalar_value_0_.data(), // beta <=> 0.0
-                                  cusparse_view_.batch_dual_solutions_data_transposed_.data(), // Output transposed dual solutions we want to use in SpMM
-                                  climber_strategies_.size(), // B_NUM_ROWS <=> climber_strategies_.size()
-                                  cusparse_view_.batch_dual_solutions_data_transposed_.data(), // Output transposed current AtYs we want to use in SpMM
-                                  climber_strategies_.size()) ); // B_NUM_ROWS <=> climber_strategies_.size()*/
-      }
-      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmm(handle_ptr_->get_cusparse_handle(),
-                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                                       reusable_device_scalar_value_1_.data(),
-                                                       cusparse_view_.A_T,
-                                                       cusparse_view_.batch_dual_solutions,
-                                                       reusable_device_scalar_value_0_.data(),
-                                                       cusparse_view_.batch_current_AtYs,
-                                                       CUSPARSE_SPMM_CSR_ALG3,
-                                                       (f_t*)cusparse_view_.buffer_transpose_batch.data(),
-                                                       stream_view_));
-      if (use_row_row)
-      {
-        /*RAFT_CUBLAS_TRY( cublasDgeam(handle_ptr_->get_cublas_handle(), CUBLAS_OP_T, CUBLAS_OP_N,
-                                  problem_ptr->n_variables, // mC <=> A final rows <=> A NUM_ROW (A_NUM_COL if A transposed, here yes) <=> n_variables
-                                  climber_strategies_.size(), // nC <=> B NUM_COL <=> climber_strategies_.size()
-                                  reusable_device_scalar_value_1_.data(), // alpha <=> 1.0
-                                  cusparse_view_.batch_current_AtYs_data_transposed_.data(), // Transposed output of SpMM 
-                                  climber_strategies_.size(), // nC <=> B NUM_COL <=> climber_strategies_.size()
-                                  reusable_device_scalar_value_0_.data(), // beta <=> 0.0
-                                   nullptr, 
-                                   problem_ptr->n_variables, // mC <=> A final rows <=> A NUM_ROW (A_NUM_COL if A transposed, here yes) <=> n_variables
-                                  current_saddle_point_state_.get_current_AtY().data(), // ReTransposed output to be used COL wise 
-                                  problem_ptr->n_variables) ); // mC <=> A final rows <=> A NUM_ROW (A_NUM_COL if A transposed, here yes) <=> n_variables*/
-      }
-    }
-    else
-    {
-    for (size_t i = 0; i < climber_strategies_.size(); i++) {
-        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmv(handle_ptr_->get_cusparse_handle(),
-                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                                       reusable_device_scalar_value_1_.data(),
-                                                       cusparse_view_.A_T,
-                                                       cusparse_view_.dual_solution_vector[i],
-                                                       reusable_device_scalar_value_0_.data(),
-                                                       cusparse_view_.current_AtYs_vector[i],
-                                                       CUSPARSE_SPMV_CSR_ALG2,
-                                                       (f_t*)cusparse_view_.buffer_transpose.data(),
-                                                       stream_view_));
-      }
-    }
+    RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmm(handle_ptr_->get_cusparse_handle(),
+                                                      CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                      CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                      reusable_device_scalar_value_1_.data(),
+                                                      cusparse_view_.A_T,
+                                                      cusparse_view_.batch_dual_solutions,
+                                                      reusable_device_scalar_value_0_.data(),
+                                                      cusparse_view_.batch_current_AtYs,
+                                                      CUSPARSE_SPMM_CSR_ALG3,
+                                                      (f_t*)cusparse_view_.buffer_transpose_batch.data(),
+                                                      stream_view_));
   }
 }
 
@@ -281,66 +232,17 @@ void pdhg_solver_t<i_t, f_t>::compute_A_x()
   }
   else
   {
-    if (!deterministic_batch_pdlp)
-    {
-      // When using row row we need to transpose the input / output before / after the SpMM
-      if (use_row_row)
-      {
-        /*RAFT_CUBLAS_TRY( cublasDgeam(handle_ptr_->get_cublas_handle(), CUBLAS_OP_T, CUBLAS_OP_N,
-                                  climber_strategies_.size(), 
-                                  problem_ptr->n_variables,
-                                  reusable_device_scalar_value_1_.data(), 
-                                  reflected_primal_.data(), 
-                                  problem_ptr->n_variables,
-                                  reusable_device_scalar_value_0_.data(), 
-                                  cusparse_view_.batch_reflected_primal_solutions_data_transposed_.data(), 
-                                  climber_strategies_.size(),
-                                  cusparse_view_.batch_reflected_primal_solutions_data_transposed_.data(), 
-                                  climber_strategies_.size()) );*/
-      }
-      RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmm(handle_ptr_->get_cusparse_handle(),
-                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                                       reusable_device_scalar_value_1_.data(),
-                                                       cusparse_view_.A,
-                                                       cusparse_view_.batch_reflected_primal_solutions,
-                                                       reusable_device_scalar_value_0_.data(),
-                                                       cusparse_view_.batch_dual_gradients,
-                                                       CUSPARSE_SPMM_CSR_ALG3,
-                                                       (f_t*)cusparse_view_.buffer_non_transpose_batch.data(),
-                                                       stream_view_));
-      if (use_row_row)
-      {
-        /*RAFT_CUBLAS_TRY( cublasDgeam(handle_ptr_->get_cublas_handle(), CUBLAS_OP_T, CUBLAS_OP_N,
-                                  problem_ptr->n_constraints, // mC <=> A final rows <=> A NUM_ROW (A NUM_COL if A transposed) <=> n_constraints
-                                  climber_strategies_.size(), // nC <=> B NUM_COL <=> climber_strategies_.size()
-                                  reusable_device_scalar_value_1_.data(), // alpha <=> 1.0
-                                  cusparse_view_.batch_dual_gradients_data_transposed_.data(), // Transposed SpMM output 
-                                  climber_strategies_.size(), // nC <=> B NUM_COL <=> climber_strategies_.size()
-                                  reusable_device_scalar_value_0_.data(), // beta <=> 0.0
-                                  nullptr, // B not used 
-                                  problem_ptr->n_constraints, // mC <=> A final rows <=> A NUM_ROW (A NUM_COL if A transposed) <=> n_constraints
-                                  current_saddle_point_state_.get_dual_gradient().data(), // ReTransposed output to be use COL wise 
-                                  problem_ptr->n_constraints) // mC <=> A final rows <=> A NUM_ROW (A NUM_COL if A transposed) <=> n_constraints
-                                );*/
-      }
-    }
-    else
-    {
-      for (size_t i = 0; i < climber_strategies_.size(); ++i)
-      {
-        RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmv(handle_ptr_->get_cusparse_handle(),
-                                        CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                        reusable_device_scalar_value_1_.data(),
-                                        cusparse_view_.A,
-                                        cusparse_view_.reflected_primal_solution_vector[i],
-                                        reusable_device_scalar_value_0_.data(),
-                                        cusparse_view_.dual_gradients_vector[i],
-                                        CUSPARSE_SPMV_CSR_ALG2,
-                                        (f_t*)cusparse_view_.buffer_non_transpose.data(),
-                                        stream_view_));
-      }
-    }
+    RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmm(handle_ptr_->get_cusparse_handle(),
+                                                      CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                      CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                      reusable_device_scalar_value_1_.data(),
+                                                      cusparse_view_.A,
+                                                      cusparse_view_.batch_reflected_primal_solutions,
+                                                      reusable_device_scalar_value_0_.data(),
+                                                      cusparse_view_.batch_dual_gradients,
+                                                      CUSPARSE_SPMM_CSR_ALG3,
+                                                      (f_t*)cusparse_view_.buffer_non_transpose_batch.data(),
+                                                      stream_view_));
   }
 }
 
@@ -668,142 +570,6 @@ struct dual_reflected_projection_bulk_op {
     reflected_dual[idx] = f_t(2.0) * next_dual - current_dual;
   }
 };
-/*
-template <typename f_t>
-__global__ void primal_reflected_major_projection_batch_kernel(
-    raft::device_span<const f_t> primal_solution,
-    raft::device_span<const f_t> objective_coefficients,
-    raft::device_span<const f_t> current_AtY,
-    raft::device_span<const typename type_2<f_t>::type> variable_bounds,
-    raft::device_span<const f_t> primal_step_size,
-    raft::device_span<f_t> potential_next_primal,
-    raft::device_span<f_t> dual_slack,
-    raft::device_span<f_t> reflected_primal,
-    int primal_size,
-    int batch_size)
-{
-  using f_t2 = typename type_2<f_t>::type;
-
-  const int batch_idx = blockIdx.x * blockDim.x + threadIdx.x;
-  const int var_idx = blockIdx.y * blockDim.y + threadIdx.y;
-  
-  if (batch_idx < batch_size && var_idx < primal_size) {
-    const int idx = var_idx * batch_size + batch_idx;
-    
-    const f_t step_size = primal_step_size[batch_idx];
-    const f_t primal_val = primal_solution[idx];
-    const f_t obj_coef = objective_coefficients[var_idx];
-    const f_t aty_val = current_AtY[idx];
-    
-    // Compute next value
-    const f_t next = primal_val - step_size * (obj_coef - aty_val);
-    
-    // Project onto variable bounds
-    const f_t2 bounds = variable_bounds[var_idx];
-    const f_t next_clamped = cuda::std::max(cuda::std::min(next, get_upper(bounds)), get_lower(bounds));
-    
-    // Write outputs
-    potential_next_primal[idx] = next_clamped;
-    dual_slack[idx] = (next_clamped - next) / step_size;
-    reflected_primal[idx] = f_t(2.0) * next_clamped - primal_val;
-  }
-}
-
-template <typename f_t>
-__global__ void dual_reflected_major_projection_batch_kernel(
-    raft::device_span<const f_t> dual_solution,
-    raft::device_span<const f_t> dual_gradient,
-    raft::device_span<const f_t> constraint_lower_bounds,
-    raft::device_span<const f_t> constraint_upper_bounds,
-    raft::device_span<const f_t> dual_step_size,
-    raft::device_span<f_t> potential_next_dual,
-    raft::device_span<f_t> reflected_dual,
-    int dual_size,
-    int batch_size)
-{
-  const int batch_idx = blockIdx.x * blockDim.x + threadIdx.x;
-  const int constraint_idx = blockIdx.y * blockDim.y + threadIdx.y;
-  
-  if (batch_idx < batch_size && constraint_idx < dual_size) {
-    const int idx = constraint_idx * batch_size + batch_idx;
-
-    const f_t step_size = dual_step_size[batch_idx];
-    const f_t current_dual = dual_solution[idx];
-    const f_t Ax = dual_gradient[idx];
-    
-    const f_t tmp = current_dual / step_size - Ax;
-    const f_t tmp_proj = cuda::std::max<f_t>(-constraint_upper_bounds[constraint_idx], 
-                                              cuda::std::min<f_t>(tmp, -constraint_lower_bounds[constraint_idx]));
-    const f_t next_dual = (tmp - tmp_proj) * step_size;
-    
-    // Write outputs
-    potential_next_dual[idx] = next_dual;
-    reflected_dual[idx] = f_t(2.0) * next_dual - current_dual;
-  }
-}
-
-template <typename f_t>
-__global__ void primal_reflected_projection_batch_kernel(
-    raft::device_span<const f_t> primal_solution,
-    raft::device_span<const f_t> objective_coefficients,
-    raft::device_span<const f_t> current_AtY,
-    raft::device_span<const typename type_2<f_t>::type> variable_bounds,
-    raft::device_span<const f_t> primal_step_size,
-    raft::device_span<f_t> reflected_primal,
-    int primal_size,
-    int batch_size)
-{
-  using f_t2 = typename type_2<f_t>::type;
-
-  const int batch_idx = blockIdx.x * blockDim.x + threadIdx.x;
-  const int var_idx = blockIdx.y * blockDim.y + threadIdx.y;
-  
-  if (batch_idx < batch_size && var_idx < primal_size) {
-    int idx = var_idx * batch_size + batch_idx;
-    
-    f_t step_size = primal_step_size[batch_idx];
-    f_t primal_val = primal_solution[idx];
-    f_t obj_coef = objective_coefficients[var_idx];
-    f_t aty_val = current_AtY[idx];
-    
-    // Compute reflected value
-    f_t reflected = primal_val - step_size * (obj_coef - aty_val);
-    
-    // Project onto variable bounds
-    f_t2 bounds = variable_bounds[var_idx];
-    
-    reflected = cuda::std::max(cuda::std::min(reflected, get_upper(bounds)), get_lower(bounds));
-    
-    reflected_primal[idx] = f_t(2.0) * reflected - primal_val;
-  }
-}
-
-template <typename f_t>
-__global__ void dual_reflected_projection_batch_kernel(
-    raft::device_span<const f_t> dual_solution,
-    raft::device_span<const f_t> dual_gradient,
-    raft::device_span<const f_t> constraint_lower_bounds,
-    raft::device_span<const f_t> constraint_upper_bounds,
-    raft::device_span<const f_t> dual_step_size,
-    raft::device_span<f_t> reflected_dual,
-    int dual_size,
-    int batch_size)
-{
-  const int batch_idx = blockIdx.x * blockDim.x + threadIdx.x;
-  const int constraint_idx = blockIdx.y * blockDim.y + threadIdx.y;
-  
-  if (batch_idx < batch_size && constraint_idx < dual_size) {
-    const int idx = constraint_idx * batch_size + batch_idx;
-
-    const f_t step_size = dual_step_size[batch_idx];
-    const f_t current_dual = dual_solution[idx];
-    const f_t tmp       = current_dual / step_size - dual_gradient[idx];
-    const f_t tmp_proj  = cuda::std::max<f_t>(-constraint_upper_bounds[constraint_idx], cuda::std::min<f_t>(tmp, -constraint_lower_bounds[constraint_idx]));
-    const f_t next_dual = (tmp - tmp_proj) * step_size;
-    
-    reflected_dual[idx] = f_t(2.0) * next_dual - current_dual;
-  }
-}*/
 
 template <typename i_t, typename f_t>
 __global__ void refine_primal_projection_major_batch_kernel(i_t batch_size,
@@ -937,77 +703,19 @@ void pdhg_solver_t<i_t, f_t>::compute_next_primal_dual_solution_reflected(
       }
       else
       {
-        // TODO batch mode: handle different objective coefficient and variable bounds
-          /*cub::DeviceTransform::Transform(
-        cuda::std::make_tuple(current_saddle_point_state_.get_primal_solution().data(),
-                              problem_wrap_container(problem_ptr->objective_coefficients),
-                              current_saddle_point_state_.get_current_AtY().data(),
-                              problem_wrap_container(problem_ptr->variable_bounds),
-                            thrust::make_transform_iterator(
-                            thrust::make_counting_iterator(0),
-                            batch_wrapped_iterator<f_t>(primal_step_size.data(), primal_size_h_))
-                          ),
-          thrust::make_zip_iterator(
-            potential_next_primal_solution_.data(), dual_slack_.data(), reflected_primal_.data()),
+        cub::DeviceFor::Bulk(
           potential_next_primal_solution_.size(),
-          primal_reflected_major_projection_batch<f_t>(),
-          stream_view_);*/
-          /*thrust::for_each_n(handle_ptr_->get_thrust_policy(),
-                           thrust::make_counting_iterator(size_t(0)),
-                           potential_next_primal_solution_.size(),
-                           [primal_solution        = current_saddle_point_state_.get_primal_solution().data(),
-                            objective_coefficients = problem_ptr->objective_coefficients.data(),
-                            current_AtY            = current_saddle_point_state_.get_current_AtY().data(),
-                            variable_bounds        = problem_ptr->variable_bounds.data(),
-                            primal_step_size       = primal_step_size.data(),
-                            potential_next_primal  = potential_next_primal_solution_.data(),
-                            dual_slack             = dual_slack_.data(),
-                            reflected_primal       = reflected_primal_.data(),
-                            batch_size             = (int)climber_strategies_.size()] __device__(size_t idx) {
-                             const int batch_idx = idx % batch_size;
-                             const int var_idx   = idx / batch_size;
-
-                             const f_t step_size  = primal_step_size[batch_idx];
-                             const f_t primal_val = primal_solution[idx];
-                             const f_t obj_coef   = objective_coefficients[var_idx];
-                             const f_t aty_val    = current_AtY[idx];
-
-                             const f_t next = primal_val - step_size * (obj_coef - aty_val);
-
-                             const typename type_2<f_t>::type bounds = variable_bounds[var_idx];
-                             const f_t next_clamped =
-                               cuda::std::max(cuda::std::min(next, get_upper(bounds)), get_lower(bounds));
-
-                             potential_next_primal[idx] = next_clamped;
-                             dual_slack[idx]            = (next_clamped - next) / step_size;
-                             reflected_primal[idx]      = f_t(2.0) * next_clamped - primal_val;
-                           });*/
-          cub::DeviceFor::Bulk(
-            potential_next_primal_solution_.size(),
-            primal_reflected_major_projection_bulk_op<f_t>{
-              current_saddle_point_state_.get_primal_solution().data(),
-              problem_ptr->objective_coefficients.data(),
-              current_saddle_point_state_.get_current_AtY().data(),
-              problem_ptr->variable_bounds.data(),
-              primal_step_size.data(),
-              potential_next_primal_solution_.data(),
-              dual_slack_.data(),
-              reflected_primal_.data(),
-              (int)climber_strategies_.size()},
-            stream_view_);
-          /*const auto [grid_size, block_size] = map_kernel_config_from_batch_size(primal_size_h_, climber_strategies_.size());
-          primal_reflected_major_projection_batch_kernel<f_t><<<grid_size, block_size, 0, stream_view_>>>(
-            make_span(current_saddle_point_state_.get_primal_solution()),
-            make_span(problem_ptr->objective_coefficients),
-            make_span(current_saddle_point_state_.get_current_AtY()),
-            make_span(problem_ptr->variable_bounds),
-            make_span(primal_step_size),
-            make_span(potential_next_primal_solution_),
-            make_span(dual_slack_),
-            make_span(reflected_primal_),
-            primal_size_h_,
-            climber_strategies_.size());*/
-
+          primal_reflected_major_projection_bulk_op<f_t>{
+            current_saddle_point_state_.get_primal_solution().data(),
+            problem_ptr->objective_coefficients.data(),
+            current_saddle_point_state_.get_current_AtY().data(),
+            problem_ptr->variable_bounds.data(),
+            primal_step_size.data(),
+            potential_next_primal_solution_.data(),
+            dual_slack_.data(),
+            reflected_primal_.data(),
+            (int)climber_strategies_.size()},
+          stream_view_);
       }
       if (new_bounds_idx_.size() != 0) {
         const auto [grid_size, block_size] =
@@ -1053,48 +761,6 @@ void pdhg_solver_t<i_t, f_t>::compute_next_primal_dual_solution_reflected(
       }
       else
       {
-        // TODO batch mode: handle different constraint bound
-        /*cub::DeviceTransform::Transform(
-        cuda::std::make_tuple(current_saddle_point_state_.get_dual_solution().data(),
-                              current_saddle_point_state_.get_dual_gradient().data(),
-                              problem_wrap_container(
-                            problem_ptr->constraint_lower_bounds),
-                              problem_wrap_container(
-                            problem_ptr->constraint_upper_bounds),
-                            thrust::make_transform_iterator(
-                            thrust::make_counting_iterator(0),
-                            batch_wrapped_iterator<f_t>(dual_step_size.data(), dual_size_h_))),
-        thrust::make_zip_iterator(potential_next_dual_solution_.data(), reflected_dual_.data()),
-        potential_next_dual_solution_.size(),
-        dual_reflected_major_projection_batch<f_t>(),
-        stream_view_);*/
-        /*thrust::for_each_n(handle_ptr_->get_thrust_policy(),
-                         thrust::make_counting_iterator(size_t(0)),
-                         potential_next_dual_solution_.size(),
-                         [dual_solution           = current_saddle_point_state_.get_dual_solution().data(),
-                          dual_gradient           = current_saddle_point_state_.get_dual_gradient().data(),
-                          constraint_lower_bounds = problem_ptr->constraint_lower_bounds.data(),
-                          constraint_upper_bounds = problem_ptr->constraint_upper_bounds.data(),
-                          dual_step_size          = dual_step_size.data(),
-                          potential_next_dual     = potential_next_dual_solution_.data(),
-                          reflected_dual          = reflected_dual_.data(),
-                          batch_size              = (int)climber_strategies_.size()] __device__(size_t idx) {
-                           const int batch_idx      = idx % batch_size;
-                           const int constraint_idx = idx / batch_size;
-
-                           const f_t step_size    = dual_step_size[batch_idx];
-                           const f_t current_dual = dual_solution[idx];
-                           const f_t Ax           = dual_gradient[idx];
-
-                           const f_t tmp      = current_dual / step_size - Ax;
-                           const f_t tmp_proj = cuda::std::max<f_t>(
-                             -constraint_upper_bounds[constraint_idx],
-                             cuda::std::min<f_t>(tmp, -constraint_lower_bounds[constraint_idx]));
-                           const f_t next_dual = (tmp - tmp_proj) * step_size;
-
-                           potential_next_dual[idx] = next_dual;
-                           reflected_dual[idx]      = f_t(2.0) * next_dual - current_dual;
-                         });*/
         cub::DeviceFor::Bulk(
           potential_next_dual_solution_.size(),
           dual_reflected_major_projection_bulk_op<f_t>{
@@ -1107,17 +773,6 @@ void pdhg_solver_t<i_t, f_t>::compute_next_primal_dual_solution_reflected(
             reflected_dual_.data(),
             (int)climber_strategies_.size()},
           stream_view_);
-        /*const auto [grid_size, block_size] = map_kernel_config_from_batch_size(dual_size_h_, climber_strategies_.size());
-        dual_reflected_major_projection_batch_kernel<f_t><<<grid_size, block_size, 0, stream_view_>>>(
-          make_span(current_saddle_point_state_.get_dual_solution()),
-          make_span(current_saddle_point_state_.get_dual_gradient()),
-          make_span(problem_ptr->constraint_lower_bounds),
-          make_span(problem_ptr->constraint_upper_bounds),
-          make_span(dual_step_size),
-          make_span(potential_next_dual_solution_),
-          make_span(reflected_dual_),
-          dual_size_h_,
-          climber_strategies_.size());*/
       }
 
 #ifdef CUPDLP_DEBUG_MODE
@@ -1155,67 +810,17 @@ print("current_saddle_point_state_.get_current_AtY()", current_saddle_point_stat
       }
       else
       {
-        /*cub::DeviceTransform::Transform(
-        cuda::std::make_tuple(current_saddle_point_state_.get_primal_solution().data(),
-                              problem_wrap_container(problem_ptr->objective_coefficients),
-                              current_saddle_point_state_.get_current_AtY().data(),
-                              problem_wrap_container(problem_ptr->variable_bounds),
-                            thrust::make_transform_iterator(
-                            thrust::make_counting_iterator(0),
-                            batch_wrapped_iterator<f_t>(primal_step_size.data(), primal_size_h_))
-                          ),
-          reflected_primal_.data(),
+        cub::DeviceFor::Bulk(
           reflected_primal_.size(),
-          primal_reflected_projection_batch<f_t>(),
-          stream_view_);*/
-          /*thrust::for_each_n(handle_ptr_->get_thrust_policy(),
-                           thrust::make_counting_iterator(size_t(0)),
-                           reflected_primal_.size(),
-                           [primal_solution        = current_saddle_point_state_.get_primal_solution().data(),
-                            objective_coefficients = problem_ptr->objective_coefficients.data(),
-                            current_AtY            = current_saddle_point_state_.get_current_AtY().data(),
-                            variable_bounds        = problem_ptr->variable_bounds.data(),
-                            primal_step_size       = primal_step_size.data(),
-                            reflected_primal       = reflected_primal_.data(),
-                            batch_size             = (int)climber_strategies_.size()] __device__(size_t idx) {
-                             const int batch_idx = idx % batch_size;
-                             const int var_idx   = idx / batch_size;
-
-                             const f_t step_size  = primal_step_size[batch_idx];
-                             const f_t primal_val = primal_solution[idx];
-                             const f_t obj_coef   = objective_coefficients[var_idx];
-                             const f_t aty_val    = current_AtY[idx];
-
-                             f_t reflected = primal_val - step_size * (obj_coef - aty_val);
-
-                             const typename type_2<f_t>::type bounds = variable_bounds[var_idx];
-                             reflected =
-                               cuda::std::max(cuda::std::min(reflected, get_upper(bounds)), get_lower(bounds));
-
-                             reflected_primal[idx] = f_t(2.0) * reflected - primal_val;
-                           });*/
-          cub::DeviceFor::Bulk(
-            reflected_primal_.size(),
-            primal_reflected_projection_bulk_op<f_t>{
-              current_saddle_point_state_.get_primal_solution().data(),
-              problem_ptr->objective_coefficients.data(),
-              current_saddle_point_state_.get_current_AtY().data(),
-              problem_ptr->variable_bounds.data(),
-              primal_step_size.data(),
-              reflected_primal_.data(),
-              (int)climber_strategies_.size()},
-            stream_view_);
-          /*const auto [grid_size, block_size] = map_kernel_config_from_batch_size(primal_size_h_, climber_strategies_.size());
-          primal_reflected_projection_batch_kernel<f_t><<<grid_size, block_size, 0, stream_view_>>>(
-            make_span(current_saddle_point_state_.get_primal_solution()),
-            make_span(problem_ptr->objective_coefficients),
-            make_span(current_saddle_point_state_.get_current_AtY()),
-            make_span(problem_ptr->variable_bounds),
-            make_span(primal_step_size),
-            make_span(reflected_primal_),
-            primal_size_h_,
-            climber_strategies_.size());*/
-
+          primal_reflected_projection_bulk_op<f_t>{
+            current_saddle_point_state_.get_primal_solution().data(),
+            problem_ptr->objective_coefficients.data(),
+            current_saddle_point_state_.get_current_AtY().data(),
+            problem_ptr->variable_bounds.data(),
+            primal_step_size.data(),
+            reflected_primal_.data(),
+            (int)climber_strategies_.size()},
+          stream_view_);
       }
       if (new_bounds_idx_.size() != 0) {
         const auto [grid_size, block_size] =
@@ -1261,43 +866,6 @@ print("dual_step_size", dual_step_size);
       }
       else
       {
-        /*cub::DeviceTransform::Transform(
-        cuda::std::make_tuple(current_saddle_point_state_.get_dual_solution().data(),
-                              current_saddle_point_state_.get_dual_gradient().data(),
-                              problem_wrap_container(problem_ptr->constraint_lower_bounds),
-                              problem_wrap_container(problem_ptr->constraint_upper_bounds),
-                            thrust::make_transform_iterator(
-                            thrust::make_counting_iterator(0),
-                            batch_wrapped_iterator<f_t>(dual_step_size.data(), dual_size_h_))),
-        reflected_dual_.data(),
-        reflected_dual_.size(),
-        dual_reflected_projection_batch<f_t>(),
-        stream_view_);*/
-        /*thrust::for_each_n(handle_ptr_->get_thrust_policy(),
-                         thrust::make_counting_iterator(size_t(0)),
-                         reflected_dual_.size(),
-                         [dual_solution           = current_saddle_point_state_.get_dual_solution().data(),
-                          dual_gradient           = current_saddle_point_state_.get_dual_gradient().data(),
-                          constraint_lower_bounds = problem_ptr->constraint_lower_bounds.data(),
-                          constraint_upper_bounds = problem_ptr->constraint_upper_bounds.data(),
-                          dual_step_size          = dual_step_size.data(),
-                          reflected_dual          = reflected_dual_.data(),
-                          batch_size              = (int)climber_strategies_.size()] __device__(size_t idx) {
-                           const int batch_idx      = idx % batch_size;
-                           const int constraint_idx = idx / batch_size;
-
-                           const f_t step_size    = dual_step_size[batch_idx];
-                           const f_t current_dual = dual_solution[idx];
-                           const f_t tmp = current_dual / step_size - dual_gradient[idx];
-                           const f_t lower_bound = constraint_lower_bounds[constraint_idx];
-                           const f_t upper_bound = constraint_upper_bounds[constraint_idx];
-                           const f_t tmp_proj =
-                             cuda::std::max<f_t>(-upper_bound,
-                                               cuda::std::min<f_t>(tmp, -lower_bound));
-                           const f_t next_dual = (tmp - tmp_proj) * step_size;
-
-                           reflected_dual[idx] = f_t(2.0) * next_dual - current_dual;
-                         });*/
         cub::DeviceFor::Bulk(
           reflected_dual_.size(),
           dual_reflected_projection_bulk_op<f_t>{
@@ -1309,16 +877,6 @@ print("dual_step_size", dual_step_size);
             reflected_dual_.data(),
             (int)climber_strategies_.size()},
           stream_view_);
-        /*const auto [grid_size, block_size] = map_kernel_config_from_batch_size(dual_size_h_, climber_strategies_.size());
-        dual_reflected_projection_batch_kernel<f_t><<<grid_size, block_size, 0, stream_view_>>>(
-          make_span(current_saddle_point_state_.get_dual_solution()),
-          make_span(current_saddle_point_state_.get_dual_gradient()),
-          make_span(problem_ptr->constraint_lower_bounds),
-          make_span(problem_ptr->constraint_upper_bounds),
-          make_span(dual_step_size),
-          make_span(reflected_dual_),
-          dual_size_h_,
-          climber_strategies_.size());*/
       }
 #ifdef CUPDLP_DEBUG_MODE
       print("reflected_dual_", reflected_dual_);

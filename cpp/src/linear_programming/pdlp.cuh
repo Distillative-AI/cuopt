@@ -181,8 +181,6 @@ class pdlp_solver_t {
   void transpose_primal_dual_to_row(rmm::device_uvector<f_t>& primal_to_transpose, rmm::device_uvector<f_t>& dual_to_transpose, rmm::device_uvector<f_t>& dual_slack_to_transpose);
   void transpose_primal_dual_back_to_col(rmm::device_uvector<f_t>& primal_to_transpose, rmm::device_uvector<f_t>& dual_to_transpose, rmm::device_uvector<f_t>& dual_slack_to_transpose);
 
-  bool matrix_transposed_{false};
-
   // Initial scaling strategy
   detail::pdlp_initial_scaling_strategy_t<i_t, f_t> initial_scaling_strategy_;
 

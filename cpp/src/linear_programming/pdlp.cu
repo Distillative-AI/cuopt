@@ -1591,10 +1591,8 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
     settings_.get_pdlp_warm_start_data().last_restart_duality_gap_dual_solution_.size() != 0;
 
   // In batch mode, before running the solver, we need to transpose the primal and dual solution to row format
-  if (batch_mode_) {
+  if (batch_mode_)
     transpose_primal_dual_to_row(pdhg_solver_.get_potential_next_primal_solution(), pdhg_solver_.get_potential_next_dual_solution(), pdhg_solver_.get_dual_slack());
-    matrix_transposed_ = true;
-  }
 
   if (!inside_mip_) {
     CUOPT_LOG_INFO(
@@ -1663,12 +1661,10 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
       // In case of batch mode, primal and dual matrices are in row format
       // We need to transpose them to column format before doing any checks
       if (batch_mode_) {
-        cuopt_assert(matrix_transposed_, "Matrix should be transposed");
         rmm::device_uvector<f_t> dummy(0, stream_view_);
         transpose_primal_dual_back_to_col(pdhg_solver_.get_potential_next_primal_solution(), pdhg_solver_.get_potential_next_dual_solution(), pdhg_solver_.get_dual_slack());
         transpose_primal_dual_back_to_col(restart_strategy_.last_restart_duality_gap_.primal_solution_, restart_strategy_.last_restart_duality_gap_.dual_solution_, dummy);
         transpose_primal_dual_back_to_col(pdhg_solver_.get_primal_solution(), pdhg_solver_.get_dual_solution(), dummy);
-        matrix_transposed_ = false;
       }
 
       // We go back to the unscaled problem here. It ensures that we do not terminate 'too early'
@@ -1759,20 +1755,11 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
       // We transpose back to row for the PDHG iterations
       if (batch_mode_) {
         transpose_primal_dual_to_row(pdhg_solver_.get_potential_next_primal_solution(), pdhg_solver_.get_potential_next_dual_solution(), pdhg_solver_.get_dual_slack());
-        // If restart has happend, the following has been written in column format:
-        // last_restart_duality_gap_.primal_solution_.data(), pdhg_solver.get_primal_solution().data(), last_restart_duality_gap_.dual_solution_.data(), pdhg_solver.get_dual_solution().data(),
-        // And thus should also be transposed to row
-        // TODO batch mode: works because all restart currently
-        //if (has_restarted[0])
-        {
-          //cuopt_assert(std::all_of(has_restarted.begin(), has_restarted.end(), [](int restarted){ return restarted == 1; }), "If any, all should be true");
-          rmm::device_uvector<f_t> dummy(0, stream_view_);
-          transpose_primal_dual_to_row(restart_strategy_.last_restart_duality_gap_.primal_solution_, restart_strategy_.last_restart_duality_gap_.dual_solution_, dummy);
-          transpose_primal_dual_to_row(pdhg_solver_.get_primal_solution(), pdhg_solver_.get_dual_solution(), dummy);
-        }
-        matrix_transposed_ = true;
-      }
+        rmm::device_uvector<f_t> dummy(0, stream_view_);
+        transpose_primal_dual_to_row(restart_strategy_.last_restart_duality_gap_.primal_solution_, restart_strategy_.last_restart_duality_gap_.dual_solution_, dummy);
+        transpose_primal_dual_to_row(pdhg_solver_.get_primal_solution(), pdhg_solver_.get_dual_solution(), dummy);
     }
+  }
 
 #ifdef CUPDLP_DEBUG_MODE
     printf("Is Major %d\n", (total_pdlp_iterations_ + 1) % settings_.hyper_params.major_iteration == 0);
@@ -1789,18 +1776,15 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
           if (std::any_of(has_restarted.begin(), has_restarted.end(), [](int restarted){ return restarted == 1; }))
             cuopt_assert(std::all_of(has_restarted.begin(), has_restarted.end(), [](int restarted){ return restarted == 1; }), "If any, all should be true");
           if (batch_mode_) {
-            cuopt_assert(matrix_transposed_, "Matrix should be transposed");
             rmm::device_uvector<f_t> dummy(0, stream_view_);
             transpose_primal_dual_back_to_col(pdhg_solver_.get_reflected_primal(), pdhg_solver_.get_reflected_dual(), pdhg_solver_.get_saddle_point_state().get_current_AtY());
             transpose_primal_dual_back_to_col(pdhg_solver_.get_primal_solution(), pdhg_solver_.get_dual_solution(), dummy);
-            matrix_transposed_ = false;
           }
           compute_fixed_error(has_restarted);  // May set has_restarted to false
           if (batch_mode_) {
             rmm::device_uvector<f_t> dummy(0, stream_view_);
             transpose_primal_dual_to_row(pdhg_solver_.get_reflected_primal(), pdhg_solver_.get_reflected_dual(), pdhg_solver_.get_saddle_point_state().get_current_AtY());
             transpose_primal_dual_to_row(pdhg_solver_.get_primal_solution(), pdhg_solver_.get_dual_solution(), dummy);
-            matrix_transposed_ = true;
           }
         }
       halpern_update();
@@ -1856,8 +1840,6 @@ void pdlp_solver_t<i_t, f_t>::take_adaptive_step(i_t total_pdlp_iterations, bool
 template <typename i_t, typename f_t>
 void pdlp_solver_t<i_t, f_t>::take_constant_step(bool is_major_iteration)
 {
-  if (batch_mode_)
-    cuopt_assert(matrix_transposed_, "Matrix should be transposed");
   pdhg_solver_.take_step(
     primal_step_size_, dual_step_size_, 0, false, total_pdlp_iterations_, is_major_iteration);
 }
