@@ -201,14 +201,16 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
     branch_and_bound_settings.num_diving_threads = num_diving_threads;
 
     // Set the branch and bound -> primal heuristics callback
+    // heuristic_preemption_callback is needed in both modes to properly stop the heuristic thread
+    branch_and_bound_settings.heuristic_preemption_callback = std::bind(
+      &branch_and_bound_solution_helper_t<i_t, f_t>::preempt_heuristic_solver, &solution_helper);
+
     if (context.settings.determinism_mode == CUOPT_MODE_OPPORTUNISTIC) {
       branch_and_bound_settings.solution_callback =
         std::bind(&branch_and_bound_solution_helper_t<i_t, f_t>::solution_callback,
                   &solution_helper,
                   std::placeholders::_1,
                   std::placeholders::_2);
-      branch_and_bound_settings.heuristic_preemption_callback = std::bind(
-        &branch_and_bound_solution_helper_t<i_t, f_t>::preempt_heuristic_solver, &solution_helper);
 
       branch_and_bound_settings.set_simplex_solution_callback =
         std::bind(&branch_and_bound_solution_helper_t<i_t, f_t>::set_simplex_solution,

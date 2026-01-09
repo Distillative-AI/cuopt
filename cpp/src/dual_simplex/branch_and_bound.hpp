@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -357,6 +357,9 @@ class branch_and_bound_t {
   // Prune nodes held by workers based on new incumbent
   void prune_worker_nodes_vs_incumbent();
 
+  // Balance worker loads - redistribute nodes only if significant imbalance detected
+  void balance_worker_loads();
+
   // BSP-specific node solving that records events
   node_solve_info_t solve_node_bsp(bb_worker_state_t<i_t, f_t>& worker,
                                    mip_node_t<i_t, f_t>* node_ptr,
@@ -366,10 +369,10 @@ class branch_and_bound_t {
  private:
   // BSP state
   std::unique_ptr<bb_worker_pool_t<i_t, f_t>> bsp_workers_;
-  double bsp_horizon_step_{5.0};    // Virtual time step per horizon (tunable)
-  double bsp_current_horizon_{0.0}; // Current horizon target
-  bool bsp_mode_enabled_{false};    // Whether BSP mode is active
-  int bsp_horizon_number_{0};       // Current horizon number (for debugging)
+  double bsp_horizon_step_{5.0};     // Virtual time step per horizon (tunable)
+  double bsp_current_horizon_{0.0};  // Current horizon target
+  bool bsp_mode_enabled_{false};     // Whether BSP mode is active
+  int bsp_horizon_number_{0};        // Current horizon number (for debugging)
 
   // Counter for deterministic final_id assignment during sync phase
   // Starts at 2 (root's children are 1 and 2), incremented by 2 for each branch

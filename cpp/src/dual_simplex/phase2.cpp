@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -2504,7 +2504,8 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     i_t remaining_iters = iter - last_feature_log_iter;
     if (remaining_iters <= 0) return;
     f_t prediction = predict_work_units(remaining_iters);
-    printf("DualSimplex determ (final): %d iters, predicted %.4f\n", remaining_iters, prediction);
+    // printf("DualSimplex determ (final): %d iters, predicted %.4f\n", remaining_iters,
+    // prediction);
     work_unit_context->record_work(prediction);
   });
 
@@ -3123,11 +3124,11 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
 
       if (work_unit_context) {
         f_t prediction = predict_work_units(iters_elapsed);
-        printf("DualSimplex determ: %d iters, predicted %.4f, actual %.4f, error %.4f\n",
-               iters_elapsed,
-               prediction,
-               features.interval_runtime,
-               prediction - features.interval_runtime);
+        // printf("DualSimplex determ: %d iters, predicted %.4f, actual %.4f, error %.4f\n",
+        //        iters_elapsed,
+        //        prediction,
+        //        features.interval_runtime,
+        //        prediction - features.interval_runtime);
         work_unit_context->record_work(prediction);
       }
 

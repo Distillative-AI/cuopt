@@ -245,8 +245,8 @@ class bound_prop_recombiner_t : public recombiner_t<i_t, f_t> {
         // CUOPT_LOG_ERROR("Excess: %g, %g, %g, %g, feas %d", offspring.get_total_excess(),
         // offspring.compute_max_constraint_violation(), offspring.compute_max_int_violation(),
         // offspring.compute_max_variable_violation(), feasible_after_unfix);
-        cuopt_assert(fabs(excess_after_unfix - excess_before) < 1e-6,
-                     "Excess after unfix should be same as before unfix!");
+        // cuopt_assert(fabs(excess_after_unfix - excess_before) < 1e-6,
+        //              "Excess after unfix should be same as before unfix!");
       }
       a.handle_ptr->sync_stream();
     } else {

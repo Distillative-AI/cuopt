@@ -19,6 +19,7 @@
 #include <dual_simplex/random.hpp>
 #include <dual_simplex/tic_toc.hpp>
 #include <dual_simplex/user_problem.hpp>
+#include <mip/utils.cuh>
 
 #include <raft/common/nvtx.hpp>
 
@@ -1871,6 +1872,8 @@ void branch_and_bound_t<i_t, f_t>::run_bsp_coordinator(const csr_matrix_t<i_t, f
 {
   raft::common::nvtx::range scope("BB::bsp_coordinator");
 
+  bsp_horizon_step_ = 0.05;
+
   const int num_workers = settings_.num_bfs_threads;
   bsp_mode_enabled_     = true;
   bsp_current_horizon_  = bsp_horizon_step_;
@@ -1910,6 +1913,10 @@ void branch_and_bound_t<i_t, f_t>::run_bsp_coordinator(const csr_matrix_t<i_t, f
 
   constexpr i_t target_queue_size = 5;  // Target nodes per worker
 
+  // Initial distribution: fill worker queues once at the start
+  refill_worker_queues(target_queue_size);
+  BSP_DEBUG_FLUSH_ASSIGN_TRACE(bsp_debug_settings_, bsp_debug_logger_);
+
   // Main BSP coordinator loop
   while (solver_status_ == mip_exploration_status_t::RUNNING &&
          abs_gap > settings_.absolute_mip_gap_tol && rel_gap > settings_.relative_mip_gap_tol &&
@@ -1921,12 +1928,6 @@ void branch_and_bound_t<i_t, f_t>::run_bsp_coordinator(const csr_matrix_t<i_t, f
     // Debug: Log horizon start
     BSP_DEBUG_LOG_HORIZON_START(
       bsp_debug_settings_, bsp_debug_logger_, bsp_horizon_number_, horizon_start, horizon_end);
-
-    // PHASE 1: ASSIGNMENT - Fill worker queues
-    refill_worker_queues(target_queue_size);
-
-    // Flush assignment trace after all assignments
-    BSP_DEBUG_FLUSH_ASSIGN_TRACE(bsp_debug_settings_, bsp_debug_logger_);
 
     // Reset workers for new horizon
     bsp_workers_->reset_for_horizon(horizon_start, horizon_end);
@@ -1963,9 +1964,54 @@ void branch_and_bound_t<i_t, f_t>::run_bsp_coordinator(const csr_matrix_t<i_t, f
     // Prune paused nodes that are now dominated by new incumbent
     prune_worker_nodes_vs_incumbent();
 
+    // Balance worker loads if significant imbalance detected
+    balance_worker_loads();
+    BSP_DEBUG_FLUSH_ASSIGN_TRACE(bsp_debug_settings_, bsp_debug_logger_);
+
     // Debug: Log horizon end, emit tree state and JSON state
     BSP_DEBUG_LOG_HORIZON_END(
       bsp_debug_settings_, bsp_debug_logger_, bsp_horizon_number_, horizon_end);
+
+    // Compute and log determinism fingerprint hash
+    // This hash captures all state that should be identical across deterministic runs
+    if (bsp_debug_settings_.any_enabled()) {
+      // Collect all determinism-critical state into a vector for hashing
+      std::vector<int32_t> state_data;
+
+      // Global state
+      state_data.push_back(static_cast<int32_t>(bsp_next_final_id_));
+      state_data.push_back(static_cast<int32_t>(exploration_stats_.nodes_explored));
+      state_data.push_back(static_cast<int32_t>(exploration_stats_.nodes_unexplored));
+
+      // Upper/lower bounds (convert to fixed-point for exact comparison)
+      f_t ub = get_upper_bound();
+      f_t lb = get_lower_bound();
+      state_data.push_back(static_cast<int32_t>(ub * 1000000));  // 6 decimal places
+      state_data.push_back(static_cast<int32_t>(lb * 1000000));
+
+      // Worker queue contents (sorted by final_id for determinism)
+      for (const auto& worker : *bsp_workers_) {
+        // Hash paused node if any
+        if (worker.current_node != nullptr) {
+          state_data.push_back(worker.current_node->final_id >= 0 ? worker.current_node->final_id
+                                                                  : worker.current_node->node_id);
+        }
+        // Hash local queue
+        std::vector<int> queue_fids;
+        for (const auto* node : worker.local_queue) {
+          queue_fids.push_back(node->final_id >= 0 ? node->final_id : node->node_id);
+        }
+        std::sort(queue_fids.begin(), queue_fids.end());
+        for (int fid : queue_fids) {
+          state_data.push_back(fid);
+        }
+      }
+
+      uint32_t hash = cuopt::mip::compute_hash(state_data);
+      BSP_DEBUG_LOG_HORIZON_HASH(
+        bsp_debug_settings_, bsp_debug_logger_, bsp_horizon_number_, horizon_end, hash);
+    }
+
     BSP_DEBUG_EMIT_TREE_STATE(bsp_debug_settings_,
                               bsp_debug_logger_,
                               bsp_horizon_number_,
@@ -2192,9 +2238,8 @@ node_solve_info_t branch_and_bound_t<i_t, f_t>::solve_node_bsp(bb_worker_state_t
   lp_settings.cut_off    = get_upper_bound() + settings_.dual_tol;
   lp_settings.inside_mip = 2;
   lp_settings.time_limit = settings_.time_limit - toc(exploration_stats_.start_time);
-  // Work limit is the remaining VT budget in this horizon
-  // Note: accumulated_vt tracks work already spent (for statistics), but doesn't increase budget
-  lp_settings.work_limit    = current_horizon - worker.clock;
+  // Work limit is the ABSOLUTE VT at which to pause (LP solver compares against absolute elapsed)
+  lp_settings.work_limit    = current_horizon;
   lp_settings.scale_columns = false;
 
   bool feasible = worker.node_presolver->bounds_strengthening(
@@ -2599,26 +2644,8 @@ void branch_and_bound_t<i_t, f_t>::process_history_and_sync(
     if (worker.current_node != nullptr) { apply_final_id(worker.current_node); }
   }
 
-  // Get current upper bound for pruning decisions
-  f_t upper_bound = get_upper_bound();
-
-  // Move ALL nodes from worker local queues to global heap for redistribution
-  // This ensures proper work distribution across workers each horizon
-  mutex_heap_.lock();
-  for (auto& worker : *bsp_workers_) {
-    while (!worker.local_queue.empty()) {
-      mip_node_t<i_t, f_t>* node = worker.local_queue.front();
-      worker.local_queue.pop_front();
-      // Only push non-pruned nodes
-      if (node->lower_bound < upper_bound) {
-        heap_.push(node);
-      } else {
-        search_tree_.update(node, node_status_t::FATHOMED);
-        --exploration_stats_.nodes_unexplored;
-      }
-    }
-  }
-  mutex_heap_.unlock();
+  // Workers keep their local queues across horizons - no redistribution here.
+  // Load balancing is handled separately in balance_worker_loads() if needed.
 }
 
 template <typename i_t, typename f_t>
@@ -2648,6 +2675,95 @@ void branch_and_bound_t<i_t, f_t>::prune_worker_nodes_vs_incumbent()
         ++it;
       }
     }
+  }
+}
+
+template <typename i_t, typename f_t>
+void branch_and_bound_t<i_t, f_t>::balance_worker_loads()
+{
+  const size_t num_workers = bsp_workers_->size();
+  if (num_workers <= 1) return;
+
+  // Count work for each worker: current_node (if any) + local_queue size
+  std::vector<size_t> work_counts(num_workers);
+  size_t total_work = 0;
+  size_t max_work   = 0;
+  size_t min_work   = std::numeric_limits<size_t>::max();
+
+  for (size_t w = 0; w < num_workers; ++w) {
+    auto& worker   = (*bsp_workers_)[w];
+    work_counts[w] = worker.local_queue.size();
+    if (worker.current_node != nullptr) { work_counts[w]++; }
+    total_work += work_counts[w];
+    max_work = std::max(max_work, work_counts[w]);
+    min_work = std::min(min_work, work_counts[w]);
+  }
+
+  // Check if we need to balance: significant imbalance = some worker has 0 work while others have
+  // 2+ Or max/min ratio is very high
+  bool needs_balance =
+    (min_work == 0 && max_work >= 2) || (min_work > 0 && max_work > 4 * min_work);
+
+  if (!needs_balance) return;
+
+  // Collect all redistributable nodes (from local queues only, not current_node which is paused)
+  std::vector<mip_node_t<i_t, f_t>*> all_nodes;
+  for (auto& worker : *bsp_workers_) {
+    while (!worker.local_queue.empty()) {
+      all_nodes.push_back(worker.local_queue.front());
+      worker.local_queue.pop_front();
+    }
+  }
+
+  // Also pull nodes from global heap if workers need work
+  mutex_heap_.lock();
+  f_t upper_bound = get_upper_bound();
+  while (!heap_.empty() && all_nodes.size() < num_workers * 5) {
+    mip_node_t<i_t, f_t>* node = heap_.top();
+    heap_.pop();
+    if (node->lower_bound < upper_bound) {
+      all_nodes.push_back(node);
+    } else {
+      search_tree_.update(node, node_status_t::FATHOMED);
+      --exploration_stats_.nodes_unexplored;
+    }
+  }
+  mutex_heap_.unlock();
+
+  if (all_nodes.empty()) return;
+
+  // Sort by deterministic ID for consistent distribution
+  std::sort(all_nodes.begin(),
+            all_nodes.end(),
+            [](const mip_node_t<i_t, f_t>* a, const mip_node_t<i_t, f_t>* b) {
+              return a->get_deterministic_id() < b->get_deterministic_id();
+            });
+
+  // Redistribute round-robin, but skip workers that have a paused current_node
+  // (they already have work and will resume that node first)
+  std::vector<size_t> worker_order;
+  for (size_t w = 0; w < num_workers; ++w) {
+    // Prioritize workers without a paused node
+    if ((*bsp_workers_)[w].current_node == nullptr) { worker_order.push_back(w); }
+  }
+  for (size_t w = 0; w < num_workers; ++w) {
+    if ((*bsp_workers_)[w].current_node != nullptr) { worker_order.push_back(w); }
+  }
+
+  // Distribute nodes
+  for (size_t i = 0; i < all_nodes.size(); ++i) {
+    size_t worker_idx = worker_order[i % num_workers];
+    (*bsp_workers_)[worker_idx].enqueue_node(all_nodes[i]);
+
+    // Debug: Log redistribution (happens at horizon END, at the sync point)
+    double vt = bsp_current_horizon_;
+    BSP_DEBUG_LOG_NODE_ASSIGNED(bsp_debug_settings_,
+                                bsp_debug_logger_,
+                                vt,
+                                static_cast<int>(worker_idx),
+                                all_nodes[i]->node_id,
+                                all_nodes[i]->final_id,
+                                all_nodes[i]->lower_bound);
   }
 }
 

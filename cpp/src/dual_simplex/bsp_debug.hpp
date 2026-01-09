@@ -37,6 +37,7 @@ namespace cuopt::linear_programming::dual_simplex {
 enum class bsp_log_event_t {
   HORIZON_START,       // New horizon begins
   HORIZON_END,         // Horizon completed
+  HORIZON_HASH,        // Determinism fingerprint for horizon
   NODE_ASSIGNED,       // Node assigned to worker
   NODE_SOLVE_START,    // Worker starts solving node
   NODE_SOLVE_END,      // Worker finishes node (with result type)
@@ -60,6 +61,7 @@ inline const char* bsp_log_event_name(bsp_log_event_t event)
   switch (event) {
     case bsp_log_event_t::HORIZON_START: return "HORIZON_START";
     case bsp_log_event_t::HORIZON_END: return "HORIZON_END";
+    case bsp_log_event_t::HORIZON_HASH: return "HORIZON_HASH";
     case bsp_log_event_t::NODE_ASSIGNED: return "NODE_ASSIGNED";
     case bsp_log_event_t::NODE_SOLVE_START: return "NODE_SOLVE_START";
     case bsp_log_event_t::NODE_SOLVE_END: return "NODE_SOLVE_END";
@@ -256,6 +258,24 @@ class bsp_debug_logger_t {
     if (settings_.enable_event_log) { log_event(vt, -1, bsp_log_event_t::HORIZON_END, -1, -1, ""); }
 
     if (settings_.enable_timeline) { emit_timeline_for_horizon(horizon_num); }
+  }
+
+  // Log determinism fingerprint hash for the horizon
+  // This hash captures all state that should be identical across deterministic runs
+  void log_horizon_hash(int horizon_num, double vt, uint32_t hash)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (settings_.enable_event_log) {
+      std::stringstream ss;
+      ss << "hash=0x" << std::hex << std::setfill('0') << std::setw(8) << hash;
+      log_event_unlocked(vt, -1, bsp_log_event_t::HORIZON_HASH, -1, -1, ss.str());
+    }
+
+    if (settings_.enable_determinism_trace) {
+      trace_ss_ << "H" << horizon_num << ":HASH:0x" << std::hex << std::setfill('0') << std::setw(8)
+                << hash << std::dec << "\n";
+    }
   }
 
   void log_node_assigned(double vt, int worker_id, i_t node_id, i_t final_id, f_t lower_bound)
@@ -859,6 +879,10 @@ class bsp_debug_logger_t {
   do {                                                             \
     if ((settings).any_enabled()) (logger).log_horizon_end(h, vt); \
   } while (0)
+#define BSP_DEBUG_LOG_HORIZON_HASH(settings, logger, h, vt, hash)         \
+  do {                                                                    \
+    if ((settings).any_enabled()) (logger).log_horizon_hash(h, vt, hash); \
+  } while (0)
 #define BSP_DEBUG_LOG_NODE_ASSIGNED(settings, logger, vt, w, nid, fid, lb)         \
   do {                                                                             \
     if ((settings).any_enabled()) (logger).log_node_assigned(vt, w, nid, fid, lb); \
@@ -946,6 +970,7 @@ class bsp_debug_logger_t {
 
 #define BSP_DEBUG_LOG_HORIZON_START(settings, logger, h, vs, ve)                  ((void)0)
 #define BSP_DEBUG_LOG_HORIZON_END(settings, logger, h, vt)                        ((void)0)
+#define BSP_DEBUG_LOG_HORIZON_HASH(settings, logger, h, vt, hash)                 ((void)0)
 #define BSP_DEBUG_LOG_NODE_ASSIGNED(settings, logger, vt, w, nid, fid, lb)        ((void)0)
 #define BSP_DEBUG_FLUSH_ASSIGN_TRACE(settings, logger)                            ((void)0)
 #define BSP_DEBUG_LOG_SOLVE_START(settings, logger, vt, w, nid, fid, wl, resumed) ((void)0)
