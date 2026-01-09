@@ -195,6 +195,11 @@ class branch_and_bound_t {
 
   // Selects the variable to branch on.
   branch_variable_t<i_t> variable_selection(mip_node_t<i_t, f_t>* node_ptr,
+                                            const lp_problem_t<i_t, f_t>& lp,
+                                            const simplex_solver_settings_t<i_t, f_t>& lp_settings,
+                                            const std::vector<variable_type_t>& var_types,
+                                            const std::vector<variable_status_t>& vstatus,
+                                            const std::vector<f_t>& edge_norms,
                                             const std::vector<i_t>& fractional,
                                             const std::vector<f_t>& solution,
                                             bnb_worker_type_t type);

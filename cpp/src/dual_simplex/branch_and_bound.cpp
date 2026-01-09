@@ -553,6 +553,11 @@ rounding_direction_t martin_criteria(f_t val, f_t root_val)
 template <typename i_t, typename f_t>
 branch_variable_t<i_t> branch_and_bound_t<i_t, f_t>::variable_selection(
   mip_node_t<i_t, f_t>* node_ptr,
+  const lp_problem_t<i_t, f_t>& lp,
+  const simplex_solver_settings_t<i_t, f_t>& lp_settings,
+  const std::vector<variable_type_t>& var_types,
+  const std::vector<variable_status_t>& vstatus,
+  const std::vector<f_t>& edge_norms,
   const std::vector<i_t>& fractional,
   const std::vector<f_t>& solution,
   bnb_worker_type_t type)
@@ -565,8 +570,18 @@ branch_variable_t<i_t> branch_and_bound_t<i_t, f_t>::variable_selection(
 
   switch (type) {
     case bnb_worker_type_t::EXPLORATION:
-      branch_var = pc_.variable_selection(fractional, solution, log);
-      round_dir  = martin_criteria(solution[branch_var], root_relax_soln_.x[branch_var]);
+      // branch_var = pc_.variable_selection(fractional, solution, log);
+      branch_var = pc_.reliable_variable_selection(lp,
+                                                   lp_settings,
+                                                   var_types_,
+                                                   vstatus,
+                                                   edge_norms,
+                                                   fractional,
+                                                   solution,
+                                                   node_ptr->lower_bound,
+                                                   log);
+
+      round_dir = martin_criteria(solution[branch_var], root_relax_soln_.x[branch_var]);
 
       // Note that the exploration thread is the only one that can insert new nodes into the heap,
       // and thus, we only need to calculate the objective estimate here (it is used for
@@ -643,13 +658,13 @@ dual::status_t branch_and_bound_t<i_t, f_t>::solve_node_lp(mip_node_t<i_t, f_t>*
     node_ptr->vstatus[node_ptr->branch_var]);
 #endif
 
-  bool is_feasible         = worker_data->set_lp_variable_bounds_for(node_ptr, settings_);
-  dual::status_t lp_status = dual::status_t::DUAL_UNBOUNDED;
+  bool is_feasible                 = worker_data->set_lp_variable_bounds_for(node_ptr, settings_);
+  dual::status_t lp_status         = dual::status_t::DUAL_UNBOUNDED;
+  std::vector<f_t> leaf_edge_norms = edge_norms_;  // = node.steepest_edge_norms;
 
   if (is_feasible) {
-    i_t node_iter                    = 0;
-    f_t lp_start_time                = tic();
-    std::vector<f_t> leaf_edge_norms = edge_norms_;  // = node.steepest_edge_norms;
+    i_t node_iter     = 0;
+    f_t lp_start_time = tic();
 
     lp_status = dual_phase2_with_advanced_basis(2,
                                                 0,
@@ -748,8 +763,16 @@ std::pair<node_status_t, rounding_direction_t> branch_and_bound_t<i_t, f_t>::upd
 
     } else if (leaf_objective <= upper_bound_ + abs_fathom_tol) {
       // Choose fractional variable to branch on
-      auto [branch_var, round_dir] =
-        variable_selection(node_ptr, leaf_fractional, leaf_solution.x, worker_data->worker_type);
+      auto [branch_var, round_dir] = variable_selection(node_ptr,
+                                                        leaf_problem,
+                                                        lp_settings,
+                                                        var_types_,
+                                                        leaf_vstatus,
+                                                        leaf_edge_norms,
+                                                        leaf_fractional,
+                                                        leaf_solution.x,
+                                                        thread_type,
+                                                        lp_settings.log);
 
       assert(leaf_vstatus.size() == leaf_problem.num_cols);
       assert(branch_var >= 0);
