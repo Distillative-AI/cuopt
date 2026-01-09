@@ -357,6 +357,7 @@ f_t pseudo_costs_t<i_t, f_t>::obj_estimate(const std::vector<i_t>& fractional,
       std::min(std::max(pseudo_cost_down * f_down, eps), std::max(pseudo_cost_up * f_up, eps));
   }
 
+  log.debug("pseudocost estimate = %e\n", estimate);
   return estimate;
 }
 
