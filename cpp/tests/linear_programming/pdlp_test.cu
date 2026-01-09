@@ -227,7 +227,7 @@ TEST(pdlp_class, run_sub_mittleman)
                               solution.get_primal_solution(),
                               solution.get_additional_termination_information().primal_objective,
                               epsilon);
-        test_constraint_sanity(op_problem, solution, epsilon, presolve);
+        test_constraint_sanity(op_problem, solution.get_additional_termination_information(0), solution.get_primal_solution(), epsilon, presolve);
       }
     }
   }
@@ -999,7 +999,14 @@ TEST(pdlp_class, test_lp_no_constraints)
   EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERIMINATION_STATUS_OPTIMAL);
   EXPECT_NEAR(
     solution.get_additional_termination_information().primal_objective, 1.0, factor_tolerance);
+}
 
+template <typename T>
+rmm::device_uvector<T> extract_subvector(const rmm::device_uvector<T>& vector, size_t start, size_t length)
+{
+  rmm::device_uvector<T> subvector(length, vector.stream());
+  raft::copy(subvector.data(), vector.data() + start, length, vector.stream());
+  return subvector;
 }
 
 
@@ -1065,8 +1072,12 @@ TEST(pdlp_class, simple_batch_afiro)
       EXPECT_EQ(ref_primal_solution[p], ref_primal_solution[p + i * primal_size]);
     for (size_t d = 0; d < dual_size; ++d)
       EXPECT_EQ(ref_dual_solution[d], ref_dual_solution[d + i * dual_size]);
-    break;
   }
+
+  const auto primal_solution = extract_subvector(solution.get_primal_solution(), 0, primal_size);
+
+  test_objective_sanity(op_problem, primal_solution, solution.get_additional_termination_information(0).primal_objective);
+  test_constraint_sanity(op_problem, solution.get_additional_termination_information(0), primal_solution, tolerance, false);
 }
 
 TEST(pdlp_class, simple_batch_different_bounds)
@@ -1080,22 +1091,21 @@ TEST(pdlp_class, simple_batch_different_bounds)
   auto solver_settings   = pdlp_solver_settings_t<int, double>{};
   solver_settings.method = cuopt::linear_programming::method_t::PDLP;
 
-  // Setup a larger batch afiro but with different bounds on the first climber
   const std::vector<double>& variable_lower_bounds = op_problem.get_variable_lower_bounds();
   const std::vector<double>& variable_upper_bounds = op_problem.get_variable_upper_bounds();
+  
+  // Solve alone to get ref
+  auto op_problem_ref = op_problem;
+  op_problem_ref.get_variable_lower_bounds()[5] = 4.0;
+  op_problem_ref.get_variable_upper_bounds()[5] = 5.0;
+  
+  optimization_problem_solution_t<int, double> solution =
+  solve_lp(&handle_, op_problem_ref, solver_settings);
 
   // Create new variable bounds for the first climber in the batch
   solver_settings.new_bounds.push_back({5, 4.0, 5.0});
   // The second climber has no changes
   solver_settings.new_bounds.push_back({0, variable_lower_bounds[0], variable_upper_bounds[0]});
-
-  // Solve alone to get ref
-  auto op_problem_ref = op_problem;
-  op_problem_ref.get_variable_lower_bounds()[5] = 4.0;
-  op_problem_ref.get_variable_upper_bounds()[5] = 5.0;
-
-  optimization_problem_solution_t<int, double> solution =
-    solve_lp(&handle_, op_problem_ref, solver_settings);
 
   const auto new_primal = solution.get_additional_termination_information(0).primal_objective;
 
@@ -1111,6 +1121,11 @@ TEST(pdlp_class, simple_batch_different_bounds)
   EXPECT_EQ((int)solution2.get_termination_status(1), CUOPT_TERIMINATION_STATUS_OPTIMAL);
   EXPECT_FALSE(is_incorrect_objective(
     afiro_primal_objective, solution2.get_additional_termination_information(1).primal_objective));
+
+  const auto primal_solution = extract_subvector(solution2.get_primal_solution(), 0, solution2.get_primal_solution().size() / 2);
+
+  test_objective_sanity(op_problem_ref, primal_solution, solution2.get_additional_termination_information(0).primal_objective);
+  test_constraint_sanity(op_problem_ref, solution2.get_additional_termination_information(0), primal_solution, tolerance, false);
 }
 
 TEST(pdlp_class, more_complex_batch_different_bounds)
@@ -1130,17 +1145,6 @@ TEST(pdlp_class, more_complex_batch_different_bounds)
   const std::vector<double>& variable_lower_bounds = op_problem.get_variable_lower_bounds();
   const std::vector<double>& variable_upper_bounds = op_problem.get_variable_upper_bounds();
 
-  // Climber #0: no-op
-  solver_settings.new_bounds.push_back({0, variable_lower_bounds[0], variable_upper_bounds[0]});
-  // Climber #1: var 5 -> [4.0, 5.0]
-  solver_settings.new_bounds.push_back({5, 4.0, 5.0});
-  // Climber #2: no-op
-  solver_settings.new_bounds.push_back({0, variable_lower_bounds[0], variable_upper_bounds[0]});
-  // Climber #3: var 1 -> [-7.0, 13.0]
-  solver_settings.new_bounds.push_back({1, -7.0, 13.0});
-  // Climber #4: no-op
-  solver_settings.new_bounds.push_back({0, variable_lower_bounds[0], variable_upper_bounds[0]});
-
   // Get ref for climber #1
   auto op_problem_ref1 = op_problem;
   op_problem_ref1.get_variable_lower_bounds()[5] = 4.0;
@@ -1156,6 +1160,17 @@ TEST(pdlp_class, more_complex_batch_different_bounds)
   optimization_problem_solution_t<int, double> solution2 =
     solve_lp(&handle_, op_problem_ref3, solver_settings);
   const auto second_new_primal = solution2.get_additional_termination_information(0).primal_objective;
+
+  // Climber #0: no-op
+  solver_settings.new_bounds.push_back({0, variable_lower_bounds[0], variable_upper_bounds[0]});
+  // Climber #1: var 5 -> [4.0, 5.0]
+  solver_settings.new_bounds.push_back({5, 4.0, 5.0});
+  // Climber #2: no-op
+  solver_settings.new_bounds.push_back({0, variable_lower_bounds[0], variable_upper_bounds[0]});
+  // Climber #3: var 1 -> [-7.0, 13.0]
+  solver_settings.new_bounds.push_back({1, -7.0, 13.0});
+  // Climber #4: no-op
+  solver_settings.new_bounds.push_back({0, variable_lower_bounds[0], variable_upper_bounds[0]});
 
   // Setup and solve batch
   optimization_problem_solution_t<int, double> solution3 =
@@ -1177,6 +1192,25 @@ TEST(pdlp_class, more_complex_batch_different_bounds)
 
   EXPECT_FALSE(is_incorrect_objective(
     second_new_primal, solution3.get_additional_termination_information(3).primal_objective));
+
+  const size_t primal_size = solution3.get_primal_solution().size() / batch_size;
+
+  // Sanity checks for all climbers
+  for (size_t i = 0; i < batch_size; ++i) {
+    const auto current_primal_solution = extract_subvector(solution3.get_primal_solution(), i * primal_size, primal_size);
+    const auto& current_info = solution3.get_additional_termination_information(i);
+
+    if (i == 1) {
+      test_objective_sanity(op_problem_ref1, current_primal_solution, current_info.primal_objective);
+      test_constraint_sanity(op_problem_ref1, current_info, current_primal_solution, tolerance, false);
+    } else if (i == 3) {
+      test_objective_sanity(op_problem_ref3, current_primal_solution, current_info.primal_objective);
+      test_constraint_sanity(op_problem_ref3, current_info, current_primal_solution, tolerance, false);
+    } else {
+      test_objective_sanity(op_problem, current_primal_solution, current_info.primal_objective);
+      test_constraint_sanity(op_problem, current_info, current_primal_solution, tolerance, false);
+    }
+  }
 }
 
 TEST(pdlp_class, cupdlpx_infeasible_detection_afiro_new_bounds)
@@ -1400,6 +1434,11 @@ TEST(pdlp_class, big_batch_afiro)
       EXPECT_EQ(ref_dual_solution[d], ref_dual_solution[d + i * dual_size]);
     break;
   }
+
+  const auto primal_solution = extract_subvector(solution.get_primal_solution(), primal_size * (batch_size - 1), primal_size);
+
+  test_objective_sanity(op_problem, primal_solution, solution.get_additional_termination_information(batch_size - 1).primal_objective);
+  test_constraint_sanity(op_problem, solution.get_additional_termination_information(batch_size - 1), primal_solution, tolerance, false);
 }
 
 // Disabled until we have a reliable way to detect infeasibility
@@ -1478,6 +1517,104 @@ TEST(pdlp_class, DISABLED_larger_batch_optimal_and_infeasible)
     afiro_primal_objective, solution.get_additional_termination_information(2).primal_objective));
   EXPECT_FALSE(is_incorrect_objective(
     afiro_primal_objective, solution.get_additional_termination_information(4).primal_objective));
+}
+
+TEST(pdlp_class, strong_branching_test)
+{
+  const raft::handle_t handle_{};
+
+  auto path = make_path_absolute("linear_programming/afiro_original.mps");
+  cuopt::mps_parser::mps_data_model_t<int, double> op_problem =
+    cuopt::mps_parser::parse_mps<int, double>(path, true);
+
+  const std::vector<int> fractional = {1, 2, 4};
+  const std::vector<double> root_soln_x = {0.891, 0.109, 0.636429};
+
+  auto solver_settings   = pdlp_solver_settings_t<int, double>{};
+  solver_settings.method = cuopt::linear_programming::method_t::PDLP;
+  solver_settings.detect_infeasibility = true;
+  solver_settings.pdlp_solver_mode = pdlp_solver_mode_t::Stable3;
+  solver_settings.presolve = false;
+
+  const int n_fractional = fractional.size();
+  const int batch_size = n_fractional * 2;
+
+  std::vector<double> ref_objectives(batch_size);
+  std::vector<pdlp_termination_status_t> ref_statuses(batch_size);
+  std::vector<cuopt::mps_parser::mps_data_model_t<int, double>> ref_problems;
+
+  // Logic from batch_pdlp_solve in solve.cu:
+  // Down branches first, then Up branches
+
+  // Down branches
+  for (int i = 0; i < n_fractional; ++i) {
+    auto ref_prob = op_problem;
+    int var_idx = fractional[i];
+    ref_prob.get_variable_upper_bounds()[var_idx] = std::floor(root_soln_x[i]);
+    ref_problems.push_back(ref_prob);
+  }
+  // Up branches
+  for (int i = 0; i < n_fractional; ++i) {
+    auto ref_prob = op_problem;
+    int var_idx = fractional[i];
+    ref_prob.get_variable_lower_bounds()[var_idx] = std::ceil(root_soln_x[i]);
+    ref_problems.push_back(ref_prob);
+  }
+
+  // Solve references
+  for (int i = 0; i < batch_size; ++i) {
+    auto sol = solve_lp(&handle_, ref_problems[i], solver_settings);
+    ref_statuses[i] = sol.get_termination_status(0);
+    ref_objectives[i] = sol.get_additional_termination_information(0).primal_objective;
+  }
+
+  // Solve batch
+  auto batch_sol = batch_pdlp_solve(&handle_, op_problem, fractional, root_soln_x, solver_settings);
+
+  EXPECT_EQ((int)batch_sol.get_terminations_status().size(), batch_size);
+  const size_t primal_size = op_problem.get_n_variables();
+
+  for (int i = 0; i < batch_size; ++i) {
+    EXPECT_EQ(batch_sol.get_termination_status(i), ref_statuses[i]);
+    // Climber in the batch that have gained optimality can lose optimality while other are still optimizing
+    // This can lead to differences in the objective values, so we allow for a small tolerance
+    EXPECT_NEAR(batch_sol.get_additional_termination_information(i).primal_objective, ref_objectives[i], 1e-1);
+
+    // Sanity checks
+    const auto current_primal_solution = extract_subvector(batch_sol.get_primal_solution(), i * primal_size, primal_size);
+    const auto& current_info = batch_sol.get_additional_termination_information(i);
+
+    test_objective_sanity(ref_problems[i], current_primal_solution, current_info.primal_objective);
+    test_constraint_sanity(ref_problems[i], current_info, current_primal_solution, tolerance, false);
+  }
+
+  // Now run again using the new_bounds API which does not leverage the optimal batch size but should results in the bit wise same results
+  // since in this case, the optimal batch size is also the max batch size
+  for (int i = 0; i < n_fractional; ++i) {
+    solver_settings.new_bounds.push_back({fractional[i], op_problem.get_variable_lower_bounds()[fractional[i]], std::floor(root_soln_x[i])});
+  }
+  for (int i = 0; i < n_fractional; ++i) {
+    solver_settings.new_bounds.push_back({fractional[i], std::ceil(root_soln_x[i]), op_problem.get_variable_upper_bounds()[fractional[i]]});
+  }
+  auto batch_sol2 = solve_lp(&handle_, op_problem, solver_settings);
+  EXPECT_EQ(batch_sol2.get_terminations_status().size(), batch_size);
+  for (int i = 0; i < batch_size; ++i) {
+    EXPECT_EQ(batch_sol2.get_termination_status(i), batch_sol.get_termination_status(i));
+    EXPECT_EQ(batch_sol2.get_additional_termination_information(i).primal_objective, batch_sol.get_additional_termination_information(i).primal_objective);
+    EXPECT_EQ(batch_sol2.get_additional_termination_information(i).dual_objective, batch_sol.get_additional_termination_information(i).dual_objective);
+    EXPECT_EQ(batch_sol2.get_additional_termination_information(i).number_of_steps_taken, batch_sol.get_additional_termination_information(i).number_of_steps_taken);
+    EXPECT_EQ(batch_sol2.get_additional_termination_information(i).total_number_of_attempted_steps, batch_sol.get_additional_termination_information(i).total_number_of_attempted_steps);
+    EXPECT_EQ(batch_sol2.get_additional_termination_information(i).l2_primal_residual, batch_sol.get_additional_termination_information(i).l2_primal_residual);
+    EXPECT_EQ(batch_sol2.get_additional_termination_information(i).l2_dual_residual, batch_sol.get_additional_termination_information(i).l2_dual_residual);
+  }
+  const auto batch_sol1_primal_host = host_copy(batch_sol.get_primal_solution());
+  const auto batch_sol2_primal_host = host_copy(batch_sol2.get_primal_solution());
+  const auto batch_sol1_dual_host = host_copy(batch_sol.get_dual_solution());
+  const auto batch_sol2_dual_host = host_copy(batch_sol2.get_dual_solution());
+  for (size_t p = 0; p < batch_sol1_primal_host.size(); ++p)
+    EXPECT_EQ(batch_sol1_primal_host[p], batch_sol2_primal_host[p]);
+  for (size_t d = 0; d < batch_sol1_dual_host.size(); ++d)
+    EXPECT_EQ(batch_sol1_dual_host[d], batch_sol2_dual_host[d]);
 }
 
 }  // namespace cuopt::linear_programming::test

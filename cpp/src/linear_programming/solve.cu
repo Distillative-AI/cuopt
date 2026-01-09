@@ -701,10 +701,10 @@ optimization_problem_solution_t<i_t, f_t> batch_pdlp_solve(
   int batch_size = only_upper ? fractional.size() : fractional.size() * 2;
 
   for (size_t i = 0; i < fractional.size(); ++i)
-    settings.new_bounds.push_back({fractional[i], mps_model.get_variable_lower_bounds()[fractional[i]], std::floor(root_soln_x[fractional[i]])});
+    settings.new_bounds.push_back({fractional[i], mps_model.get_variable_lower_bounds()[fractional[i]], std::floor(root_soln_x[i])});
   if (!only_upper) {
     for (size_t i = 0; i < fractional.size(); i++)
-      settings.new_bounds.push_back({fractional[i], std::ceil(root_soln_x[fractional[i]]), mps_model.get_variable_upper_bounds()[fractional[i]]});
+      settings.new_bounds.push_back({fractional[i], std::ceil(root_soln_x[i]), mps_model.get_variable_upper_bounds()[fractional[i]]});
   }
 
   optimization_problem_t<i_t, f_t> op_problem = mps_data_model_to_optimization_problem(handle_ptr, mps_model);

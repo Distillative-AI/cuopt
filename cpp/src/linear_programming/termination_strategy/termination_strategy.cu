@@ -295,6 +295,9 @@ if (idx == 0)
       termination_status[idx] = (i_t)pdlp_termination_status_t::PrimalFeasible;
       return;
     }
+    else {
+      termination_status[idx] = (i_t)pdlp_termination_status_t::NoTermination;
+    }
   }
 
   if (infeasibility_detection) {

@@ -130,6 +130,7 @@ class pdlp_solver_t {
 
   #ifdef BATCH_VERBOSE_MODE
   std::unordered_map<i_t, i_t> climber_done;
+  std::unordered_map<i_t, i_t> climber_was_done;
   #endif
 
   problem_t<i_t, f_t>* problem_ptr;

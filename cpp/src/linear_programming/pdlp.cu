@@ -599,20 +599,29 @@ std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>
     {
       climber_done.emplace(i, total_pdlp_iterations_);
       std::cout << "[BATCH MODE]: Climber " << i << " is done with "
-        << optimization_problem_solution_t<i_t, f_t>::get_termination_status_string(term) << " at step " << total_pdlp_iterations_ << std::endl;
+      << optimization_problem_solution_t<i_t, f_t>::get_termination_status_string(term) << " at step " << total_pdlp_iterations_ << std::endl;
     }
     if (climber_done.find(i) != climber_done.end() && !current_termination_strategy_.is_done(term)) // Check if one is now not feasible anymore
     {
-      std::cout << "[BATCH MODE]: Climber " << i << " is now not feasible anymore with "
+      if (climber_was_done.find(i) == climber_was_done.end())
+      {
+        std::cout << "[BATCH MODE]: Climber " << i << " is now not feasible anymore with "
+          << optimization_problem_solution_t<i_t, f_t>::get_termination_status_string(term) << " at step " << total_pdlp_iterations_ << std::endl;
+        climber_was_done.emplace(i, total_pdlp_iterations_);
+      }
+    }
+    if (climber_was_done.find(i) != climber_was_done.end() && current_termination_strategy_.is_done(term))
+    {
+      std::cout << "[BATCH MODE]: Climber " << i << " is now feasible again with "
         << optimization_problem_solution_t<i_t, f_t>::get_termination_status_string(term) << " at step " << total_pdlp_iterations_ << std::endl;
+      climber_was_done.erase(i);
     }
   }
   #endif
 
 
   // All are optimal or infeasible
-  // TODO batch mode: remove the right one once done analyzing
-  if (current_termination_strategy_.all_done()/* || climber_done.size() == current_termination_strategy_.get_terminations_status().size()*/)
+  if (current_termination_strategy_.all_done())
   {
   #ifdef BATCH_VERBOSE_MODE
     i_t max_it_finish = -1;
