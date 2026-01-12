@@ -25,7 +25,8 @@ class pseudo_costs_t {
     : pseudo_cost_sum_down(num_variables),
       pseudo_cost_sum_up(num_variables),
       pseudo_cost_num_down(num_variables),
-      pseudo_cost_num_up(num_variables)
+      pseudo_cost_num_up(num_variables),
+      pseudo_cost_mutex(num_variables)
   {
   }
 
@@ -37,12 +38,13 @@ class pseudo_costs_t {
     pseudo_cost_sum_up.resize(num_variables);
     pseudo_cost_num_down.resize(num_variables);
     pseudo_cost_num_up.resize(num_variables);
+    pseudo_cost_mutex.resize(num_variables);
   }
 
   void initialized(i_t& num_initialized_down,
                    i_t& num_initialized_up,
                    f_t& pseudo_cost_down_avg,
-                   f_t& pseudo_cost_up_avg) const;
+                   f_t& pseudo_cost_up_avg);
 
   i_t variable_selection(const std::vector<i_t>& fractional,
                          const std::vector<f_t>& solution,
@@ -75,8 +77,7 @@ class pseudo_costs_t {
   std::vector<i_t> pseudo_cost_num_down;
   std::vector<f_t> strong_branch_down;
   std::vector<f_t> strong_branch_up;
-
-  omp_mutex_t mutex;
+  std::vector<omp_mutex_t> pseudo_cost_mutex;
   omp_atomic_t<i_t> num_strong_branches_completed = 0;
 };
 
