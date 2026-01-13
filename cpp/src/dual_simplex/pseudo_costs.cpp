@@ -422,12 +422,13 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
              pseudo_cost_down_avg,
              pseudo_cost_up_avg);
 
-  const i_t max_iter     = 0.5 * bnb_lp_iter;
-  const i_t gamma        = (max_iter - total_lp_iter) / (total_lp_iter + 1);
-  const i_t max_v        = 5;
-  const i_t min_v        = 1;
-  i_t reliable_threshold = std::clamp((1 - gamma) * min_v + gamma * max_v, min_v, max_v);
-  reliable_threshold     = total_lp_iter < max_iter ? reliable_threshold : 0;
+  // const i_t max_iter     = 0.5 * bnb_lp_iter;
+  // const i_t gamma        = (max_iter - total_lp_iter) / (total_lp_iter + 1);
+  // const i_t max_v        = 5;
+  // const i_t min_v        = 1;
+  // i_t reliable_threshold = std::clamp((1 - gamma) * min_v + gamma * max_v, min_v, max_v);
+  // reliable_threshold     = total_lp_iter < max_iter ? reliable_threshold : 0;
+  i_t reliable_threshold = 1;
 
   settings.log.debug("RB LP iterations = %d, B&B LP iterations = %d reliable_threshold = %d\n",
                      total_lp_iter.load(),
