@@ -564,7 +564,7 @@ void pdlp_solver_t<i_t, f_t>::print_final_termination_criteria(
   bool is_average)
 {
   if (!inside_mip_) {
-    // TODO batch mode: handle this
+    // TODO less critical batch mode: handle this
     print_termination_criteria(timer, is_average);
     CUOPT_LOG_INFO(
       "LP Solver status:                %s",
@@ -723,7 +723,7 @@ pdhg_solver_.get_saddle_point_state().get_delta_primal(),
 
   if (settings_.first_primal_feasible) {
     // Both primal feasible, return best objective
-    // TODO batch mode: handle primal feasible here
+    // TODO later batch mode: handle primal feasible here
     cuopt_expects(!(climber_strategies_.size() > 1), error_type_t::ValidationError, "First primal feasible is not supported in batch mode");
     if (termination_average == pdlp_termination_status_t::PrimalFeasible &&
         termination_current == pdlp_termination_status_t::PrimalFeasible) {
@@ -856,7 +856,6 @@ pdhg_solver_.get_saddle_point_state().get_delta_primal(),
     std::cout << "Optimal. End total number of iteration current=" << internal_solver_iterations_
               << std::endl;
 #endif
-    // TODO batch mode: for now only print detail of the first climber
     print_final_termination_criteria(
       timer, current_termination_strategy_.get_convergence_information(), termination_current);
     return current_termination_strategy_.fill_return_problem_solution(
@@ -879,7 +878,6 @@ pdhg_solver_.get_saddle_point_state().get_delta_primal(),
   // (If infeasibility_detection is not set, termination reason cannot be Infeasible)
   if (settings_.detect_infeasibility)
   {
-    // TODO batch mode: handle part of the batch being done
     if (settings_.strict_infeasibility || settings_.hyper_params.never_restart_to_average) {
       if (termination_current == pdlp_termination_status_t::PrimalInfeasible ||
           termination_current == pdlp_termination_status_t::DualInfeasible) {
@@ -1775,7 +1773,7 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
             ((total_pdlp_iterations_ + 1) % settings_.hyper_params.major_iteration == 0 ||
           std::any_of(has_restarted.begin(), has_restarted.end(), [](int restarted){ return restarted == 1; })))
         {
-          // TODO batch mode: remove this once you have per solution score
+          // TODO later batch mode: remove this once if you have per climber restart
           if (std::any_of(has_restarted.begin(), has_restarted.end(), [](int restarted){ return restarted == 1; }))
             cuopt_assert(std::all_of(has_restarted.begin(), has_restarted.end(), [](int restarted){ return restarted == 1; }), "If any, all should be true");
           if (batch_mode_) {
@@ -1852,7 +1850,7 @@ void pdlp_solver_t<i_t, f_t>::halpern_update()
 {
   raft::common::nvtx::range fun_scope("halpern_update");
 
-  // TODO batch mode: handle if element in the batch have different one if restart per climber
+  // TODO later batch mode: handle if element in the batch have different one if restart per climber
   const f_t weight =
     f_t(restart_strategy_.weighted_average_solution_.get_iterations_since_last_restart() + 1) /
     f_t(restart_strategy_.weighted_average_solution_.get_iterations_since_last_restart() + 2);

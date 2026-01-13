@@ -265,6 +265,7 @@ template <typename i_t, typename f_t>
 void optimization_problem_solution_t<i_t, f_t>::set_solve_time(double ms)
 {
   // TODO batch mode: shouldn't we have a different solve time per climber?
+  // Currently the issue is that we would need one solve time per climber and one overall solve time
   std::for_each(termination_stats_.begin(), termination_stats_.end(), [ms](auto& termination) { termination.solve_time = ms; });
 }
 
@@ -272,14 +273,15 @@ template <typename i_t, typename f_t>
 void optimization_problem_solution_t<i_t, f_t>::set_termination_status(
   pdlp_termination_status_t termination_status)
 {
-  // TODO batch mode: is that ok?
+  cuopt_assert(termination_stats_.size() == 1, "Set termination status only supported in non batch mode");
   termination_status_[0] = termination_status;
 }
 
 template <typename i_t, typename f_t>
 double optimization_problem_solution_t<i_t, f_t>::get_solve_time() const
 {
-  // TODO batch mode: is that ok?
+  // TODO batch mode: shouldn't we have a different solve time per climber?
+  // Currently the issue is that we would need one solve time per climber and one overall solve tim
   return termination_stats_[0].solve_time;
 }
 

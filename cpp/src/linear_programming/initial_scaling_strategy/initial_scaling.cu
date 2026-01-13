@@ -472,7 +472,7 @@ void pdlp_initial_scaling_strategy_t<i_t, f_t>::scale_problem()
       stream_view_);
   }
 
-  // TODO batch mode: handle different constraints bounds
+  // TODO later batch mode: handle different constraints bounds
   raft::linalg::eltwiseMultiply(
     const_cast<rmm::device_uvector<f_t>&>(op_problem_scaled_.constraint_lower_bounds).data(),
     op_problem_scaled_.constraint_lower_bounds.data(),

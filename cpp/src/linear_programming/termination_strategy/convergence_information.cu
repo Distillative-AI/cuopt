@@ -47,7 +47,7 @@ convergence_information_t<i_t, f_t>::convergence_information_t(
     problem_ptr(&op_problem),
     op_problem_cusparse_view_(cusparse_view),
     l2_norm_primal_linear_objective_{0.0, stream_view_},
-    l2_norm_primal_right_hand_side_{0.0, stream_view_}, // TODO batch mode: per problem rhs
+    l2_norm_primal_right_hand_side_{0.0, stream_view_}, // TODO later batch mode: per problem rhs
     primal_objective_{climber_strategies.size(), stream_view_},
     dual_objective_{climber_strategies.size(), stream_view_},
     reduced_cost_dual_objective_{f_t(0.0), stream_view_},
@@ -87,7 +87,7 @@ convergence_information_t<i_t, f_t>::convergence_information_t(
   batch_mode_);  // primal_residual_ will contain abs max of bounds when
                         // finite, otherwise 0 //just reused allocated mem here
 
-  // TODO batch mode: different objective coefficients
+  // TODO later batch mode: different objective coefficients
   // constant throughout solving, so precompute
   my_l2_norm<i_t, f_t>(
     problem_ptr->objective_coefficients, l2_norm_primal_linear_objective_, handle_ptr_);
@@ -98,7 +98,7 @@ convergence_information_t<i_t, f_t>::convergence_information_t(
     my_l2_norm<i_t, f_t>(primal_residual_, l2_norm_primal_right_hand_side_, handle_ptr_);
   }
   else {
-    // TODO batch mode: different constraints bounds
+    // TODO later batch mode: different constraints bounds
     compute_sum_bounds(problem_ptr->constraint_lower_bounds,
                        problem_ptr->constraint_upper_bounds,
                        l2_norm_primal_right_hand_side_,
@@ -261,7 +261,7 @@ void convergence_information_t<i_t, f_t>::compute_convergence_information(
 #endif
   // If per_constraint_residual is false we still need to perform the l2 since it's used in kkt
   if (settings.per_constraint_residual) {
-    // TODO batch mode: handle per_constraint_residual here
+    // TODO later batch mode: handle per_constraint_residual here
     cuopt_expects(!batch_mode_, error_type_t::ValidationError, "Batch mode not supported for per_constraint_residual");
 
     // Compute the linf of (residual_i - rel * b_i)
@@ -316,7 +316,7 @@ void convergence_information_t<i_t, f_t>::compute_convergence_information(
 #endif
   // If per_constraint_residual is false we still need to perform the l2 since it's used in kkt
   if (settings.per_constraint_residual) {
-    // TODO batch mode: handle per_constraint_residual here
+    // TODO later batch mode: handle per_constraint_residual here
     cuopt_expects(!(climber_strategies_.size() > 1), error_type_t::ValidationError, "Batch mode not supported for per_constraint_residual");
 
     // Compute the linf of (residual_i - rel * c_i)
@@ -766,7 +766,7 @@ f_t convergence_information_t<i_t, f_t>::get_relative_gap_value(i_t climber_stra
 template <typename i_t, typename f_t>
 f_t convergence_information_t<i_t, f_t>::get_relative_l2_primal_residual_value(i_t climber_strategy_id) const
 {
-  // TODO batch mode: handle per climber rhs
+  // TODO later batch mode: handle per climber rhs
   return l2_primal_residual_.element(climber_strategy_id, stream_view_) /
          (f_t(1.0) + l2_norm_primal_right_hand_side_.value(stream_view_));
 }
@@ -774,7 +774,7 @@ f_t convergence_information_t<i_t, f_t>::get_relative_l2_primal_residual_value(i
 template <typename i_t, typename f_t>
 f_t convergence_information_t<i_t, f_t>::get_relative_l2_dual_residual_value(i_t climber_strategy_id) const
 {
-  // TODO batch mode: handle per climber objective
+  // TODO later batch mode: handle per climber objective
   return l2_dual_residual_.element(climber_strategy_id, stream_view_) /
          (f_t(1.0) + l2_norm_primal_linear_objective_.value(stream_view_));
 }
@@ -812,7 +812,7 @@ typename convergence_information_t<i_t, f_t>::primal_quality_adapter_t
 convergence_information_t<i_t, f_t>::to_primal_quality_adapter(
   bool is_primal_feasible) const noexcept
 {
-  // TODO batch mode: handle primal quality adapter here
+  // TODO later batch mode: handle primal quality adapter here
   return {is_primal_feasible,
           nb_violated_constraints_.value(stream_view_),
           l2_primal_residual_.element(0, stream_view_),

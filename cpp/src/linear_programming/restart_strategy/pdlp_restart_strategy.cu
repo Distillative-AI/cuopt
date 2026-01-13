@@ -747,9 +747,6 @@ HDI void cupdlpx_new_primal_weight_computation(
   const f_t restart_k_d,
   const f_t restart_i_smooth)
 {
-  // TODO batch mode:No value update if this climber is not restarting
-  //if (!should_restart[i])
-  //continue;
   const f_t l2_primal_distance = cuda::std::sqrt(primal_distance);
   const f_t l2_dual_distance = cuda::std::sqrt(dual_distance);
 
@@ -853,7 +850,7 @@ void pdlp_restart_strategy_t<i_t, f_t>::cupdlpx_restart(
 {
   raft::common::nvtx::range fun_scope("cupdlpx_restart");
 
-  // TODO batch mode: remove this once you have per solution score
+  // TODO later batch mode: remove if you have per climber restart
   cuopt_assert(std::all_of(should_restart.begin(), should_restart.end(), [](int restarted){ return restarted == 1; }), "If any, all should be true");
 
   // Computing the deltas
@@ -921,7 +918,7 @@ void pdlp_restart_strategy_t<i_t, f_t>::cupdlpx_restart(
     best_primal_weight.set_element_async(0, best_primal_weight_value, stream_view_);
   }
 
-  // TODO batch mode: for now with restart for everyone
+  // TODO later batch mode: remove if you have per climber restart
 
   raft::copy(last_restart_duality_gap_.primal_solution_.data(),
              pdhg_solver.get_potential_next_primal_solution().data(),
@@ -950,7 +947,7 @@ void pdlp_restart_strategy_t<i_t, f_t>::cupdlpx_restart(
 
   for (size_t i = 0; i < climber_strategies_.size(); ++i)
   {
-    // TODO batch mode: handle if not all restart at same momoent
+    // TODO later batch mode: remove if you have per climber restart
     if (should_restart[i])
     {
       weighted_average_solution_.iterations_since_last_restart_ = 0;
@@ -1162,7 +1159,7 @@ void pdlp_restart_strategy_t<i_t, f_t>::distance_squared_moved_from_last_restart
             << "  New location=" << debugb.value(stream_view_) << std::endl;
 #endif
 
-  // TODO batch mode: this will only work if all climbers restart together
+  // TODO later batch mode: this will only work if all climbers restart together
   raft::linalg::binaryOp(tmp.data(),
                          old_solution.data(),
                          new_solution.data(),

@@ -16,7 +16,7 @@
  */
 #pragma once
 
-// TODO batch mode: for now empty but should need some data there at some point
+// TODO later batch mode: for now empty but should need some data there at some point
 struct pdlp_climber_strategy_t {
 
 };

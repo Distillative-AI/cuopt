@@ -222,8 +222,6 @@ class pdlp_restart_strategy_t {
                                       rmm::device_uvector<f_t>& tmp_primal,
                                       rmm::device_uvector<f_t>& tmp_dual);
 
-  // TODO batch mode: may need this for mask mode later
-  //static std::vector<int> one{1};
   void distance_squared_moved_from_last_restart_period(const rmm::device_uvector<f_t>& new_solution,
                                                        const rmm::device_uvector<f_t>& old_solution,
                                                        rmm::device_uvector<f_t>& tmp,

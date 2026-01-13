@@ -94,7 +94,7 @@ std::vector<pdlp_termination_status_t> pdlp_termination_strategy_t<i_t, f_t>::ge
   return out;
 }
 
-// TODO batch mode: will be useful once I bring back MCPDLP
+// TODO later batch mode: will be useful once I bring back MCPDLP
 template <typename i_t, typename f_t>
 bool pdlp_termination_strategy_t<i_t, f_t>::has_optimal_status() const
 {
@@ -208,7 +208,7 @@ if (idx == 0)
       *convergence_information.relative_l_inf_dual_residual,
       tolerance.absolute_dual_tolerance);
   } else {
-    // TODO batch mode: per problem rhs
+    // TODO later batch mode: per problem rhs
     printf(
       "Primal residual  %lf <= %lf [%d] (tolerance.absolute_primal_tolerance %lf + "
       "tolerance.relative_primal_tolerance %lf * "
@@ -326,7 +326,6 @@ if (idx == 0)
 template <typename i_t, typename f_t>
 bool pdlp_termination_strategy_t<i_t, f_t>::all_optimal_status() const
 {
-  // TODO batch mode: would using a std::par be useful here?
   return std::all_of(termination_status_.cbegin(), termination_status_.cend(), [](i_t termination_status) { return termination_status == (i_t)pdlp_termination_status_t::Optimal; });
 }
 
@@ -339,7 +338,6 @@ bool pdlp_termination_strategy_t<i_t, f_t>::is_done(pdlp_termination_status_t te
 template <typename i_t, typename f_t>
 bool pdlp_termination_strategy_t<i_t, f_t>::all_done() const
 {
-  // TODO batch mode: would using a std::par be useful here?
   return std::all_of(termination_status_.cbegin(), termination_status_.cend(), [](i_t termination_status) 
   {
     return is_done((pdlp_termination_status_t)termination_status);
@@ -393,7 +391,7 @@ pdlp_termination_strategy_t<i_t, f_t>::fill_return_problem_solution(
 
     raft::copy(&term_stats_vector[i].l2_primal_residual,
             (settings_.per_constraint_residual)
-              ? convergence_information_view.relative_l_inf_primal_residual // TODO batch mode: handle per climber overall residual
+              ? convergence_information_view.relative_l_inf_primal_residual // TODO later batch mode: handle per climber overall residual
         : convergence_information_view.l2_primal_residual.data() + i,
         1,
       stream_view_);
@@ -491,7 +489,7 @@ pdlp_termination_strategy_t<i_t, f_t>::fill_return_problem_solution(
 template <typename i_t, typename f_t>
 void pdlp_termination_strategy_t<i_t, f_t>::print_termination_criteria(i_t iteration, f_t elapsed, i_t best_id) const
 {
-  // TODO batch mode: handle this
+  // TODO less critical batch mode: handle this
   CUOPT_LOG_INFO("%7d %+.8e %+.8e  %8.2e   %8.2e     %8.2e   %.3fs",
                 iteration,
                 convergence_information_.get_primal_objective().element(best_id, stream_view_),

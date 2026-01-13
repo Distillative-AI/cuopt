@@ -339,7 +339,7 @@ void adaptive_step_size_strategy_t<i_t, f_t>::compute_interaction_and_movement(
   }
   else
   {
-    // TODO batch mode: handle if not all restart
+    // TODO later batch mode: handle if not all restart
     RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmm(handle_ptr_->get_cusparse_handle(),
                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -354,17 +354,7 @@ void adaptive_step_size_strategy_t<i_t, f_t>::compute_interaction_and_movement(
   }
 
   // Compute Ay' - Ay = next_Aty - current_Aty
-  /* TODO batch mode: re-add this, for now we will suppose everyone restarts
-  batched_dot_product_handler_.batch_masked_transform_reduce([&](i_t climber, rmm::cuda_stream_view stream){
-    cub::DeviceTransform::Transform(
-      cuda::std::make_tuple(current_saddle_point_state.get_next_AtY().data() + climber * primal_size_,
-                            current_saddle_point_state.get_current_AtY().data() + climber * primal_size_),
-      tmp_primal.data() + climber * primal_size_,
-      primal_size_,
-      cuda::std::minus<>{},
-      stream);
-  }, mask);*/
-  // TODO batch mode: remove this once you want to do per climber solution
+  // TODO later batch mode: remove this once you want to do per climber restart
   cub::DeviceTransform::Transform(
     cuda::std::make_tuple(current_saddle_point_state.get_next_AtY().data(),
                           current_saddle_point_state.get_current_AtY().data()),
@@ -424,7 +414,7 @@ void adaptive_step_size_strategy_t<i_t, f_t>::compute_interaction_and_movement(
   }
   else
   {
-    // TODO batch mode: remove this once you want to do per climber solution
+    // TODO later batch mode: remove this once you want to do per climber restart
     cub::DeviceSegmentedReduce::Sum(
   dot_product_storage.data(), dot_product_bytes, 
   thrust::make_transform_iterator(thrust::make_zip_iterator(tmp_primal.data(), current_saddle_point_state.get_delta_primal().data()),

@@ -642,7 +642,6 @@ cusparse_view_t<i_t, f_t>::cusparse_view_t(raft::handle_t const* handle_ptr,
   if (batch_mode_) {
     [[maybe_unused]] const bool is_cupdlpx = is_cupdlpx_restart<i_t, f_t>(hyper_params);
     cuopt_assert(is_cupdlpx, "Batch mode only supported with cuPDLPx restart");
-    // TODO batch mode: also use container
     batch_primal_solutions.create(
       op_problem.n_variables,
       climber_strategies.size(),

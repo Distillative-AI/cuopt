@@ -220,8 +220,6 @@ struct problem_wrapped_iterator {
 template <typename f_t>
 static inline auto problem_wrap_container(const rmm::device_uvector<f_t>& in)
 {
-  // TODO batch mode: couldn't we find a way to get rid of the % 
-  // TODO batch mode: is TMA used here if called with DeviceTransform? (nvbench it)
   return thrust::make_transform_iterator(
                             thrust::make_counting_iterator(0),
                             problem_wrapped_iterator<f_t>(in.data(), in.size()));
@@ -256,7 +254,7 @@ void inline combine_constraint_bounds(const problem_t<i_t, f_t>& op_problem,
   {
     // In batch mode we use combined_constraint_bounds in convergeance_information to fill the primal residual which will be bigger 
     cuopt_assert(combined_bounds.size() % op_problem.n_constraints == 0, "combined_bounds size must be a multiple of op_problem.n_constraints");
-    // TODO batch mode: different constraint bounds
+    // TODO later batch mode: different constraint bounds
     cub::DeviceTransform::Transform(cuda::std::make_tuple(
       problem_wrap_container(op_problem.constraint_lower_bounds),
       problem_wrap_container(op_problem.constraint_upper_bounds)
