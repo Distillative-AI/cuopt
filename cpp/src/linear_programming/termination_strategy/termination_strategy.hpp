@@ -78,7 +78,7 @@ class pdlp_termination_strategy_t {
     pdhg_solver_t<i_t, f_t>& current_pdhg_solver,
     rmm::device_uvector<f_t>& primal_iterate,
     rmm::device_uvector<f_t>& dual_iterate,
-    pdlp_warm_start_data_t<i_t, f_t> warm_start_data,
+    pdlp_warm_start_data_t<i_t, f_t>&& warm_start_data,
     std::vector<pdlp_termination_status_t>&& termination_status,
     bool deep_copy = false);
 

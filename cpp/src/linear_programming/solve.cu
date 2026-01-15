@@ -1016,7 +1016,7 @@ optimization_problem_solution_t<i_t, f_t> solve_lp(
       solution = optimization_problem_solution_t<i_t, f_t>(primal_solution,
                                                            dual_solution,
                                                            reduced_costs,
-                                                           solution.get_pdlp_warm_start_data(),
+                                                           std::move(solution.get_pdlp_warm_start_data()),
                                                            op_problem.get_objective_name(),
                                                            op_problem.get_variable_names(),
                                                            op_problem.get_row_names(),

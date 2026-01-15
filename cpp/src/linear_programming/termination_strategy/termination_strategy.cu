@@ -369,7 +369,7 @@ pdlp_termination_strategy_t<i_t, f_t>::fill_return_problem_solution(
   pdhg_solver_t<i_t, f_t>& current_pdhg_solver,
   rmm::device_uvector<f_t>& primal_iterate,
   rmm::device_uvector<f_t>& dual_iterate,
-  pdlp_warm_start_data_t<i_t, f_t> warm_start_data,
+  pdlp_warm_start_data_t<i_t, f_t>&& warm_start_data,
   std::vector<pdlp_termination_status_t>&& termination_status,
   bool deep_copy)
 {
@@ -455,7 +455,7 @@ pdlp_termination_strategy_t<i_t, f_t>::fill_return_problem_solution(
       primal_iterate,
       dual_iterate,
       convergence_information_.get_reduced_cost(),
-      warm_start_data,
+      std::move(warm_start_data),
       problem_ptr->objective_name,
       problem_ptr->var_names,
       problem_ptr->row_names,

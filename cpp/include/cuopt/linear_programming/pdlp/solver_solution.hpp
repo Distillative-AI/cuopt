@@ -128,7 +128,7 @@ class optimization_problem_solution_t : public base_solution_t {
   optimization_problem_solution_t(rmm::device_uvector<f_t>& final_primal_solution,
                                   rmm::device_uvector<f_t>& final_dual_solution,
                                   rmm::device_uvector<f_t>& final_reduced_cost,
-                                  pdlp_warm_start_data_t<i_t, f_t>& warm_start_data,
+                                  pdlp_warm_start_data_t<i_t, f_t>&& warm_start_data,
                                   const std::string objective_name,
                                   const std::vector<std::string>& var_names,
                                   const std::vector<std::string>& row_names,
@@ -254,6 +254,7 @@ class optimization_problem_solution_t : public base_solution_t {
    */
   additional_termination_information_t get_additional_termination_information(i_t id = 0) const;
   std::vector<additional_termination_information_t> get_additional_termination_informations() const;
+  std::vector<additional_termination_information_t>& get_additional_termination_informations();
 
   pdlp_warm_start_data_t<i_t, f_t>& get_pdlp_warm_start_data();
 

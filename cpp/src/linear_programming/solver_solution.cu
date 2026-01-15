@@ -49,7 +49,7 @@ optimization_problem_solution_t<i_t, f_t>::optimization_problem_solution_t(
   rmm::device_uvector<f_t>& final_primal_solution,
   rmm::device_uvector<f_t>& final_dual_solution,
   rmm::device_uvector<f_t>& final_reduced_cost,
-  pdlp_warm_start_data_t<i_t, f_t>& warm_start_data,
+  pdlp_warm_start_data_t<i_t, f_t>&& warm_start_data,
   const std::string objective_name,
   const std::vector<std::string>& var_names,
   const std::vector<std::string>& row_names,
@@ -384,6 +384,13 @@ optimization_problem_solution_t<i_t, f_t>::get_additional_termination_informatio
 template <typename i_t, typename f_t>
 std::vector<typename optimization_problem_solution_t<i_t, f_t>::additional_termination_information_t>
 optimization_problem_solution_t<i_t, f_t>::get_additional_termination_informations() const
+{
+  return termination_stats_;
+}
+
+template <typename i_t, typename f_t>
+std::vector<typename optimization_problem_solution_t<i_t, f_t>::additional_termination_information_t>&
+optimization_problem_solution_t<i_t, f_t>::get_additional_termination_informations()
 {
   return termination_stats_;
 }

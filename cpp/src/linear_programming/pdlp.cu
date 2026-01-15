@@ -1035,14 +1035,36 @@ void pdlp_solver_t<i_t, f_t>::update_primal_dual_solutions(
   if (primal) {
     cuopt_assert(pdhg_solver_.get_primal_solution().size() == primal.value()->size(), "Both of those should have equal size");
     raft::copy(pdhg_solver_.get_primal_solution().data(),
-               primal.value()->data(),
-               pdhg_solver_.get_primal_solution().size(),
-               stream_view_);
+    primal.value()->data(),
+    pdhg_solver_.get_primal_solution().size(),
+    stream_view_);
+    if (settings_.hyper_params.use_reflected_primal_dual)
+    {
+      raft::copy(pdhg_solver_.get_potential_next_primal_solution().data(),
+        primal.value()->data(),
+        pdhg_solver_.get_potential_next_primal_solution().size(),
+        stream_view_);
+      raft::copy(restart_strategy_.last_restart_duality_gap_.primal_solution_.data(),
+        primal.value()->data(),
+        restart_strategy_.last_restart_duality_gap_.primal_solution_.size(),
+        stream_view_);
+    }
   }
   if (dual) {
     cuopt_assert(pdhg_solver_.get_dual_solution().size() == dual.value()->size(), "Both of those should have equal size");
     raft::copy(
       pdhg_solver_.get_dual_solution().data(), dual.value()->data(), pdhg_solver_.get_dual_solution().size(), stream_view_);
+    if (settings_.hyper_params.use_reflected_primal_dual)
+    {
+      raft::copy(pdhg_solver_.get_potential_next_dual_solution().data(),
+      dual.value()->data(),
+      pdhg_solver_.get_potential_next_dual_solution().size(),
+      stream_view_);
+      raft::copy(restart_strategy_.last_restart_duality_gap_.dual_solution_.data(),
+        dual.value()->data(),
+        restart_strategy_.last_restart_duality_gap_.dual_solution_.size(),
+        stream_view_);
+    }
   }
 
   // Handle initial step size if needed
@@ -1132,6 +1154,11 @@ void pdlp_solver_t<i_t, f_t>::update_primal_dual_solutions(
 #endif
     initial_scaling_strategy_.scale_solutions(pdhg_solver_.get_primal_solution(),
                                               pdhg_solver_.get_dual_solution());
+    if (settings_.hyper_params.use_reflected_primal_dual)
+    {
+      initial_scaling_strategy_.scale_solutions(pdhg_solver_.get_potential_next_primal_solution(), pdhg_solver_.get_potential_next_dual_solution());
+      initial_scaling_strategy_.scale_solutions(restart_strategy_.last_restart_duality_gap_.primal_solution_, restart_strategy_.last_restart_duality_gap_.dual_solution_);
+    }
   }
 
   // If only primal or dual is set, the primal weight wont (as it can't) be updated
@@ -1147,6 +1174,11 @@ void pdlp_solver_t<i_t, f_t>::update_primal_dual_solutions(
   if (settings_.hyper_params.compute_initial_primal_weight_before_scaling) {
     initial_scaling_strategy_.scale_solutions(pdhg_solver_.get_primal_solution(),
                                               pdhg_solver_.get_dual_solution());
+    if (settings_.hyper_params.use_reflected_primal_dual)
+    {
+      initial_scaling_strategy_.scale_solutions(pdhg_solver_.get_potential_next_primal_solution(), pdhg_solver_.get_potential_next_dual_solution());
+      initial_scaling_strategy_.scale_solutions(restart_strategy_.last_restart_duality_gap_.primal_solution_, restart_strategy_.last_restart_duality_gap_.dual_solution_);
+    }
   }
 }
 
@@ -1532,8 +1564,13 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
   }
 
 #ifdef CUPDLP_DEBUG_MODE
-  std::cout << "Primal solution before projection" << std::endl;
+  std::cout << "Solution before projection" << std::endl;
   print("pdhg_solver_.get_primal_solution()", pdhg_solver_.get_primal_solution());
+  print("pdhg_solver_.get_dual_solution()", pdhg_solver_.get_dual_solution());
+  print("pdhg_solver_.get_potential_next_primal_solution()", pdhg_solver_.get_potential_next_primal_solution());
+  print("pdhg_solver_.get_potential_next_dual_solution()", pdhg_solver_.get_potential_next_dual_solution());
+  print("restart_strategy_.last_restart_duality_gap_.primal_solution_", restart_strategy_.last_restart_duality_gap_.primal_solution_);
+  print("restart_strategy_.last_restart_duality_gap_.dual_solution_", restart_strategy_.last_restart_duality_gap_.dual_solution_);
 #endif
 
   // Project initial primal solution
@@ -1562,8 +1599,13 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
   }
 
 #ifdef CUPDLP_DEBUG_MODE
-  std::cout << "Primal solution after projection" << std::endl;
+  std::cout << "Solution after projection" << std::endl;
   print("pdhg_solver_.get_primal_solution()", pdhg_solver_.get_primal_solution());
+  print("pdhg_solver_.get_dual_solution()", pdhg_solver_.get_dual_solution());
+  print("pdhg_solver_.get_potential_next_primal_solution()", pdhg_solver_.get_potential_next_primal_solution());
+  print("pdhg_solver_.get_potential_next_dual_solution()", pdhg_solver_.get_potential_next_dual_solution());
+  print("restart_strategy_.last_restart_duality_gap_.primal_solution_", restart_strategy_.last_restart_duality_gap_.primal_solution_);
+  print("restart_strategy_.last_restart_duality_gap_.dual_solution_", restart_strategy_.last_restart_duality_gap_.dual_solution_);
 #endif
 
   // Need to to tranpose primal solution to row format as there might be initial values or clamping
@@ -1571,6 +1613,11 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
   if (batch_mode_) {
     rmm::device_uvector<f_t> dummy(0, stream_view_);
     transpose_primal_dual_to_row(pdhg_solver_.get_primal_solution(), pdhg_solver_.get_dual_solution(), dummy);
+    if (settings_.hyper_params.use_reflected_primal_dual)
+    {
+      transpose_primal_dual_to_row(pdhg_solver_.get_potential_next_primal_solution(), pdhg_solver_.get_potential_next_dual_solution(), dummy);
+      transpose_primal_dual_to_row(restart_strategy_.last_restart_duality_gap_.primal_solution_, restart_strategy_.last_restart_duality_gap_.dual_solution_, dummy);
+    }
   }
 
 
