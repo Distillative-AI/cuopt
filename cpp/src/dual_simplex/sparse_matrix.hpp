@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -280,12 +280,9 @@ i_t matrix_transpose_vector_multiply(const csc_matrix_t<i_t, f_t>& A,
 }
 
 // y <- alpha*A*x + beta*y
-template <typename i_t, typename f_t, typename AllocatorA, typename AllocatorB>
-i_t matrix_vector_multiply(const csc_matrix_t<i_t, f_t>& A,
-                           f_t alpha,
-                           const std::vector<f_t, AllocatorA>& x,
-                           f_t beta,
-                           std::vector<f_t, AllocatorB>& y)
+template <typename i_t, typename f_t, typename VectorX, typename VectorY>
+i_t matrix_vector_multiply(
+  const csc_matrix_t<i_t, f_t>& A, f_t alpha, const VectorX& x, f_t beta, VectorY& y)
 {
   // y <- alpha*A*x + beta*y
   i_t m = A.m;

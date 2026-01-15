@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -85,6 +85,7 @@ f_t dual_infeasibility(const lp_problem_t<i_t, f_t>& lp,
                        const std::vector<variable_status_t>& vstatus,
                        const std::vector<f_t>& z)
 {
+  raft::common::nvtx::range scope("DualSimplex::dual_infeasibility");
   const i_t n             = lp.num_cols;
   const i_t m             = lp.num_rows;
   i_t num_infeasible      = 0;

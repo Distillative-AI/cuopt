@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -951,12 +951,9 @@ template double sparse_dot<int, double>(const std::vector<int>& xind,
                                         const csc_matrix_t<int, double>& Y,
                                         int y_col);
 
-template int matrix_vector_multiply<int, double, std::allocator<double>, std::allocator<double>>(
-  const csc_matrix_t<int, double>& A,
-  double alpha,
-  const std::vector<double, std::allocator<double>>& x,
-  double beta,
-  std::vector<double, std::allocator<double>>& y);
+// NOTE: matrix_vector_multiply is now templated on VectorX and VectorY.
+// Since it's defined inline in the header, no explicit instantiation is needed here.
+
 template int
 matrix_transpose_vector_multiply<int, double, std::allocator<double>, std::allocator<double>>(
   const csc_matrix_t<int, double>& A,
