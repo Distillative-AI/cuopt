@@ -35,7 +35,7 @@
 #include <utility>
 #include <vector>
 
-#define CUOPT_ENABLE_MEMORY_INSTRUMENTATION 0
+#define CUOPT_ENABLE_MEMORY_INSTRUMENTATION 1
 
 #ifdef __NVCC__
 #define HDI inline __host__ __device__
