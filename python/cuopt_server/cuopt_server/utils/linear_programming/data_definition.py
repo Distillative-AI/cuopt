@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 import copy
@@ -372,68 +372,6 @@ class Tolerances(StrictModel):
     mip_relative_tolerance: float = Field(
         default=None, description="MIP relative tolerance"
     )
-    absolute_primal: float = Field(
-        default=None,
-        deprecated=True,
-        description="Deprecated in 25.08. "
-        "Use absolute_primal_tolerance instead",
-    )
-    absolute_dual: float = Field(
-        default=None,
-        deprecated=True,
-        description="Deprecated in 25.08. Use absolute_dual_tolerance instead",
-    )
-    absolute_gap: float = Field(
-        default=None,
-        deprecated=True,
-        description="Deprecated in 25.08. Use absolute_gap_tolerance instead",
-    )
-    relative_primal: float = Field(
-        default=None,
-        deprecated=True,
-        description="Deprecated in 25.08. "
-        "Use relative_primal_tolerance instead",
-    )
-    relative_dual: float = Field(
-        default=None,
-        deprecated=True,
-        description="Deprecated in 25.08. Use relative_dual_tolerance instead",
-    )
-    relative_gap: float = Field(
-        default=None,
-        deprecated=True,
-        description="Deprecated in 25.08. Use relative_gap_tolerance instead",
-    )
-    primal_infeasible: float = Field(
-        default=None,
-        deprecated=True,
-        description="Deprecated in 25.08. "
-        "Use primal_infeasible_tolerance instead",
-    )
-    dual_infeasible: float = Field(
-        default=None,
-        deprecated=True,
-        description="Deprecated in 25.08. "
-        "Use dual_infeasible_tolerance instead",
-    )
-    integrality_tolerance: float = Field(
-        default=None,
-        deprecated=True,
-        description="Deprecated starting in 25.05. "
-        "Use mip_integratlity_tolerance instead.",
-    )
-    absolute_mip_gap: float = Field(
-        default=None,
-        deprecated=True,
-        description="Deprecated starting in 25.05. "
-        "Use mip_absolute_gap instead.",
-    )
-    relative_mip_gap: float = Field(
-        default=None,
-        deprecated=True,
-        description="Deprecated starting in 25.05. "
-        "Use mip_relative_gap instead.",
-    )
 
 
 class SolverConfig(StrictModel):
@@ -515,6 +453,10 @@ class SolverConfig(StrictModel):
     num_cpu_threads: Optional[int] = Field(
         default=None,
         description="Set the number of CPU threads to use for branch and bound.",  # noqa
+    )
+    num_gpus: Optional[int] = Field(
+        default=None,
+        description="Set the number of GPUs to use for LP solve.",
     )
     augmented: Optional[int] = Field(
         default=-1,
@@ -624,18 +566,6 @@ class SolverConfig(StrictModel):
         default="",
         description="Ignored by the service but included "
         "for dataset compatibility",
-    )
-    solver_mode: Optional[int] = Field(
-        default=None,
-        deprecated=True,
-        description="Deprecated starting in 25.05. "
-        "Use pdlp_solver_mode instead.",
-    )
-    heuristics_only: Optional[bool] = Field(
-        default=None,
-        deprecated=True,
-        description="Deprecated starting in 25.05. "
-        "Use mip_heuristics_only instead.",
     )
 
 
@@ -806,27 +736,77 @@ class SolutionData(StrictModel):
     )
 
 
+# LP termination status values
+# NOTE: These must match LPTerminationStatus from
+# cuopt.linear_programming.solver.solver_wrapper
+# We cannot import them directly because it triggers CUDA/RMM initialization
+# before the server has configured memory management.
+# See test_termination_status_enum_sync() in test_lp.py to ensure these stay in sync.
+LP_STATUS_NAMES = frozenset(
+    {
+        "NoTermination",
+        "NumericalError",
+        "Optimal",
+        "PrimalInfeasible",
+        "DualInfeasible",
+        "IterationLimit",
+        "TimeLimit",
+        "PrimalFeasible",
+    }
+)
+
+# MILP termination status values
+# NOTE: These must match MILPTerminationStatus from
+# cuopt.linear_programming.solver.solver_wrapper
+MILP_STATUS_NAMES = frozenset(
+    {
+        "NoTermination",
+        "Optimal",
+        "FeasibleFound",
+        "Infeasible",
+        "Unbounded",
+        "TimeLimit",
+    }
+)
+
+# Combined set of all valid status names
+ALL_STATUS_NAMES = LP_STATUS_NAMES | MILP_STATUS_NAMES
+
+
+def validate_termination_status(v):
+    """Validate that status is a valid LP or MILP termination status name."""
+    if v not in ALL_STATUS_NAMES:
+        raise ValueError(
+            f"status must be one of {sorted(ALL_STATUS_NAMES)}, got '{v}'"
+        )
+    return v
+
+
 class SolutionResultData(StrictModel):
-    status: int = Field(
-        default=0,
-        examples=[1],
-        description=(
-            "In case of LP : \n\n"
-            "0 - No Termination \n\n"
-            "1 - Optimal solution is available \n\n"
-            "2 - Primal Infeasible solution \n\n"
-            "3 - Dual Infeasible solution \n\n"
-            "4 - Iteration Limit reached \n\n"
-            "5 - TimeLimit reached \n\n"
-            "6 - Primal Feasible \n\n"
-            "---------------------- \n\n"
-            "In case of MILP/IP : \n\n"
-            "0 - No Termination \n\n"
-            "1 - Optimal solution is available \n\n"
-            "2 - Feasible solution is available \n\n"
-            "3 - Infeasible \n\n"
-            "4 - Unbounded\n\n"
-        ),
+    status: Annotated[str, PlainValidator(validate_termination_status)] = (
+        Field(
+            default="NoTermination",
+            examples=["Optimal"],
+            description=(
+                "In case of LP : \n\n"
+                "NoTermination - No Termination \n\n"
+                "NumericalError - Numerical Error \n\n"
+                "Optimal - Optimal solution is available \n\n"
+                "PrimalInfeasible - Primal Infeasible solution \n\n"
+                "DualInfeasible - Dual Infeasible solution \n\n"
+                "IterationLimit - Iteration Limit reached \n\n"
+                "TimeLimit - TimeLimit reached \n\n"
+                "PrimalFeasible - Primal Feasible \n\n"
+                "---------------------- \n\n"
+                "In case of MILP/IP : \n\n"
+                "NoTermination - No Termination \n\n"
+                "Optimal - Optimal solution is available \n\n"
+                "FeasibleFound - Feasible solution is available \n\n"
+                "Infeasible - Infeasible \n\n"
+                "Unbounded - Unbounded \n\n"
+                "TimeLimit - TimeLimit reached \n\n"
+            ),
+        )
     )
     solution: SolutionData = Field(
         default=SolutionData(), description=("Solution of the LP problem")
@@ -892,7 +872,7 @@ lp_response = {
     "value": {
         "response": {
             "solver_response": {
-                "status": 1,
+                "status": "Optimal",
                 "solution": {
                     "problem_category": 0,
                     "primal_solution": [0.0, 0.0],
@@ -921,7 +901,7 @@ milp_response = {
     "value": {
         "response": {
             "solver_response": {
-                "status": 2,
+                "status": "FeasibleFound",
                 "solution": {
                     "problem_category": 1,
                     "primal_solution": [0.0, 0.0],
@@ -952,7 +932,7 @@ milp_response = {
     "value": {
         "response": {
             "solver_response": {
-                "status": 2,
+                "status": "FeasibleFound",
                 "solution": {
                     "problem_category": 1,
                     "primal_solution": [0.0, 0.0],

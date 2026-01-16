@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -135,7 +135,7 @@ void pdhg_solver_t<i_t, f_t>::compute_next_dual_solution(rmm::device_scalar<f_t>
                               current_saddle_point_state_.get_delta_dual().data()),
     dual_size_h_,
     dual_projection<f_t>(dual_step_size.data()),
-    stream_view_);
+    stream_view_.value());
 }
 
 template <typename i_t, typename f_t>
@@ -194,7 +194,7 @@ void pdhg_solver_t<i_t, f_t>::compute_primal_projection_with_gradient(
                               tmp_primal_.data()),
     primal_size_h_,
     primal_projection<f_t, f_t2>(primal_step_size.data()),
-    stream_view_);
+    stream_view_.value());
 }
 
 template <typename i_t, typename f_t>
@@ -343,7 +343,7 @@ void pdhg_solver_t<i_t, f_t>::compute_next_primal_dual_solution_reflected(
           potential_next_primal_solution_.data(), dual_slack_.data(), reflected_primal_.data()),
         primal_size_h_,
         primal_reflected_major_projection<f_t>(primal_step_size.data()),
-        stream_view_);
+        stream_view_.value());
 #ifdef CUPDLP_DEBUG_MODE
       print("potential_next_primal_solution_", potential_next_primal_solution_);
       print("reflected_primal_", reflected_primal_);
@@ -361,7 +361,7 @@ void pdhg_solver_t<i_t, f_t>::compute_next_primal_dual_solution_reflected(
         thrust::make_zip_iterator(potential_next_dual_solution_.data(), reflected_dual_.data()),
         dual_size_h_,
         dual_reflected_major_projection<f_t>(dual_step_size.data()),
-        stream_view_);
+        stream_view_.value());
 
 #ifdef CUPDLP_DEBUG_MODE
       print("potential_next_dual_solution_", potential_next_dual_solution_);
@@ -386,7 +386,7 @@ void pdhg_solver_t<i_t, f_t>::compute_next_primal_dual_solution_reflected(
         reflected_primal_.data(),
         primal_size_h_,
         primal_reflected_projection<f_t>(primal_step_size.data()),
-        stream_view_);
+        stream_view_.value());
 #ifdef CUPDLP_DEBUG_MODE
       print("reflected_primal_", reflected_primal_);
 #endif
@@ -402,7 +402,7 @@ void pdhg_solver_t<i_t, f_t>::compute_next_primal_dual_solution_reflected(
         reflected_dual_.data(),
         dual_size_h_,
         dual_reflected_projection<f_t>(dual_step_size.data()),
-        stream_view_);
+        stream_view_.value());
 #ifdef CUPDLP_DEBUG_MODE
       print("reflected_dual_", reflected_dual_);
 #endif
@@ -455,35 +455,23 @@ void pdhg_solver_t<i_t, f_t>::update_solution(
   // Accepted (valid step size) next_Aty will be current Aty next PDHG iteration, saves an SpMV
   std::swap(current_saddle_point_state_.current_AtY_, current_saddle_point_state_.next_AtY_);
 
-  // Forced to reinite cusparse views but that's ok, cost is marginal
+  // Update cusparse views to point to the new values, cost is marginal
+  RAFT_CUSPARSE_TRY(cusparseDnVecSetValues(cusparse_view_.current_AtY,
+                                           current_saddle_point_state_.current_AtY_.data()));
   RAFT_CUSPARSE_TRY(
-    raft::sparse::detail::cusparsecreatednvec(&cusparse_view_.current_AtY,
-                                              current_saddle_point_state_.get_primal_size(),
-                                              current_saddle_point_state_.current_AtY_.data()));
+    cusparseDnVecSetValues(cusparse_view_.next_AtY, current_saddle_point_state_.next_AtY_.data()));
+  RAFT_CUSPARSE_TRY(cusparseDnVecSetValues(cusparse_view_.potential_next_dual_solution,
+                                           potential_next_dual_solution_.data()));
+  RAFT_CUSPARSE_TRY(cusparseDnVecSetValues(cusparse_view_.primal_solution,
+                                           current_saddle_point_state_.primal_solution_.data()));
+  RAFT_CUSPARSE_TRY(cusparseDnVecSetValues(cusparse_view_.dual_solution,
+                                           current_saddle_point_state_.dual_solution_.data()));
   RAFT_CUSPARSE_TRY(
-    raft::sparse::detail::cusparsecreatednvec(&cusparse_view_.next_AtY,
-                                              current_saddle_point_state_.get_primal_size(),
-                                              current_saddle_point_state_.next_AtY_.data()));
+    cusparseDnVecSetValues(current_op_problem_evaluation_cusparse_view_.primal_solution,
+                           current_saddle_point_state_.primal_solution_.data()));
   RAFT_CUSPARSE_TRY(
-    raft::sparse::detail::cusparsecreatednvec(&cusparse_view_.potential_next_dual_solution,
-                                              current_saddle_point_state_.get_dual_size(),
-                                              potential_next_dual_solution_.data()));
-  RAFT_CUSPARSE_TRY(
-    raft::sparse::detail::cusparsecreatednvec(&cusparse_view_.primal_solution,
-                                              current_saddle_point_state_.get_primal_size(),
-                                              current_saddle_point_state_.primal_solution_.data()));
-  RAFT_CUSPARSE_TRY(
-    raft::sparse::detail::cusparsecreatednvec(&cusparse_view_.dual_solution,
-                                              current_saddle_point_state_.get_dual_size(),
-                                              current_saddle_point_state_.dual_solution_.data()));
-  RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
-    &current_op_problem_evaluation_cusparse_view_.primal_solution,
-    current_saddle_point_state_.get_primal_size(),
-    current_saddle_point_state_.primal_solution_.data()));
-  RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsecreatednvec(
-    &current_op_problem_evaluation_cusparse_view_.dual_solution,
-    current_saddle_point_state_.get_dual_size(),
-    current_saddle_point_state_.dual_solution_.data()));
+    cusparseDnVecSetValues(current_op_problem_evaluation_cusparse_view_.dual_solution,
+                           current_saddle_point_state_.dual_solution_.data()));
 }
 
 template <typename i_t, typename f_t>
