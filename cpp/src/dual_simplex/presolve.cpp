@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -622,7 +622,8 @@ void convert_user_problem(const user_problem_t<i_t, f_t>& user_problem,
     convert_greater_to_less(user_problem, row_sense, problem, greater_rows, less_rows);
   }
 
-  constexpr bool run_bounds_strengthening = false;
+  bool run_bounds_strengthening = true;
+  if (settings.deterministic) { run_bounds_strengthening = false; }
   if (run_bounds_strengthening) {
     csr_matrix_t<i_t, f_t> Arow(1, 1, 1);
     problem.A.to_compressed_row(Arow);

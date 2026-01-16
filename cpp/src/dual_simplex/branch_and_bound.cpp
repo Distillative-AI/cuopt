@@ -2419,8 +2419,10 @@ node_solve_info_t branch_and_bound_t<i_t, f_t>::solve_node_bsp(bb_worker_state_t
 
   bool feasible = true;
   // TODO: incorporate into work unit estimation
-  // feasible = worker.node_presolver->bounds_strengthening(
-  //   worker.leaf_problem->lower, worker.leaf_problem->upper, lp_settings);
+  if (!settings_.deterministic) {
+    feasible = worker.node_presolver->bounds_strengthening(
+      worker.leaf_problem->lower, worker.leaf_problem->upper, lp_settings);
+  }
 
   if (!feasible) {
     node_ptr->lower_bound = std::numeric_limits<f_t>::infinity();
