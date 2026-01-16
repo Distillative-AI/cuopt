@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -51,12 +51,8 @@ feasibility_pump_t<i_t, f_t>::feasibility_pump_t(
                         context.problem_ptr->handle_ptr->get_stream()),
     lp_optimal_solution(lp_optimal_solution_),
     rng(cuopt::seed_generator::get_seed()),
-    timer(context.gpu_heur_loop, 20.)
+    timer(20.)
 {
-  thrust::fill(context.problem_ptr->handle_ptr->get_thrust_policy(),
-               last_projection.begin(),
-               last_projection.end(),
-               (f_t)0);
 }
 
 template <typename Iter_T>
@@ -221,18 +217,12 @@ bool feasibility_pump_t<i_t, f_t>::linear_project_onto_polytope(solution_t<i_t, 
   lp_settings.time_limit          = time_limit;
   lp_settings.tolerance           = lp_tolerance;
   lp_settings.check_infeasibility = false;
-
-  // CHANGE
-  if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
-    lp_settings.time_limit = std::numeric_limits<double>::infinity();
-    lp_settings.work_limit = time_limit;
-  }
-  auto solver_response = get_relaxed_lp_solution(temp_p, solution, lp_settings);
+  auto solver_response            = get_relaxed_lp_solution(temp_p, solution, lp_settings);
   cuopt_func_call(solution.test_variable_bounds(false));
   last_lp_time = old_remaining - timer.remaining_time();
   lp_time += last_lp_time;
   n_calls++;
-  CUOPT_LOG_TRACE("lp_time %f average lp_time %f", last_lp_time, lp_time / n_calls);
+  CUOPT_LOG_DEBUG("lp_time %f average lp_time %f", last_lp_time, lp_time / n_calls);
   solution.assignment.resize(solution.problem_ptr->n_variables, solution.handle_ptr->get_stream());
   raft::copy(last_projection.data(),
              solution.assignment.data(),
@@ -255,9 +245,8 @@ template <typename i_t, typename f_t>
 bool feasibility_pump_t<i_t, f_t>::round(solution_t<i_t, f_t>& solution)
 {
   bool result;
-  CUOPT_LOG_TRACE("Rounding the point");
-  work_limit_timer_t bounds_prop_timer(context.gpu_heur_loop,
-                                       std::max(0.05, std::min(0.5, timer.remaining_time() / 10.)));
+  CUOPT_LOG_DEBUG("Rounding the point");
+  timer_t bounds_prop_timer(std::max(0.05, std::min(0.5, timer.remaining_time() / 10.)));
   const f_t lp_run_time_after_feasible     = 0.;
   bool old_var                             = constraint_prop.round_all_vars;
   f_t old_time                             = constraint_prop.max_time_for_bounds_prop;
@@ -289,7 +278,6 @@ void feasibility_pump_t<i_t, f_t>::perturbate(solution_t<i_t, f_t>& solution)
 template <typename i_t, typename f_t>
 bool feasibility_pump_t<i_t, f_t>::run_fj_cycle_escape(solution_t<i_t, f_t>& solution)
 {
-  CUOPT_LOG_TRACE("Running FJ cycle escape");
   bool is_feasible;
   fj.settings.mode                   = fj_mode_t::EXIT_NON_IMPROVING;
   fj.settings.update_weights         = true;
@@ -311,17 +299,13 @@ bool feasibility_pump_t<i_t, f_t>::run_fj_cycle_escape(solution_t<i_t, f_t>& sol
 template <typename i_t, typename f_t>
 bool feasibility_pump_t<i_t, f_t>::test_fj_feasible(solution_t<i_t, f_t>& solution, f_t time_limit)
 {
-  CUOPT_LOG_DEBUG("Running 20%% FJ, remaining %fwu", timer.remaining_time());
+  CUOPT_LOG_DEBUG("Running 20%% with %f time limit", time_limit);
   bool is_feasible;
-  fj.settings                        = fj_settings_t{};
   fj.settings.mode                   = fj_mode_t::EXIT_NON_IMPROVING;
   fj.settings.update_weights         = true;
   fj.settings.feasibility_run        = true;
   fj.settings.n_of_minimums_for_exit = 5000;
   fj.settings.time_limit             = std::min(time_limit, timer.remaining_time());
-  if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
-    fj.settings.work_limit = fj.settings.time_limit;
-  }
   cuopt_func_call(solution.test_variable_bounds(true));
   is_feasible = fj.solve(solution);
   cuopt_func_call(solution.test_variable_bounds(true));
@@ -335,9 +319,6 @@ bool feasibility_pump_t<i_t, f_t>::test_fj_feasible(solution_t<i_t, f_t>& soluti
   } else {
     CUOPT_LOG_DEBUG("20%% FJ run found feasible!");
   }
-  CUOPT_LOG_DEBUG("20%% FJ run finished, elapsed %fs remaining %fwu",
-                  fj.settings.time_limit,
-                  timer.remaining_time());
   return is_feasible;
 }
 
@@ -345,7 +326,7 @@ template <typename i_t, typename f_t>
 bool feasibility_pump_t<i_t, f_t>::handle_cycle(solution_t<i_t, f_t>& solution)
 {
   raft::common::nvtx::range fun_scope("handle_cycle");
-  CUOPT_LOG_TRACE("running handle cycle");
+  CUOPT_LOG_DEBUG("running handle cycle");
   bool is_feasible       = false;
   fp_fj_cycle_time_begin = timer.remaining_time();
   CUOPT_LOG_DEBUG("Running longer FJ on last rounding");
@@ -422,7 +403,7 @@ bool feasibility_pump_t<i_t, f_t>::check_distance_cycle(solution_t<i_t, f_t>& so
       std::accumulate(last_distances.begin(), last_distances.end(), 0.0) / last_distances.size();
     if (avg_distance - distance_to_last_rounding <
         config.cycle_distance_reduction_ration * avg_distance) {
-      CUOPT_LOG_TRACE("Distance cycle detected curr %f avg %f for last %d iter",
+      CUOPT_LOG_DEBUG("Distance cycle detected curr %f avg %f for last %d iter",
                       distance_to_last_rounding,
                       avg_distance,
                       last_distances.size());
@@ -430,7 +411,7 @@ bool feasibility_pump_t<i_t, f_t>::check_distance_cycle(solution_t<i_t, f_t>& so
     }
     last_distances.pop_back();
   } else {
-    CUOPT_LOG_TRACE("Distance of projection: %f", distance_to_last_rounding);
+    CUOPT_LOG_DEBUG("Distance of projection: %f", distance_to_last_rounding);
   }
   last_distances.push_front(distance_to_last_rounding);
   return is_cycle;
@@ -489,69 +470,15 @@ template <typename i_t, typename f_t>
 bool feasibility_pump_t<i_t, f_t>::run_single_fp_descent(solution_t<i_t, f_t>& solution)
 {
   raft::common::nvtx::range fun_scope("run_single_fp_descent");
-
-  // === FP PREDICTOR FEATURES - START ===
-  f_t start_time    = timer.remaining_time();
-  i_t fp_iterations = 0;
-
-  // // Problem structure features
-  // CUOPT_LOG_INFO("FP_FEATURES: n_variables=%d n_constraints=%d n_integer_vars=%d
-  // n_binary_vars=%d",
-  //                solution.problem_ptr->n_variables,
-  //                solution.problem_ptr->n_constraints,
-  //                solution.problem_ptr->n_integer_vars,
-  //                solution.problem_ptr->n_binary_vars);
-
-  // CUOPT_LOG_INFO("FP_FEATURES: nnz=%lu sparsity=%.6f nnz_stddev=%.6f unbalancedness=%.6f",
-  //                solution.problem_ptr->coefficients.size(),
-  //                solution.problem_ptr->sparsity,
-  //                solution.problem_ptr->nnz_stddev,
-  //                solution.problem_ptr->unbalancedness);
-
-  // Initial solution features
-  solution.compute_feasibility();
-  i_t initial_n_integers        = solution.compute_number_of_integers();
-  f_t initial_ratio_of_integers = solution.problem_ptr->n_integer_vars > 0
-                                    ? (f_t)initial_n_integers / solution.problem_ptr->n_integer_vars
-                                    : 0.0;
-
-  // CUOPT_LOG_INFO("FP_FEATURES: initial_feasibility=%d initial_excess=%.6f
-  // initial_objective=%.6f",
-  //                solution.get_feasible(),
-  //                solution.get_total_excess(),
-  //                solution.get_objective());
-
-  // CUOPT_LOG_INFO("FP_FEATURES: initial_ratio_of_integers=%.6f initial_n_integers=%d",
-  //                initial_ratio_of_integers,
-  //                initial_n_integers);
-
-  // // Algorithm configuration features
-  // CUOPT_LOG_INFO("FP_FEATURES: alpha=%.6f check_distance_cycle=%d cycle_detection_length=%d",
-  //                config.alpha,
-  //                config.check_distance_cycle,
-  //                cycle_queue.cycle_detection_length);
-
-  // CUOPT_LOG_INFO("FP_FEATURES: has_cutting_plane=%d time_budget=%.6f",
-  //                solution.problem_ptr->cutting_plane_added,
-  //                timer.remaining_time());
-  // === FP PREDICTOR FEATURES - END ===
-
   // start by doing nearest rounding
   solution.round_nearest();
   raft::copy(last_rounding.data(),
              solution.assignment.data(),
              solution.assignment.size(),
              solution.handle_ptr->get_stream());
-
-  CUOPT_LOG_TRACE("FP: starting FP descent, sol hash 0x%x", solution.get_hash());
   while (true) {
-    fp_iterations++;
     if (timer.check_time_limit()) {
       CUOPT_LOG_DEBUG("FP time limit reached!");
-      f_t time_taken = start_time - timer.remaining_time();
-      // CUOPT_LOG_INFO("FP_RESULT: iterations=%d time_taken=%.6f termination=TIME_LIMIT",
-      //                fp_iterations,
-      //                time_taken);
       round(solution);
       return false;
     }
@@ -560,10 +487,11 @@ bool feasibility_pump_t<i_t, f_t>::run_single_fp_descent(solution_t<i_t, f_t>& s
     f_t ratio_of_assigned_integers =
       f_t(solution.n_assigned_integers) / solution.problem_ptr->n_integer_vars;
     bool is_feasible = linear_project_onto_polytope(solution, ratio_of_assigned_integers);
-    CUOPT_LOG_DEBUG(
-      "FP: after fp projection, iter %d sol hash 0x%x", fp_iterations, solution.get_hash());
-    i_t n_integers = solution.compute_number_of_integers();
-    bool is_cycle  = true;
+    i_t n_integers   = solution.compute_number_of_integers();
+    CUOPT_LOG_DEBUG("after fp projection n_integers %d total n_integes %d",
+                    n_integers,
+                    solution.problem_ptr->n_integer_vars);
+    bool is_cycle = true;
     // temp comment for presolve run
     if (config.check_distance_cycle) {
       // use distance cycle if we are running ii or objective FP
@@ -574,18 +502,12 @@ bool feasibility_pump_t<i_t, f_t>::run_single_fp_descent(solution_t<i_t, f_t>& s
         if (is_feasible) {
           bool res = solution.compute_feasibility();
           cuopt_assert(res, "Feasibility issue");
-          f_t time_taken = start_time - timer.remaining_time();
-          CUOPT_LOG_TRACE(
-            "FP_RESULT: iterations=%d time_taken=%.6f termination=FEASIBLE_DISTANCE_CYCLE",
-            fp_iterations,
-            time_taken);
           return true;
         }
         cuopt::default_logger().flush();
         f_t remaining_time_end_fp = timer.remaining_time();
         total_fp_time_until_cycle = fp_fj_cycle_time_begin - remaining_time_end_fp;
-        CUOPT_LOG_TRACE("total_fp_time_until_cycle: %f", total_fp_time_until_cycle);
-        f_t time_taken = start_time - timer.remaining_time();
+        CUOPT_LOG_DEBUG("total_fp_time_until_cycle: %f", total_fp_time_until_cycle);
         return false;
       }
     }
@@ -600,12 +522,10 @@ bool feasibility_pump_t<i_t, f_t>::run_single_fp_descent(solution_t<i_t, f_t>& s
         // run the LP with full precision to check if it actually is feasible
         const f_t lp_verify_time_limit = 5.;
         relaxed_lp_settings_t lp_settings;
-        lp_settings.time_limit = lp_verify_time_limit;
-        if (timer.deterministic) { lp_settings.work_limit = lp_settings.time_limit; }
+        lp_settings.time_limit            = lp_verify_time_limit;
         lp_settings.tolerance             = solution.problem_ptr->tolerances.absolute_tolerance;
         lp_settings.return_first_feasible = true;
         lp_settings.save_state            = true;
-        CUOPT_LOG_DEBUG("FP LP verify, sol hash 0x%x", solution.get_hash());
         run_lp_with_vars_fixed(*solution.problem_ptr,
                                solution,
                                solution.problem_ptr->integer_indices,
@@ -622,8 +542,8 @@ bool feasibility_pump_t<i_t, f_t>::run_single_fp_descent(solution_t<i_t, f_t>& s
     cuopt_func_call(solution.test_variable_bounds(false));
     is_feasible = round(solution);
     cuopt_func_call(solution.test_variable_bounds(true));
-    proj_and_round_time = timer.remaining_time();
-    if (!is_feasible && proj_and_round_time > 0) {
+    proj_and_round_time = proj_begin - timer.remaining_time();
+    if (!is_feasible) {
       const f_t time_ratio = 0.2;
       is_feasible          = test_fj_feasible(solution, time_ratio * proj_and_round_time);
     }

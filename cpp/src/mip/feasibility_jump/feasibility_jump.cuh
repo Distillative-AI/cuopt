@@ -19,9 +19,6 @@
 
 #include <utilities/event_handler.cuh>
 
-#include <map>
-#include <string>
-
 #define FJ_DEBUG_LOAD_BALANCING 0
 #define FJ_SINGLE_STEP          0
 
@@ -102,7 +99,6 @@ struct fj_settings_t {
   fj_mode_t mode{fj_mode_t::FIRST_FEASIBLE};
   fj_candidate_selection_t candidate_selection{fj_candidate_selection_t::WEIGHTED_SCORE};
   double time_limit{60.0};
-  double work_limit{std::numeric_limits<double>::infinity()};
   int iteration_limit{std::numeric_limits<int>::max()};
   fj_hyper_parameters_t parameters{};
   int n_of_minimums_for_exit  = 7000;
@@ -133,14 +129,8 @@ struct fj_move_t {
 // as we dont need them to be floating point per the FJ2 scoring scheme
 // sizeof(fj_staged_score_t) <= 8 is needed to allow for atomic loads
 struct fj_staged_score_t {
-  int32_t base{std::numeric_limits<int32_t>::lowest()};
-  int32_t bonus{std::numeric_limits<int32_t>::lowest()};
-
-  fj_staged_score_t()                                    = default;
-  fj_staged_score_t(const fj_staged_score_t&)            = default;
-  fj_staged_score_t(fj_staged_score_t&&)                 = default;
-  fj_staged_score_t& operator=(const fj_staged_score_t&) = default;
-  fj_staged_score_t& operator=(fj_staged_score_t&&)      = default;
+  float base{-std::numeric_limits<float>::infinity()};
+  float bonus{-std::numeric_limits<float>::infinity()};
 
   HDI bool operator<(fj_staged_score_t other) const noexcept
   {
@@ -158,7 +148,7 @@ struct fj_staged_score_t {
 
   HDI static fj_staged_score_t invalid()
   {
-    return {std::numeric_limits<int32_t>::lowest(), std::numeric_limits<int32_t>::lowest()};
+    return {-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()};
   }
   HDI static fj_staged_score_t zero() { return {0, 0}; }
 
@@ -638,10 +628,6 @@ class fj_t {
   std::vector<std::unique_ptr<climber_data_t>> climbers;
   rmm::device_uvector<typename climber_data_t::view_t> climber_views;
   fj_settings_t settings;
-  std::map<std::string, float> feature_vector;
-
- private:
-  std::map<std::string, float> get_feature_vector(i_t climber_idx = 0) const;
 };
 
 }  // namespace cuopt::linear_programming::detail

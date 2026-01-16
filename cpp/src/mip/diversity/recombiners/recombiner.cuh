@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -92,14 +92,6 @@ class recombiner_t {
                                                          cuopt::make_span(remaining_indices),
                                                          n_remaining.data());
     i_t remaining_variables = this->n_remaining.value(a.handle_ptr->get_stream());
-    // Sort the indices to resolve nondeterministic order due to atomicAdd
-    thrust::sort(a.handle_ptr->get_thrust_policy(),
-                 this->remaining_indices.data(),
-                 this->remaining_indices.data() + remaining_variables);
-
-    CUOPT_LOG_TRACE("remaining indices hash 0x%x, size %d",
-                    detail::compute_hash(this->remaining_indices),
-                    remaining_variables);
 
     auto vec_remaining_indices =
       host_copy(this->remaining_indices.data(), remaining_variables, a.handle_ptr->get_stream());
@@ -181,9 +173,6 @@ class recombiner_t {
                            i_t n_vars_from_guiding)
   {
     vars_to_fix.resize(n_vars_from_guiding, offspring.handle_ptr->get_stream());
-    CUOPT_LOG_TRACE("remaining indices hash 0x%x", detail::compute_hash(this->remaining_indices));
-    CUOPT_LOG_TRACE("integer_indices hash 0x%x",
-                    detail::compute_hash(offspring.problem_ptr->integer_indices));
     // set difference needs two sorted arrays
     thrust::sort(offspring.handle_ptr->get_thrust_policy(),
                  this->remaining_indices.data(),
@@ -206,8 +195,7 @@ class recombiner_t {
                  "vars_to_fix should be sorted!");
   }
 
-  static void init_enabled_recombiners(mip_solver_context_t<i_t, f_t>& context,
-                                       const problem_t<i_t, f_t>& problem)
+  static void init_enabled_recombiners(const problem_t<i_t, f_t>& problem)
   {
     std::unordered_set<recombiner_enum_t> enabled_recombiners;
     for (auto recombiner : recombiner_types) {
@@ -220,10 +208,6 @@ class recombiner_t {
     // check the size of the continous vars
     if (problem.n_variables - problem.n_integer_vars >
         (i_t)sub_mip_recombiner_config_t::max_continuous_vars) {
-      enabled_recombiners.erase(recombiner_enum_t::SUB_MIP);
-    }
-    // submip not supported in deterministic mode yet
-    if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
       enabled_recombiners.erase(recombiner_enum_t::SUB_MIP);
     }
     recombiner_t::enabled_recombiners =

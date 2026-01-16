@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -28,9 +28,6 @@
 #include <cuda/std/functional>
 
 #include <cooperative_groups.h>
-
-#include <iomanip>
-#include <sstream>
 
 #define FJ_LOG_PREFIX "FJ: "
 
@@ -432,11 +429,9 @@ void fj_t<i_t, f_t>::climber_init(i_t climber_idx, const rmm::cuda_stream_view& 
   f_t inf = std::numeric_limits<f_t>::infinity();
   climber->best_objective.set_value_async(inf, climber_stream);
   climber->saved_solution_objective.set_value_async(inf, climber_stream);
-  refresh_lhs_and_violation(climber_stream);
-
-  // printf("init: Violated constraints hash: %x\n", compute_hash(
-  //   make_span(climber->violated_constraints.contents, 0,
-  //   climber->violated_constraints.set_size.value(climber_stream)), climber_stream));
+  climber->violation_score.set_value_to_zero_async(climber_stream);
+  climber->weighted_violation_score.set_value_to_zero_async(climber_stream);
+  init_lhs_and_violation<i_t, f_t><<<256, 256, 0, climber_stream.value()>>>(view);
 
   // initialize the best_objective values according to the initial assignment
   f_t best_obj = compute_objective_from_vec<i_t, f_t>(
@@ -652,10 +647,10 @@ void fj_t<i_t, f_t>::run_step_device(const rmm::cuda_stream_view& climber_stream
   auto [grid_setval, blocks_setval] = setval_launch_dims;
   auto [grid_update_changed_constraints, blocks_update_changed_constraints] =
     update_changed_constraints_launch_dims;
-  auto [grid_resetmoves, blocks_resetmoves]                          = resetmoves_launch_dims;
-  auto [grid_resetmoves_bin, blocks_resetmoves_bin]                  = resetmoves_bin_launch_dims;
-  [[maybe_unused]] auto [grid_update_weights, blocks_update_weights] = update_weights_launch_dims;
-  [[maybe_unused]] auto [grid_lift_move, blocks_lift_move]           = lift_move_launch_dims;
+  auto [grid_resetmoves, blocks_resetmoves]         = resetmoves_launch_dims;
+  auto [grid_resetmoves_bin, blocks_resetmoves_bin] = resetmoves_bin_launch_dims;
+  auto [grid_update_weights, blocks_update_weights] = update_weights_launch_dims;
+  auto [grid_lift_move, blocks_lift_move]           = lift_move_launch_dims;
 
   auto& data    = *climbers[climber_idx];
   auto v        = data.view();
@@ -843,215 +838,9 @@ void fj_t<i_t, f_t>::refresh_lhs_and_violation(const rmm::cuda_stream_view& stre
   auto v     = data.view();
 
   data.violated_constraints.clear(stream);
+  data.violation_score.set_value_to_zero_async(stream);
+  data.weighted_violation_score.set_value_to_zero_async(stream);
   init_lhs_and_violation<i_t, f_t><<<4096, 256, 0, stream>>>(v);
-  // both transformreduce could be fused; but oh well hardly a bottleneck
-  auto violation =
-    thrust::transform_reduce(rmm::exec_policy(stream),
-                             thrust::make_counting_iterator<i_t>(0),
-                             thrust::make_counting_iterator<i_t>(pb_ptr->n_constraints),
-                             cuda::proclaim_return_type<f_t>([v] __device__(i_t cstr_idx) {
-                               return v.excess_score(cstr_idx, v.incumbent_lhs[cstr_idx]);
-                             }),
-                             (f_t)0,
-                             thrust::plus<f_t>());
-  auto weighted_violation = thrust::transform_reduce(
-    rmm::exec_policy(stream),
-    thrust::make_counting_iterator<i_t>(0),
-    thrust::make_counting_iterator<i_t>(pb_ptr->n_constraints),
-    cuda::proclaim_return_type<f_t>([v] __device__(i_t cstr_idx) {
-      return v.excess_score(cstr_idx, v.incumbent_lhs[cstr_idx]) * v.cstr_weights[cstr_idx];
-    }),
-    (f_t)0,
-    thrust::plus<f_t>());
-  data.violation_score.set_value_async(violation, stream);
-  data.weighted_violation_score.set_value_async(weighted_violation, stream);
-  if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
-    data.violated_constraints.sort(stream);
-  }
-#if FJ_SINGLE_STEP
-  CUOPT_LOG_DEBUG("hash assignment %x, hash lhs %x, hash lhscomp %x",
-                  detail::compute_hash(data.incumbent_assignment, stream),
-                  detail::compute_hash(data.incumbent_lhs, stream),
-                  detail::compute_hash(data.incumbent_lhs_sumcomp, stream));
-  CUOPT_LOG_DEBUG("Violated constraints hash post sort: %x, index map %x",
-                  detail::compute_hash(data.violated_constraints.contents, stream),
-                  detail::compute_hash(data.violated_constraints.index_map, stream));
-#endif
-}
-
-template <typename i_t, typename f_t>
-std::map<std::string, float> fj_t<i_t, f_t>::get_feature_vector(i_t climber_idx) const
-{
-  auto& data          = *climbers[climber_idx];
-  auto climber_stream = data.stream.view();
-  if (climber_idx == 0) climber_stream = handle_ptr->get_stream();
-
-  std::map<std::string, float> features;
-
-  // Basic problem dimensions
-  features["n_variables"]   = (float)pb_ptr->n_variables;
-  features["n_constraints"] = (float)pb_ptr->n_constraints;
-  features["nnz"]           = (float)pb_ptr->coefficients.size();
-
-  // Matrix sparsity metrics (already computed)
-  features["sparsity"]       = (float)pb_ptr->sparsity;
-  features["nnz_stddev"]     = (float)pb_ptr->nnz_stddev;
-  features["unbalancedness"] = (float)pb_ptr->unbalancedness;
-
-  // Algorithm settings
-  features["time"]                   = (float)settings.work_limit;
-  features["n_of_minimums_for_exit"] = (float)settings.n_of_minimums_for_exit;
-  features["feasibility_run"]        = (float)settings.feasibility_run;
-
-  // Variable type metrics
-  features["n_integer_vars"] = (float)pb_ptr->n_integer_vars;
-  features["n_binary_vars"]  = (float)pb_ptr->n_binary_vars;
-  features["integer_ratio"] =
-    pb_ptr->n_variables > 0 ? (float)pb_ptr->n_integer_vars / pb_ptr->n_variables : 0.0f;
-  features["binary_ratio"] =
-    pb_ptr->n_variables > 0 ? (float)pb_ptr->n_binary_vars / pb_ptr->n_variables : 0.0f;
-
-  // Initial violation metrics (from current state)
-  features["initial_violation_count"] =
-    (float)data.violated_constraints.set_size.value(climber_stream);
-  // features["initial_violation_score"] = (float)data.violation_score.value(climber_stream);
-  // features["initial_weighted_violation"] =
-  // (float)data.weighted_violation_score.value(climber_stream);
-
-  // Load balancing decision
-  bool use_load_balancing = false;
-  if (settings.load_balancing_mode == fj_load_balancing_mode_t::ALWAYS_OFF) {
-    use_load_balancing = false;
-  } else if (settings.load_balancing_mode == fj_load_balancing_mode_t::ALWAYS_ON) {
-    use_load_balancing = true;
-  } else if (settings.load_balancing_mode == fj_load_balancing_mode_t::AUTO) {
-    use_load_balancing =
-      pb_ptr->n_variables > settings.parameters.load_balancing_codepath_min_varcount;
-  }
-  if (settings.mode == fj_mode_t::ROUNDING) { use_load_balancing = false; }
-  features["uses_load_balancing"] = (float)use_load_balancing;
-
-  // Related variables metrics (if available)
-  if (pb_ptr->related_variables_offsets.size() > 0) {
-    auto h_offsets = cuopt::host_copy(pb_ptr->related_variables_offsets, handle_ptr->get_stream());
-    i_t total_related = 0;
-    i_t max_related   = 0;
-    for (i_t i = 0; i < pb_ptr->n_variables; ++i) {
-      i_t count = h_offsets[i + 1] - h_offsets[i];
-      total_related += count;
-      max_related = std::max(max_related, count);
-    }
-    features["avg_related_vars_per_var"] =
-      pb_ptr->n_variables > 0 ? (float)total_related / pb_ptr->n_variables : 0.0f;
-    // features["max_related_vars"] = (float)max_related;
-  } else {
-    features["avg_related_vars_per_var"] = 0.0f;
-    // features["max_related_vars"]         = 0.0f;
-  }
-
-  // Constraint characteristics
-  auto h_lower    = cuopt::host_copy(pb_ptr->constraint_lower_bounds, handle_ptr->get_stream());
-  auto h_upper    = cuopt::host_copy(pb_ptr->constraint_upper_bounds, handle_ptr->get_stream());
-  i_t n_equality  = 0;
-  i_t n_tight     = 0;
-  f_t total_range = 0.0;
-  i_t n_range_constraints = 0;
-
-  for (i_t i = 0; i < pb_ptr->n_constraints; ++i) {
-    if (pb_ptr->integer_equal(h_lower[i], h_upper[i])) {
-      n_equality++;
-    } else {
-      f_t range = h_upper[i] - h_lower[i];
-      if (std::isfinite(range)) {
-        total_range += range;
-        n_range_constraints++;
-        if (range < 1.0) n_tight++;
-      }
-    }
-  }
-  features["equality_ratio"] =
-    pb_ptr->n_constraints > 0 ? (float)n_equality / pb_ptr->n_constraints : 0.0f;
-  features["avg_constraint_range"] =
-    n_range_constraints > 0 ? (float)(total_range / n_range_constraints) : 0.0f;
-  features["tight_constraint_ratio"] =
-    pb_ptr->n_constraints > 0 ? (float)n_tight / pb_ptr->n_constraints : 0.0f;
-
-  // Variable bound characteristics
-  auto h_var_bounds   = cuopt::host_copy(pb_ptr->variable_bounds, handle_ptr->get_stream());
-  i_t n_unbounded     = 0;
-  i_t n_fixed         = 0;
-  f_t total_var_range = 0.0;
-  i_t n_bounded_vars  = 0;
-
-  for (i_t i = 0; i < pb_ptr->n_variables; ++i) {
-    f_t lower = get_lower(h_var_bounds[i]);
-    f_t upper = get_upper(h_var_bounds[i]);
-
-    if (!std::isfinite(lower) || !std::isfinite(upper)) {
-      n_unbounded++;
-    } else if (pb_ptr->integer_equal(lower, upper)) {
-      n_fixed++;
-    } else {
-      f_t range = upper - lower;
-      total_var_range += range;
-      n_bounded_vars++;
-    }
-  }
-  features["unbounded_var_ratio"] =
-    pb_ptr->n_variables > 0 ? (float)n_unbounded / pb_ptr->n_variables : 0.0f;
-  features["fixed_var_ratio"] =
-    pb_ptr->n_variables > 0 ? (float)n_fixed / pb_ptr->n_variables : 0.0f;
-  features["avg_variable_range"] =
-    n_bounded_vars > 0 ? (float)(total_var_range / n_bounded_vars) : 0.0f;
-
-  // Objective characteristics
-  auto h_obj_coeffs = cuopt::host_copy(pb_ptr->objective_coefficients, handle_ptr->get_stream());
-  i_t n_obj_vars    = 0;
-  f_t total_obj_magnitude = 0.0;
-  for (i_t i = 0; i < pb_ptr->n_variables; ++i) {
-    if (h_obj_coeffs[i] != 0.0) {
-      n_obj_vars++;
-      total_obj_magnitude += std::abs(h_obj_coeffs[i]);
-    }
-  }
-  features["obj_var_ratio"] =
-    pb_ptr->n_variables > 0 ? (float)n_obj_vars / pb_ptr->n_variables : 0.0f;
-  features["avg_obj_coeff_magnitude"] =
-    n_obj_vars > 0 ? (float)(total_obj_magnitude / n_obj_vars) : 0.0f;
-
-  // Matrix density patterns
-  auto h_offsets      = cuopt::host_copy(pb_ptr->offsets, handle_ptr->get_stream());
-  i_t max_nnz_per_row = 0;
-  i_t min_nnz_per_row = pb_ptr->n_variables;
-  f_t sum_sq_dev      = 0.0;
-  f_t mean_nnz =
-    pb_ptr->n_constraints > 0 ? (f_t)pb_ptr->coefficients.size() / pb_ptr->n_constraints : 0.0f;
-
-  for (i_t i = 0; i < pb_ptr->n_constraints; ++i) {
-    i_t nnz_row     = h_offsets[i + 1] - h_offsets[i];
-    max_nnz_per_row = std::max(max_nnz_per_row, nnz_row);
-    min_nnz_per_row = std::min(min_nnz_per_row, nnz_row);
-    f_t dev         = nnz_row - mean_nnz;
-    sum_sq_dev += dev * dev;
-  }
-  features["max_nnz_per_row"] = (float)max_nnz_per_row;
-  features["min_nnz_per_row"] = (float)min_nnz_per_row;
-  features["nnz_variance"] =
-    pb_ptr->n_constraints > 0 ? (float)(sum_sq_dev / pb_ptr->n_constraints) : 0.0f;
-
-  // Average variable degree (avg constraints per variable)
-  features["avg_var_degree"] =
-    pb_ptr->n_variables > 0 ? (float)pb_ptr->coefficients.size() / pb_ptr->n_variables : 0.0f;
-
-  // Derived complexity metrics
-  features["problem_size_score"] =
-    (float)(pb_ptr->n_variables * pb_ptr->n_constraints) * (float)pb_ptr->sparsity;
-  features["structural_complexity"] =
-    (features["integer_ratio"] + 1.0f) * (float)pb_ptr->unbalancedness;
-  features["constraint_var_ratio"] =
-    pb_ptr->n_variables > 0 ? (float)pb_ptr->n_constraints / pb_ptr->n_variables : 0.0f;
-
-  return features;
 }
 
 template <typename i_t, typename f_t>
@@ -1073,7 +862,7 @@ i_t fj_t<i_t, f_t>::host_loop(solution_t<i_t, f_t>& solution, i_t climber_idx)
 
   data.incumbent_quality.set_value_async(obj, handle_ptr->get_stream());
 
-  work_limit_timer_t timer(context.gpu_heur_loop, settings.time_limit);
+  timer_t timer(settings.time_limit);
   i_t steps;
   bool limit_reached = false;
   for (steps = 0; steps < std::numeric_limits<i_t>::max(); steps += iterations_per_graph) {
@@ -1091,7 +880,7 @@ i_t fj_t<i_t, f_t>::host_loop(solution_t<i_t, f_t>& solution, i_t climber_idx)
       CUOPT_LOG_TRACE(
         "FJ "
         "step %d viol %.2g [%d], obj %.8g, best %.8g, mins %d, maxw %g, "
-        "objw %g, sol %x, delta %x, inc %x, lhs %x, lhscomp %x, viol %x, weights %x",
+        "objw %g",
         steps,
         data.violation_score.value(climber_stream),
         data.violated_constraints.set_size.value(climber_stream),
@@ -1099,14 +888,7 @@ i_t fj_t<i_t, f_t>::host_loop(solution_t<i_t, f_t>& solution, i_t climber_idx)
         data.best_objective.value(climber_stream),
         data.local_minimums_reached.value(climber_stream),
         max_cstr_weight.value(climber_stream),
-        objective_weight.value(climber_stream),
-        solution.get_hash(),
-        detail::compute_hash(data.jump_move_delta, climber_stream),
-        detail::compute_hash(data.incumbent_assignment, climber_stream),
-        detail::compute_hash(data.incumbent_lhs, climber_stream),
-        detail::compute_hash(data.incumbent_lhs_sumcomp, climber_stream),
-        detail::compute_hash(data.violated_constraints.contents, climber_stream),
-        detail::compute_hash(cstr_left_weights, climber_stream));
+        objective_weight.value(climber_stream));
     }
 
     if (!limit_reached) { run_step_device(climber_stream, climber_idx); }
@@ -1175,9 +957,6 @@ i_t fj_t<i_t, f_t>::host_loop(solution_t<i_t, f_t>& solution, i_t climber_idx)
                   solution.get_total_excess(),
                   solution.get_feasible(),
                   data.local_minimums_reached.value(climber_stream));
-
-  // compute total time spent
-  double elapsed_time = timer.elapsed_time();
 
   CUOPT_LOG_TRACE("best fractional count %d",
                   data.saved_best_fractional_count.value(climber_stream));
@@ -1268,7 +1047,7 @@ template <typename i_t, typename f_t>
 i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution)
 {
   raft::common::nvtx::range scope("fj_solve");
-  work_limit_timer_t timer(context.gpu_heur_loop, settings.time_limit);
+  timer_t timer(settings.time_limit);
   handle_ptr = const_cast<raft::handle_t*>(solution.handle_ptr);
   pb_ptr     = solution.problem_ptr;
   if (settings.mode != fj_mode_t::ROUNDING) {
@@ -1277,30 +1056,6 @@ i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution)
   }
   pb_ptr->check_problem_representation(true);
   resize_vectors(solution.handle_ptr);
-
-  CUOPT_LOG_DEBUG("FJ: work_limit %f time_limit %f sol hash %x pb hash %x",
-                  settings.work_limit,
-                  settings.time_limit,
-                  solution.get_hash(),
-                  pb_ptr->get_fingerprint());
-  CUOPT_LOG_DEBUG("FJ: weights hash %x, left weights hash %x, right weights hash %x",
-                  detail::compute_hash(cstr_weights),
-                  detail::compute_hash(cstr_left_weights),
-                  detail::compute_hash(cstr_right_weights));
-
-  bool deterministic = context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC;
-  if (deterministic) { settings.work_limit = settings.time_limit; }
-  // if work_limit is set: compute an estimate of the number of iterations required
-  if (deterministic && settings.work_limit != std::numeric_limits<double>::infinity()) {
-    std::map<std::string, float> features_map = get_feature_vector(0);
-    float iter_prediction                     = std::max(
-      (f_t)0.0, (f_t)ceil(context.work_unit_predictors.fj_predictor.predict_scalar(features_map)));
-    CUOPT_LOG_DEBUG("FJ determ: Estimated number of iterations for %f WU: %f",
-                    settings.work_limit,
-                    iter_prediction);
-    if (settings.work_limit == 0) iter_prediction = 0;
-    settings.iteration_limit = std::min(settings.iteration_limit, (i_t)iter_prediction);
-  }
 
   bool is_initial_feasible = solution.compute_feasibility();
   auto initial_solution    = solution;
@@ -1335,9 +1090,6 @@ i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution)
   climber_init(0);
   RAFT_CHECK_CUDA(handle_ptr->get_stream());
   handle_ptr->sync_stream();
-
-  // Compute and store feature vector for later logging
-  if (deterministic) { feature_vector = get_feature_vector(0); }
 
   i_t iterations = host_loop(solution);
   RAFT_CHECK_CUDA(handle_ptr->get_stream());
@@ -1385,49 +1137,6 @@ i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution)
     solution.copy_from(initial_solution);
     cuopt_assert(solution.compute_feasibility(), "Reverted solution should be feasible");
   }
-
-  cuopt_func_call(solution.test_variable_bounds());
-
-  if (deterministic) {
-    double work_to_record = settings.work_limit;
-
-    if (iterations < settings.iteration_limit) {
-      CUOPT_LOG_DEBUG(
-        "FJ early exit at %d iterations (limit: %d)", iterations, settings.iteration_limit);
-      // Compute the work unit corresponding to the number of iterations elapsed
-      // by incrementally guessing work units until the model predicts >= actual iterations
-      // TODO: awfully ugly, change
-      if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC && iterations > 0) {
-        double guessed_work         = 0.0;
-        const double work_increment = 0.1;
-        const double max_work       = settings.work_limit * 2.0;  // Safety limit
-        float predicted_iters       = 0.0f;
-
-        // Make a copy of the feature vector and modify the time/work_limit field
-        std::map<std::string, float> features_for_prediction = feature_vector;
-
-        while (guessed_work <= max_work) {
-          features_for_prediction["time"] = (float)guessed_work;
-          predicted_iters                 = std::max(
-            0.0f,
-            (float)ceil(
-              context.work_unit_predictors.fj_predictor.predict_scalar(features_for_prediction)));
-
-          if (predicted_iters >= (float)iterations) {
-            work_to_record = guessed_work;
-            break;
-          }
-
-          guessed_work += work_increment;
-        }
-      }
-    }
-
-    CUOPT_LOG_DEBUG("FJ: recording work %fwu for %d iterations", work_to_record, iterations);
-    timer.record_work(work_to_record);
-  }
-
-  CUOPT_LOG_DEBUG("FJ sol hash %x", solution.get_hash());
 
   return is_new_feasible;
 }

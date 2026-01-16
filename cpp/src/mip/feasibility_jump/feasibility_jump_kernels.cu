@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -14,9 +14,6 @@
 
 #include <raft/random/rng.cuh>
 
-#include <thrust/sort.h>
-#include <thrust/tuple.h>
-
 #include <cooperative_groups.h>
 
 #include "feasibility_jump_impl_common.cuh"
@@ -27,22 +24,6 @@ namespace cg = cooperative_groups;
 #define CONSTRAINT_FLAG_REMOVE 1
 
 namespace cuopt::linear_programming::detail {
-
-template <typename move_score_t, typename i_t>
-struct score_with_tiebreaker_comparator {
-  DI auto operator()(const thrust::pair<move_score_t, i_t>& a,
-                     const thrust::pair<move_score_t, i_t>& b) const
-  {
-    auto a_score = a.first;
-    auto a_idx   = a.second;
-    auto b_score = b.first;
-    auto b_idx   = b.second;
-
-    if (a_score > b_score) return a;
-    if (a_score == b_score && a_idx > b_idx) return a;
-    return b;
-  }
-};
 
 template <typename i_t, typename f_t>
 DI thrust::pair<f_t, f_t> move_objective_score(
@@ -170,7 +151,10 @@ __global__ void init_lhs_and_violation(typename fj_t<i_t, f_t>::climber_data_t::
       fj_kahan_babushka_neumaier_sum<i_t, f_t>(delta_it + offset_begin, delta_it + offset_end);
     fj.incumbent_lhs_sumcomp[cstr_idx] = 0;
 
-    f_t th_violation   = fj.excess_score(cstr_idx, fj.incumbent_lhs[cstr_idx]);
+    f_t th_violation       = fj.excess_score(cstr_idx, fj.incumbent_lhs[cstr_idx]);
+    f_t weighted_violation = th_violation * fj.cstr_weights[cstr_idx];
+    atomicAdd(fj.violation_score, th_violation);
+    atomicAdd(fj.weighted_violation_score, weighted_violation);
     f_t cstr_tolerance = fj.get_corrected_tolerance(cstr_idx);
     if (th_violation < -cstr_tolerance) { fj.violated_constraints.insert(cstr_idx); }
   }
@@ -206,17 +190,8 @@ DI typename fj_t<i_t, f_t>::move_score_info_t compute_new_score(
     f_t c_lb = fj.pb.constraint_lower_bounds[cstr_idx];
     f_t c_ub = fj.pb.constraint_upper_bounds[cstr_idx];
 
-    auto [cstr_base_feas, cstr_bonus_robust] =
-      feas_score_constraint<i_t, f_t>(fj,
-                                      var_idx,
-                                      delta,
-                                      cstr_idx,
-                                      cstr_coeff,
-                                      c_lb,
-                                      c_ub,
-                                      fj.incumbent_lhs[cstr_idx],
-                                      fj.cstr_left_weights[cstr_idx],
-                                      fj.cstr_right_weights[cstr_idx]);
+    auto [cstr_base_feas, cstr_bonus_robust] = feas_score_constraint<i_t, f_t>(
+      fj, var_idx, delta, cstr_idx, cstr_coeff, c_lb, c_ub, fj.incumbent_lhs[cstr_idx]);
 
     base_feas += cstr_base_feas;
     bonus_robust += cstr_bonus_robust;
@@ -317,8 +292,8 @@ DI std::pair<f_t, typename fj_t<i_t, f_t>::move_score_info_t> compute_best_mtm(
     f_t c_lb = fj.pb.constraint_lower_bounds[cstr_idx];
     f_t c_ub = fj.pb.constraint_upper_bounds[cstr_idx];
     f_t new_val;
-    auto [delta_ij, sign, slack, cstr_tolerance] = get_mtm_for_constraint<i_t, f_t, move_type>(
-      fj, var_idx, cstr_idx, cstr_coeff, c_lb, c_ub, fj.incumbent_assignment, fj.incumbent_lhs);
+    auto [delta_ij, sign, slack, cstr_tolerance] =
+      get_mtm_for_constraint<i_t, f_t, move_type>(fj, var_idx, cstr_idx, cstr_coeff, c_lb, c_ub);
     if (fj.pb.is_integer_var(var_idx)) {
       new_val = cstr_coeff * sign > 0
                   ? floor(old_val + delta_ij + fj.pb.tolerances.integrality_tolerance)
@@ -373,7 +348,7 @@ DI std::pair<f_t, typename fj_t<i_t, f_t>::move_score_info_t> compute_best_mtm(
   return std::make_pair(best_val, best_score_info);
 }
 
-template <typename i_t, typename f_t, MTMMoveType move_type, i_t TPB, bool is_binary_pb = false>
+template <typename i_t, typename f_t, MTMMoveType move_type, bool is_binary_pb = false>
 DI void update_jump_value(typename fj_t<i_t, f_t>::climber_data_t::view_t fj, i_t var_idx)
 {
   cuopt_assert(var_idx >= 0 && var_idx < fj.pb.n_variables, "invalid variable index");
@@ -400,11 +375,12 @@ DI void update_jump_value(typename fj_t<i_t, f_t>::climber_data_t::view_t fj, i_
           fj.pb.check_variable_within_bounds(var_idx, fj.incumbent_assignment[var_idx] + delta),
           "Var not within bounds!");
       }
-      best_score_info = compute_new_score<i_t, f_t, TPB>(fj, var_idx, delta);
+      best_score_info = compute_new_score<i_t, f_t, TPB_resetmoves>(fj, var_idx, delta);
     } else {
-      auto [best_val, score_info] = compute_best_mtm<i_t, f_t, TPB, move_type>(fj, var_idx);
-      delta                       = best_val - fj.incumbent_assignment[var_idx];
-      best_score_info             = score_info;
+      auto [best_val, score_info] =
+        compute_best_mtm<i_t, f_t, TPB_resetmoves, move_type>(fj, var_idx);
+      delta           = best_val - fj.incumbent_assignment[var_idx];
+      best_score_info = score_info;
     }
   } else {
     delta = round(1.0 - 2 * fj.incumbent_assignment[var_idx]);
@@ -600,16 +576,14 @@ __global__ void update_assignment_kernel(typename fj_t<i_t, f_t>::climber_data_t
 
     __syncthreads();
 
-    if (threadIdx.x == 0) {
-      cuopt_assert(isfinite(fj.jump_move_delta[var_idx]), "delta should be finite");
-      // Kahan compensated summation
-      // fj.incumbent_lhs[cstr_idx] = old_lhs + cstr_coeff * fj.jump_move_delta[var_idx];
-      f_t y = cstr_coeff * fj.jump_move_delta[var_idx] - fj.incumbent_lhs_sumcomp[cstr_idx];
-      f_t t = old_lhs + y;
-      fj.incumbent_lhs_sumcomp[cstr_idx] = (t - old_lhs) - y;
-      fj.incumbent_lhs[cstr_idx]         = t;
-      cuopt_assert(isfinite(fj.incumbent_lhs[cstr_idx]), "assignment should be finite");
-    }
+    cuopt_assert(isfinite(fj.jump_move_delta[var_idx]), "delta should be finite");
+    // Kahan compensated summation
+    // fj.incumbent_lhs[cstr_idx] = old_lhs + cstr_coeff * fj.jump_move_delta[var_idx];
+    f_t y = cstr_coeff * fj.jump_move_delta[var_idx] - fj.incumbent_lhs_sumcomp[cstr_idx];
+    f_t t = old_lhs + y;
+    fj.incumbent_lhs_sumcomp[cstr_idx] = (t - old_lhs) - y;
+    fj.incumbent_lhs[cstr_idx]         = t;
+    cuopt_assert(isfinite(fj.incumbent_lhs[cstr_idx]), "assignment should be finite");
   }
 
   // update the assignment and objective proper
@@ -651,8 +625,8 @@ __global__ void update_assignment_kernel(typename fj_t<i_t, f_t>::climber_data_t
 
 #if FJ_SINGLE_STEP
     DEVICE_LOG_DEBUG(
-      "=---- FJ[%d]: updated %d [%g/%g] :%.4g+{%.4g}=%.4g score {%d,%d}, d_obj %.2g+%.2g=%.2g, "
-      "err_range %.2g%%, infeas %.2g, total viol %d, obj %x, delta %x, coef %x\n",
+      "=---- FJ[%d]: updated %d [%g/%g] :%.4g+{%.4g}=%.4g score {%g,%g}, d_obj %.2g+%.2g=%.2g, "
+      "err_range %.2g%%, infeas %.2g, total viol %d\n",
       *fj.iterations,
       var_idx,
       get_lower(fj.pb.variable_bounds[var_idx]),
@@ -667,10 +641,7 @@ __global__ void update_assignment_kernel(typename fj_t<i_t, f_t>::climber_data_t
       *fj.incumbent_objective + fj.jump_move_delta[var_idx] * fj.pb.objective_coefficients[var_idx],
       delta_rel_err,
       fj.jump_move_infeasibility[var_idx],
-      fj.violated_constraints.size(),
-      detail::compute_hash(*fj.incumbent_objective),
-      detail::compute_hash(fj.jump_move_delta[var_idx]),
-      detail::compute_hash(fj.pb.objective_coefficients[var_idx]));
+      fj.violated_constraints.size());
 #endif
     // reset the score
     fj.jump_move_scores[var_idx]        = fj_t<i_t, f_t>::move_score_t::invalid();
@@ -759,14 +730,8 @@ DI void update_lift_moves(typename fj_t<i_t, f_t>::climber_data_t::view_t fj)
       // Process each bound separately, as both are satified and may both be finite
       // otherwise range constraints aren't correctly handled
       for (auto [bound, sign] : {std::make_tuple(c_lb, -1), std::make_tuple(c_ub, 1)}) {
-        auto [delta, slack] = get_mtm_for_bound<i_t, f_t>(fj,
-                                                          var_idx,
-                                                          cstr_idx,
-                                                          cstr_coeff,
-                                                          bound,
-                                                          sign,
-                                                          fj.incumbent_assignment,
-                                                          fj.incumbent_lhs);
+        auto [delta, slack] =
+          get_mtm_for_bound<i_t, f_t>(fj, var_idx, cstr_idx, cstr_coeff, bound, sign);
 
         if (cstr_coeff * sign < 0) {
           if (fj.pb.is_integer_var(var_idx)) delta = ceil(delta);
@@ -896,15 +861,6 @@ DI void update_changed_constraints(typename fj_t<i_t, f_t>::climber_data_t::view
 
   if (blockIdx.x == 0) {
     if (threadIdx.x == 0) {
-      // sort changed constraints to guarantee determinism
-      // TODO: horribly slow as it is... block-parallelize at least? but not trivial for arbitrary
-      // sizes w/ CUB
-      if (fj.settings->work_limit != std::numeric_limits<double>::infinity()) {
-        thrust::sort(thrust::seq,
-                     fj.constraints_changed.begin(),
-                     fj.constraints_changed.begin() + *fj.constraints_changed_count);
-      }
-
       for (i_t i = 0; i < *fj.constraints_changed_count; ++i) {
         i_t idx = fj.constraints_changed[i];
         if ((idx & 1) == CONSTRAINT_FLAG_INSERT) {
@@ -996,7 +952,7 @@ __global__ void compute_iteration_related_variables_kernel(
   compute_iteration_related_variables<i_t, f_t>(fj);
 }
 
-template <typename i_t, typename f_t, MTMMoveType move_type, bool is_binary_pb, i_t TPB>
+template <typename i_t, typename f_t, MTMMoveType move_type, bool is_binary_pb>
 __device__ void compute_mtm_moves(typename fj_t<i_t, f_t>::climber_data_t::view_t fj,
                                   bool ForceRefresh)
 {
@@ -1008,14 +964,11 @@ __device__ void compute_mtm_moves(typename fj_t<i_t, f_t>::climber_data_t::view_
   if (*fj.selected_var == std::numeric_limits<i_t>::max()) full_refresh = true;
 
   // always do a full sweep when looking for satisfied mtm moves
-  i_t split_begin, split_end;
-  if constexpr (move_type == MTMMoveType::FJ_MTM_SATISFIED) {
-    full_refresh = true;
-    split_begin  = 0;
-    split_end    = fj.objective_vars.size();
-  }
+  if constexpr (move_type == MTMMoveType::FJ_MTM_SATISFIED) full_refresh = true;
+
   // only update related variables
-  else if (full_refresh) {
+  i_t split_begin, split_end;
+  if (full_refresh) {
     split_begin = 0;
     split_end   = fj.pb.n_variables;
   }
@@ -1038,15 +991,9 @@ __device__ void compute_mtm_moves(typename fj_t<i_t, f_t>::climber_data_t::view_
   if (FIRST_THREAD) *fj.relvar_count_last_update = split_end - split_begin;
 
   for (i_t i = blockIdx.x + split_begin; i < split_end; i += gridDim.x) {
-    // if sat MTM mode, go over objective variables only
-    i_t var_idx;
-    if constexpr (move_type == MTMMoveType::FJ_MTM_SATISFIED) {
-      var_idx = fj.objective_vars[i];
-    } else {
-      var_idx = full_refresh                          ? i
-                : fj.pb.related_variables.size() == 0 ? i
-                                                      : fj.pb.related_variables[i];
-    }
+    i_t var_idx = full_refresh                          ? i
+                  : fj.pb.related_variables.size() == 0 ? i
+                                                        : fj.pb.related_variables[i];
 
     // skip if we couldnt precompute a related var table and
     // this variable isnt in the dynamic related variable table
@@ -1069,7 +1016,7 @@ __device__ void compute_mtm_moves(typename fj_t<i_t, f_t>::climber_data_t::view_
     }
 
     cuopt_assert(var_idx >= 0 && var_idx < fj.pb.n_variables, "");
-    update_jump_value<i_t, f_t, move_type, TPB, is_binary_pb>(fj, var_idx);
+    update_jump_value<i_t, f_t, move_type, is_binary_pb>(fj, var_idx);
   }
 }
 
@@ -1077,7 +1024,7 @@ template <typename i_t, typename f_t, MTMMoveType move_type, bool is_binary_pb>
 __global__ void compute_mtm_moves_kernel(typename fj_t<i_t, f_t>::climber_data_t::view_t fj,
                                          bool ForceRefresh)
 {
-  compute_mtm_moves<i_t, f_t, move_type, is_binary_pb, TPB_resetmoves>(fj, ForceRefresh);
+  compute_mtm_moves<i_t, f_t, move_type, is_binary_pb>(fj, ForceRefresh);
 }
 
 template <typename i_t, typename f_t>
@@ -1089,9 +1036,8 @@ __global__ void select_variable_kernel(typename fj_t<i_t, f_t>::climber_data_t::
     fj.settings->seed, *fj.iterations * fj.settings->parameters.max_sampled_moves, 0);
 
   using move_score_t = typename fj_t<i_t, f_t>::move_score_t;
-  __shared__ alignas(thrust::pair<move_score_t, i_t>) char
-    shmem_storage[raft::WarpSize * sizeof(thrust::pair<move_score_t, i_t>)];
-  auto* const shmem = (thrust::pair<move_score_t, i_t>*)shmem_storage;
+  __shared__ alignas(move_score_t) char shmem_storage[2 * raft::WarpSize * sizeof(move_score_t)];
+  auto* const shmem = (move_score_t*)shmem_storage;
 
   auto th_best_score  = fj_t<i_t, f_t>::move_score_t::invalid();
   i_t th_selected_var = std::numeric_limits<i_t>::max();
@@ -1128,11 +1074,8 @@ __global__ void select_variable_kernel(typename fj_t<i_t, f_t>::climber_data_t::
       }
     }
     // Block level reduction to get the best variable from the sample
-    // Use deterministic tie-breaking comparator based on var_idx
     auto [best_score, reduced_selected_var] =
-      raft::blockReduce(thrust::make_pair(th_best_score, th_selected_var),
-                        (char*)shmem,
-                        score_with_tiebreaker_comparator<move_score_t, i_t>{});
+      raft::blockRankedReduce(th_best_score, shmem, th_selected_var, raft::max_op{});
     if (FIRST_THREAD) {
       // assign it to print the value outside
       th_best_score = best_score;
@@ -1167,9 +1110,9 @@ __global__ void select_variable_kernel(typename fj_t<i_t, f_t>::climber_data_t::
       i_t var_range        = get_upper(bounds) - get_lower(bounds);
       double delta_rel_err = fabs(fj.jump_move_delta[selected_var]) / var_range * 100;
       DEVICE_LOG_INFO(
-        "=---- FJ: selected %d [%g/%g] %c :%.4g+{%.4g}=%.4g score {%d,%d}, d_obj %.2g+%.2g->%.2g, "
+        "=---- FJ: selected %d [%g/%g] %c :%.4g+{%.4g}=%.4g score {%g,%g}, d_obj %.2g+%.2g->%.2g, "
         "delta_rel_err %.2g%%, "
-        "infeas %.2g, total viol %d, out of %d, obj %x\n",
+        "infeas %.2g, total viol %d, out of %d\n",
         selected_var,
         get_lower(bounds),
         get_upper(bounds),
@@ -1186,18 +1129,9 @@ __global__ void select_variable_kernel(typename fj_t<i_t, f_t>::climber_data_t::
         delta_rel_err,
         fj.jump_move_infeasibility[selected_var],
         fj.violated_constraints.size(),
-        good_var_count,
-        detail::compute_hash(*fj.incumbent_objective));
+        good_var_count);
 #endif
       cuopt_assert(fj.jump_move_scores[selected_var].valid(), "");
-    } else {
-#if FJ_SINGLE_STEP
-      DEVICE_LOG_INFO("=[%d]---- FJ: no var selected, obj is %g, viol %d, out of %d\n",
-                      *fj.iterations,
-                      *fj.incumbent_objective,
-                      fj.violated_constraints.size(),
-                      good_var_count);
-#endif
     }
   }
 }
@@ -1267,32 +1201,27 @@ DI thrust::tuple<i_t, f_t, typename fj_t<i_t, f_t>::move_score_t> gridwide_reduc
 
   if (blockIdx.x == 0) {
     using move_score_t = typename fj_t<i_t, f_t>::move_score_t;
-    __shared__ alignas(thrust::pair<move_score_t, i_t>) char
-      shmem_storage[2 * raft::WarpSize * sizeof(thrust::pair<move_score_t, i_t>)];
-    auto* const shmem = (thrust::pair<move_score_t, i_t>*)shmem_storage;
+    __shared__ alignas(move_score_t) char shmem_storage[2 * raft::WarpSize * sizeof(move_score_t)];
+    auto* const shmem = (move_score_t*)shmem_storage;
 
     auto th_best_score = fj_t<i_t, f_t>::move_score_t::invalid();
     i_t th_best_block  = 0;
-    i_t th_best_var    = -1;
     for (i_t i = threadIdx.x; i < gridDim.x; i += blockDim.x) {
       auto var_idx    = fj.grid_var_buf[i];
       auto move_score = fj.grid_score_buf[i];
 
-      if (move_score > th_best_score || (move_score == th_best_score && var_idx > th_best_var)) {
+      if (move_score > th_best_score ||
+          (move_score == th_best_score && var_idx > fj.grid_var_buf[th_best_block])) {
         th_best_score = move_score;
         th_best_block = i;
-        th_best_var   = var_idx;
       }
     }
     // Block level reduction to get the best variable from all blocks
-    auto [reduced_best_score_pair, reduced_best_block] =
-      raft::blockRankedReduce(thrust::make_pair(th_best_score, th_best_var),
-                              shmem,
-                              th_best_block,
-                              score_with_tiebreaker_comparator<move_score_t, i_t>{});
+    auto [reduced_best_score, reduced_best_block] =
+      raft::blockRankedReduce(th_best_score, shmem, th_best_block, raft::max_op{});
 
-    if (reduced_best_score_pair.first.valid() && threadIdx.x == 0) {
-      cuopt_assert(reduced_best_block < gridDim.x, "");
+    if (reduced_best_score.valid() && threadIdx.x == 0) {
+      cuopt_assert(th_best_block < gridDim.x, "");
       best_var   = fj.grid_var_buf[reduced_best_block];
       best_delta = fj.grid_delta_buf[reduced_best_block];
       best_score = fj.grid_score_buf[reduced_best_block];
@@ -1314,9 +1243,6 @@ DI thrust::tuple<i_t, f_t, typename fj_t<i_t, f_t>::move_score_t> best_random_mt
   raft::random::PCGenerator rng(fj.settings->seed + *fj.iterations, 0, 0);
 
   i_t cstr_idx = fj.violated_constraints.contents[rng.next_u32() % fj.violated_constraints.size()];
-  cuopt_assert(fj.excess_score(cstr_idx, fj.incumbent_lhs[cstr_idx]) < 0,
-               "constraint isn't violated");
-
   auto [offset_begin, offset_end] = fj.pb.range_for_constraint(cstr_idx);
 
   return gridwide_reduce_best_move<i_t, f_t, TPB, /*WeakTabu=*/true, /*recompute_score=*/true>(
@@ -1331,9 +1257,7 @@ DI thrust::tuple<i_t, f_t, typename fj_t<i_t, f_t>::move_score_t> best_sat_cstr_
   typename fj_t<i_t, f_t>::climber_data_t::view_t fj)
 {
   // compute all MTM moves within satisfied constraints
-  compute_mtm_moves<i_t, f_t, MTMMoveType::FJ_MTM_SATISFIED, false, TPB>(fj, true);
-  // NOTE: grid sync not required since each block only reduces over variables that it updated in
-  // compute_mtm_moves
+  compute_mtm_moves<i_t, f_t, MTMMoveType::FJ_MTM_SATISFIED, false>(fj, true);
   return gridwide_reduce_best_move<i_t, f_t, TPB, /*WeakTabu=*/false, /*recompute_score=*/false>(
     fj, fj.objective_vars.begin(), fj.objective_vars.end(), [fj] __device__(i_t var_idx) {
       return fj.jump_move_delta[var_idx];
@@ -1488,10 +1412,9 @@ __global__ void handle_local_minimum_kernel(typename fj_t<i_t, f_t>::climber_dat
 
     if (sat_best_score.base > 0 && sat_best_score > best_score) {
       if (FIRST_THREAD) {
-        best_score    = sat_best_score;
-        best_var      = sat_best_var;
-        best_delta    = sat_best_delta;
-        best_movetype = 'S';
+        best_score = sat_best_score;
+        best_var   = sat_best_var;
+        best_delta = sat_best_delta;
       }
     }
   }
@@ -1503,15 +1426,6 @@ __global__ void handle_local_minimum_kernel(typename fj_t<i_t, f_t>::climber_dat
                      best_var, fj.incumbent_assignment[best_var] + best_delta),
                    "assignment not within bounds");
       fj.jump_move_delta[best_var] = best_delta;
-#if FJ_SINGLE_STEP
-      DEVICE_LOG_DEBUG("FJ[%d] selected_var: %d, delta %g, score {%d %d}, type %c\n",
-                       *fj.iterations,
-                       best_var,
-                       best_delta,
-                       best_score.base,
-                       best_score.bonus,
-                       best_movetype);
-#endif
     }
   }
 }

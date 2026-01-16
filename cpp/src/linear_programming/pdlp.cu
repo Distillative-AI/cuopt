@@ -252,15 +252,7 @@ void pdlp_solver_t<i_t, f_t>::set_initial_dual_solution(
     initial_dual_.data(), initial_dual_solution.data(), initial_dual_solution.size(), stream_view_);
 }
 
-static bool time_limit_reached(const timer_t& timer)
-{
-  bool elapsed = timer.elapsed_time() >= timer.get_time_limit();
-  if (elapsed) {
-    CUOPT_LOG_ERROR("**** PDLP Time limit reached: %f *****", timer.get_time_limit());
-    // cuopt_assert(false, "unexpected timer");
-  }
-  return elapsed;
-}
+static bool time_limit_reached(const timer_t& timer) { return timer.check_time_limit(); }
 
 template <typename i_t, typename f_t>
 std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>::check_limits(
@@ -1182,50 +1174,6 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
   bool warm_start_was_given =
     settings_.get_pdlp_warm_start_data().last_restart_duality_gap_dual_solution_.size() != 0;
 
-  // Reset iteration metrics at the start of the solver run
-  total_spmv_ops_ = 0;
-
-  // Compute sparsity metrics once (they don't change during solve)
-  {
-    const i_t n_vars  = problem_ptr->n_variables;
-    const i_t n_cstrs = problem_ptr->n_constraints;
-    const int64_t nnz = problem_ptr->nnz;
-
-    cached_sparsity_       = (n_cstrs > 0 && n_vars > 0)
-                               ? static_cast<double>(nnz) / (static_cast<double>(n_cstrs) * n_vars)
-                               : 0.0;
-    cached_nnz_stddev_     = 0.0;
-    cached_unbalancedness_ = 0.0;
-
-    if (problem_ptr->offsets.size() == static_cast<size_t>(n_cstrs + 1) && n_cstrs > 0) {
-      // Copy offsets to host for efficient computation
-      std::vector<i_t> h_offsets(n_cstrs + 1);
-      raft::copy(h_offsets.data(), problem_ptr->offsets.data(), n_cstrs + 1, stream_view_);
-      RAFT_CUDA_TRY(cudaStreamSynchronize(stream_view_));
-
-      const double mean_nnz = static_cast<double>(nnz) / n_cstrs;
-      double variance_sum   = 0.0;
-      for (i_t row = 0; row < n_cstrs; ++row) {
-        const double row_nnz = static_cast<double>(h_offsets[row + 1] - h_offsets[row]);
-        const double diff    = row_nnz - mean_nnz;
-        variance_sum += diff * diff;
-      }
-      const double variance  = variance_sum / n_cstrs;
-      cached_nnz_stddev_     = std::sqrt(variance);
-      cached_unbalancedness_ = (mean_nnz > 0) ? cached_nnz_stddev_ / mean_nnz : 0.0;
-    }
-  }
-
-  // Initialize feature tracking for runtime prediction
-  features_.init_from_problem(problem_ptr->n_variables,
-                              problem_ptr->n_constraints,
-                              problem_ptr->nnz,
-                              static_cast<f_t>(cached_sparsity_),
-                              static_cast<f_t>(cached_nnz_stddev_),
-                              static_cast<f_t>(cached_unbalancedness_),
-                              warm_start_was_given);
-  interval_start_time_ = std::chrono::high_resolution_clock::now();
-
   if (!inside_mip_) {
     CUOPT_LOG_INFO(
       "   Iter    Primal Obj.      Dual Obj.    Gap        Primal Res.  Dual Res.   Time");
@@ -1340,21 +1288,7 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
           average_termination_strategy_.get_convergence_information(),  // Needed for KKT restart
           best_primal_weight_  // Needed for cuPDLP+ restart
         );
-
-        // Track restart for feature logging
-        if (has_restarted) { features_.record_restart(); }
       }
-
-      // Update convergence metrics from termination strategy (for feature logging)
-      const auto& conv_info = current_termination_strategy_.get_convergence_information();
-      const f_t kkt = restart_strategy_.compute_kkt_score(conv_info.get_l2_primal_residual(),
-                                                          conv_info.get_l2_dual_residual(),
-                                                          conv_info.get_gap(),
-                                                          primal_weight_);
-      features_.update_convergence(conv_info.get_l2_primal_residual().value(stream_view_),
-                                   conv_info.get_l2_dual_residual().value(stream_view_),
-                                   conv_info.get_gap().value(stream_view_),
-                                   kkt);
 
       if (!pdlp_hyper_params::rescale_for_restart) {
         // We don't need to rescale average because what matters is weighted_average_solution
@@ -1376,58 +1310,22 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
 #ifdef CUPDLP_DEBUG_MODE
     printf("Is Major %d\n", (total_pdlp_iterations_ + 1) % pdlp_hyper_params::major_iteration == 0);
 #endif
-    // Determine if the NEXT iteration will be a major iteration (for take_step)
-    const bool next_is_major =
-      (total_pdlp_iterations_ + 1) % pdlp_hyper_params::major_iteration == 0;
-
-    take_step(total_pdlp_iterations_, next_is_major);
-
-    // Track iteration for features (2 SpMV per regular iteration in Stable3)
-    features_.record_regular_iteration();
-
-    // Count SpMV operations for legacy tracking
-    constexpr int64_t spmv_ops_per_iteration = 2;
-    total_spmv_ops_ += spmv_ops_per_iteration;
+    take_step(total_pdlp_iterations_,
+              (total_pdlp_iterations_ + 1) % pdlp_hyper_params::major_iteration == 0);
 
     if (pdlp_hyper_params::use_reflected_primal_dual) {
-      if (pdlp_hyper_params::use_fixed_point_error && (next_is_major || has_restarted)) {
+      if (pdlp_hyper_params::use_fixed_point_error &&
+            (total_pdlp_iterations_ + 1) % pdlp_hyper_params::major_iteration == 0 ||
+          has_restarted)
         compute_fixed_error(has_restarted);  // May set has_restarted to false
-        // compute_fixed_error does 1 additional SpMV
-        total_spmv_ops_ += 1;
-      }
 
       halpern_update();
     }
-
-    // Track major iteration for features (after compute_fixed_error adds +1 SpMV)
-    if (is_major_iteration || is_conditional_major) { features_.record_major_iteration(); }
 
     ++total_pdlp_iterations_;
     ++internal_solver_iterations_;
     if (pdlp_hyper_params::never_restart_to_average)
       restart_strategy_.increment_iteration_since_last_restart();
-
-    // Update step parameters for feature tracking
-    features_.update_step_params(step_size_.value(stream_view_),
-                                 primal_weight_.value(stream_view_));
-
-    // Log PDLP features at regular intervals
-    if (features_.should_log()) {
-      // Compute elapsed time for this interval
-      auto now         = std::chrono::high_resolution_clock::now();
-      auto interval_ms = std::chrono::duration<f_t, std::milli>(now - interval_start_time_).count();
-      features_.interval_time_ms = interval_ms;
-
-      // Log the features
-      features_.log_features();
-
-      // Reset interval counters and timer
-      features_.reset_interval_counters();
-      interval_start_time_ = now;
-
-      // Reset legacy spmv counter for consistency
-      total_spmv_ops_ = 0;
-    }
   }
   return optimization_problem_solution_t<i_t, f_t>{pdlp_termination_status_t::NumericalError,
                                                    stream_view_};

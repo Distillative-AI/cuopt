@@ -12,8 +12,6 @@
 #include <rmm/device_scalar.hpp>
 #include <rmm/device_uvector.hpp>
 
-#include <mip/utils.cuh>
-
 namespace cuopt::linear_programming::detail {
 
 template <typename i_t, typename f_t>
@@ -25,11 +23,6 @@ struct weight_t {
     // objective_weight.set_value_to_zero_async(handle_ptr->get_stream());
     const f_t one = 1.;
     objective_weight.set_value_async(one, handle_ptr->get_stream());
-  }
-
-  uint32_t get_hash(rmm::cuda_stream_view stream = rmm::cuda_stream_default) const
-  {
-    return compute_hash(cstr_weights, stream) ^ compute_hash(objective_weight.value(stream));
   }
 
   rmm::device_uvector<f_t> cstr_weights;

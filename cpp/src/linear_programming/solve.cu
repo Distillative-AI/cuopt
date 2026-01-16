@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -865,7 +865,7 @@ optimization_problem_solution_t<i_t, f_t> solve_lp(
     auto lp_timer = cuopt::timer_t(settings.time_limit);
     detail::problem_t<i_t, f_t> problem(op_problem);
 
-    [[maybe_unused]] double presolve_time = 0.0;
+    double presolve_time = 0.0;
     std::unique_ptr<detail::third_party_presolve_t<i_t, f_t>> presolver;
     auto run_presolve = settings.presolve;
     run_presolve = run_presolve && settings.get_pdlp_warm_start_data().total_pdlp_iterations_ == -1;
@@ -897,7 +897,6 @@ optimization_problem_solution_t<i_t, f_t> solve_lp(
     CUOPT_LOG_INFO("Objective offset %f scaling_factor %f",
                    problem.presolve_data.objective_offset,
                    problem.presolve_data.objective_scaling_factor);
-    CUOPT_LOG_INFO("Model fingerprint: 0x%x", problem.get_fingerprint());
 
     if (settings.user_problem_file != "") {
       CUOPT_LOG_INFO("Writing user problem to file: %s", settings.user_problem_file.c_str());

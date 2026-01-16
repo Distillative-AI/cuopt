@@ -45,22 +45,16 @@ struct ls_work_normalized_reward_t {
 };
 
 struct recombiner_work_normalized_reward_t {
-  bool deterministic;
-  double work;
-  recombiner_work_normalized_reward_t(bool deterministic, double work)
-    : deterministic(deterministic), work(work)
+  double time_in_miliseconds;
+  recombiner_work_normalized_reward_t(double time_in_miliseconds)
+    : time_in_miliseconds(time_in_miliseconds)
   {
   }
 
   double operator()(double factor) const
   {
     // normal recombiners take 2000 ms
-    if (deterministic) {
-      double time_in_miliseconds = work;
-      return factor * (std::max(0.1, 4.0 - (time_in_miliseconds / 2000)));
-    } else {
-      return factor * (std::max(0.1, 4.0 - (work / 200)));
-    }
+    return factor * (std::max(0.1, 4.0 - (time_in_miliseconds / 2000)));
   }
 };
 

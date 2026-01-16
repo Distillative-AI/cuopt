@@ -124,14 +124,12 @@ __global__ void load_balancing_prepare_iteration(const __grid_constant__
   // alternate codepath in the case of a small related_var/total_var ratio
   if (!full_refresh && fj.pb.related_variables.size() > 0 &&
       fj.pb.n_variables / fj.work_ids_for_related_vars[*fj.selected_var] >=
-        fj.settings->parameters.old_codepath_total_var_to_relvar_ratio_threshold &&
-      fj.settings->load_balancing_mode != fj_load_balancing_mode_t::ALWAYS_ON) {
+        fj.settings->parameters.old_codepath_total_var_to_relvar_ratio_threshold) {
     auto range = fj.pb.range_for_related_vars(*fj.selected_var);
 
     for (i_t i = blockIdx.x + range.first; i < range.second; i += gridDim.x) {
       i_t var_idx = fj.pb.related_variables[i];
-      update_jump_value<i_t, f_t, MTMMoveType::FJ_MTM_VIOLATED, TPB_loadbalance, false>(fj,
-                                                                                        var_idx);
+      update_jump_value<i_t, f_t, MTMMoveType::FJ_MTM_VIOLATED, false>(fj, var_idx);
     }
 
     if (FIRST_THREAD) *fj.load_balancing_skip = true;
@@ -336,17 +334,8 @@ __global__ void load_balancing_compute_scores_binary(
       auto c_lb = fj.constraint_lower_bounds_csr[csr_offset];
       auto c_ub = fj.constraint_upper_bounds_csr[csr_offset];
 
-      auto [cstr_base_feas, cstr_bonus_robust] =
-        feas_score_constraint<i_t, f_t>(fj,
-                                        var_idx,
-                                        delta,
-                                        cstr_idx,
-                                        cstr_coeff,
-                                        c_lb,
-                                        c_ub,
-                                        fj.incumbent_lhs[cstr_idx],
-                                        fj.cstr_left_weights[cstr_idx],
-                                        fj.cstr_right_weights[cstr_idx]);
+      auto [cstr_base_feas, cstr_bonus_robust] = feas_score_constraint<i_t, f_t>(
+        fj, var_idx, delta, cstr_idx, cstr_coeff, c_lb, c_ub, fj.incumbent_lhs[cstr_idx]);
 
       base_feas += cstr_base_feas;
       bonus_robust += cstr_bonus_robust;
@@ -537,8 +526,8 @@ __launch_bounds__(TPB_loadbalance, 16) __global__
 
       auto& score_info = candidate.score;
 
-      int32_t base_feas    = 0;
-      int32_t bonus_robust = 0;
+      f_t base_feas    = 0;
+      f_t bonus_robust = 0;
 
       // same as for the binary var kernel, compute each score compoenent per thread
       // and merge then via a wapr reduce
@@ -546,17 +535,8 @@ __launch_bounds__(TPB_loadbalance, 16) __global__
         cuopt_assert(c_lb == fj.pb.constraint_lower_bounds[cstr_idx], "bound sanity check failed");
         cuopt_assert(c_ub == fj.pb.constraint_upper_bounds[cstr_idx], "bound sanity check failed");
 
-        auto [cstr_base_feas, cstr_bonus_robust] =
-          feas_score_constraint<i_t, f_t>(fj,
-                                          var_idx,
-                                          delta,
-                                          cstr_idx,
-                                          cstr_coeff,
-                                          c_lb,
-                                          c_ub,
-                                          fj.incumbent_lhs[cstr_idx],
-                                          fj.cstr_left_weights[cstr_idx],
-                                          fj.cstr_right_weights[cstr_idx]);
+        auto [cstr_base_feas, cstr_bonus_robust] = feas_score_constraint<i_t, f_t>(
+          fj, var_idx, delta, cstr_idx, cstr_coeff, c_lb, c_ub, fj.incumbent_lhs[cstr_idx]);
 
         base_feas += cstr_base_feas;
         bonus_robust += cstr_bonus_robust;
@@ -585,29 +565,24 @@ __launch_bounds__(TPB_loadbalance, 16) __global__
             best_score_ref{fj.jump_move_scores[var_idx]};
           auto best_score = best_score_ref.load(cuda::memory_order_relaxed);
 
-          cuda::atomic_ref<f_t, cuda::thread_scope_device> best_delta_ref{
-            fj.jump_move_delta[var_idx]};
-          auto best_delta = best_delta_ref.load(cuda::memory_order_relaxed);
-
           if (best_score < candidate.score ||
-              (best_score == candidate.score && candidate.delta < best_delta)) {
+              (best_score == candidate.score && candidate.delta < fj.jump_move_delta[var_idx])) {
             // update the best move delta
             acquire_lock(&fj.jump_locks[var_idx]);
 
             // reject this move if it would increase the target variable to a numerically unstable
             // value
-            // only skip updating, don't invalidate existing valid moves
-            if (fj.move_numerically_stable(fj.incumbent_assignment[var_idx],
-                                           fj.incumbent_assignment[var_idx] + delta,
-                                           base_feas,
-                                           *fj.violation_score)) {
-              if (fj.jump_move_scores[var_idx] < candidate.score
-                  // determinism for ease of debugging
-                  || (fj.jump_move_scores[var_idx] == candidate.score &&
-                      candidate.delta < fj.jump_move_delta[var_idx])) {
-                fj.jump_move_delta[var_idx]  = candidate.delta;
-                fj.jump_move_scores[var_idx] = candidate.score;
-              }
+            if (!fj.move_numerically_stable(fj.incumbent_assignment[var_idx],
+                                            fj.incumbent_assignment[var_idx] + delta,
+                                            base_feas,
+                                            *fj.violation_score)) {
+              fj.jump_move_scores[var_idx] = fj_t<i_t, f_t>::move_score_t::invalid();
+            } else if (fj.jump_move_scores[var_idx] < candidate.score
+                       // determinism for ease of debugging
+                       || (fj.jump_move_scores[var_idx] == candidate.score &&
+                           candidate.delta < fj.jump_move_delta[var_idx])) {
+              fj.jump_move_delta[var_idx]  = candidate.delta;
+              fj.jump_move_scores[var_idx] = candidate.score;
             }
             release_lock(&fj.jump_locks[var_idx]);
           }
@@ -669,7 +644,7 @@ __global__ void load_balancing_sanity_checks(const __grid_constant__
     if (!(score_1 == score_1.invalid() && score_2 == score_2.invalid()) &&
         !(v.pb.integer_equal(score_1.base, score_2.base) &&
           v.pb.integer_equal(score_1.bonus, score_2.bonus))) {
-      printf("(iter %d) [%d, int:%d]: delta %g/%g was %d/%d, is %d/%d\n",
+      printf("(iter %d) [%d, int:%d]: delta %g/%g was %f/%f, is %f/%f\n",
              *v.iterations,
              var_idx,
              v.pb.is_integer_var(var_idx),

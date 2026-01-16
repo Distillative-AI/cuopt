@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -35,9 +35,9 @@ class fp_recombiner_t : public recombiner_t<i_t, f_t> {
   {
   }
 
-  std::tuple<solution_t<i_t, f_t>, bool, double> recombine(solution_t<i_t, f_t>& a,
-                                                           solution_t<i_t, f_t>& b,
-                                                           const weight_t<i_t, f_t>& weights)
+  std::pair<solution_t<i_t, f_t>, bool> recombine(solution_t<i_t, f_t>& a,
+                                                  solution_t<i_t, f_t>& b,
+                                                  const weight_t<i_t, f_t>& weights)
   {
     raft::common::nvtx::range fun_scope("FP recombiner");
     auto& guiding_solution = a.get_feasible() ? a : b;
@@ -50,7 +50,6 @@ class fp_recombiner_t : public recombiner_t<i_t, f_t> {
     CUOPT_LOG_DEBUG("FP rec: Number of different variables %d MAX_VARS %d",
                     n_different_vars,
                     fp_recombiner_config_t::max_n_of_vars_from_other);
-    CUOPT_LOG_TRACE("FP rec: offspring hash 0x%x", offspring.get_hash());
     i_t n_vars_from_other = n_different_vars;
     if (n_vars_from_other > (i_t)fp_recombiner_config_t::max_n_of_vars_from_other) {
       n_vars_from_other = fp_recombiner_config_t::max_n_of_vars_from_other;
@@ -63,34 +62,17 @@ class fp_recombiner_t : public recombiner_t<i_t, f_t> {
     i_t n_vars_from_guiding = a.problem_ptr->n_integer_vars - n_vars_from_other;
     if (n_vars_from_other == 0 || n_vars_from_guiding == 0) {
       CUOPT_LOG_DEBUG("Returning false because all vars are common or different");
-      return std::make_tuple(offspring, false, 0.0);
+      return std::make_pair(offspring, false);
     }
-    // TODO: CHANGE
-    double work = static_cast<double>(n_vars_from_other);
     CUOPT_LOG_DEBUG(
       "n_vars_from_guiding %d n_vars_from_other %d", n_vars_from_guiding, n_vars_from_other);
-    CUOPT_LOG_TRACE("FP rec: offspring hash 0x%x, vars to fix 0x%x",
-                    offspring.get_hash(),
-                    detail::compute_hash(vars_to_fix));
     this->compute_vars_to_fix(offspring, vars_to_fix, n_vars_from_other, n_vars_from_guiding);
-    CUOPT_LOG_TRACE("FP rec post computevarstofix: offspring hash 0x%x, vars to fix 0x%x",
-                    offspring.get_hash(),
-                    detail::compute_hash(vars_to_fix));
     auto [fixed_problem, fixed_assignment, variable_map] = offspring.fix_variables(vars_to_fix);
-    CUOPT_LOG_TRACE("FP rec: fixed_problem hash 0x%x assigned hash 0x%x",
-                    fixed_problem.get_fingerprint(),
-                    detail::compute_hash(fixed_assignment));
     fixed_problem.check_problem_representation(true);
     if (!guiding_solution.get_feasible() && !other_solution.get_feasible()) {
-      CUOPT_LOG_TRACE("FP rec: running LP with infeasibility detection");
       relaxed_lp_settings_t lp_settings;
       lp_settings.time_limit = fp_recombiner_config_t::infeasibility_detection_time_limit;
-      if (this->context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
-        lp_settings.time_limit =
-          std::numeric_limits<double>::max();  // TODO should be global time limit
-        lp_settings.work_limit = fp_recombiner_config_t::infeasibility_detection_time_limit;
-      }
-      lp_settings.tolerance             = fixed_problem.tolerances.absolute_tolerance;
+      lp_settings.tolerance  = fixed_problem.tolerances.absolute_tolerance;
       lp_settings.return_first_feasible = true;
       lp_settings.save_state            = true;
       lp_settings.check_infeasibility   = true;
@@ -101,7 +83,7 @@ class fp_recombiner_t : public recombiner_t<i_t, f_t> {
           lp_response.get_termination_status() == pdlp_termination_status_t::DualInfeasible ||
           lp_response.get_termination_status() == pdlp_termination_status_t::TimeLimit) {
         CUOPT_LOG_DEBUG("FP recombiner failed because LP found infeasible!");
-        return std::make_tuple(offspring, false, 0.0);
+        return std::make_pair(offspring, false);
       }
     }
     // brute force rounding threshold is 8
@@ -114,7 +96,7 @@ class fp_recombiner_t : public recombiner_t<i_t, f_t> {
       offspring.handle_ptr->sync_stream();
       offspring.assignment = std::move(fixed_assignment);
       cuopt_func_call(offspring.test_variable_bounds(false));
-      work_limit_timer_t timer(this->context.gpu_heur_loop, fp_recombiner_config_t::fp_time_limit);
+      timer_t timer(fp_recombiner_config_t::fp_time_limit);
       fp.timer = timer;
       fp.cycle_queue.reset(offspring);
       fp.reset();
@@ -152,9 +134,9 @@ class fp_recombiner_t : public recombiner_t<i_t, f_t> {
                                            !guiding_solution.get_feasible();
     if (better_cost_than_parents || better_feasibility_than_parents) {
       CUOPT_LOG_DEBUG("Offspring is feasible or better than both parents");
-      return std::make_tuple(offspring, true, work);
+      return std::make_pair(offspring, true);
     }
-    return std::make_tuple(offspring, !same_as_parents, work);
+    return std::make_pair(offspring, !same_as_parents);
   }
   rmm::device_uvector<i_t> vars_to_fix;
   // keep a copy of FP to prevent interference with generation FP

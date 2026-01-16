@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -99,7 +99,6 @@ class solution_t {
   f_t compute_max_constraint_violation();
   f_t compute_max_int_violation();
   f_t compute_max_variable_violation();
-  uint32_t get_hash() const;
 
   struct view_t {
     // let's not bloat the class for every simple getter and setters

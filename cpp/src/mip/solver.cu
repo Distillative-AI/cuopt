@@ -108,7 +108,7 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
   }
 
   diversity_manager_t<i_t, f_t> dm(context);
-  dm.timer              = work_limit_timer_t(context.gpu_heur_loop, timer_.get_time_limit());
+  dm.timer              = timer_;
   f_t time_limit        = context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC
                             ? timer_.get_time_limit()
                             : timer_.remaining_time();

@@ -105,6 +105,7 @@ class feasibility_pump_t {
   feasibility_pump_t() = delete;
   feasibility_pump_t(mip_solver_context_t<i_t, f_t>& context,
                      fj_t<i_t, f_t>& fj,
+                     //                     fj_tree_t<i_t, f_t>& fj_tree_,
                      constraint_prop_t<i_t, f_t>& constraint_prop_,
                      line_segment_search_t<i_t, f_t>& line_segment_search_,
                      rmm::device_uvector<f_t>& lp_optimal_solution_);
@@ -126,7 +127,7 @@ class feasibility_pump_t {
   bool check_distance_cycle(solution_t<i_t, f_t>& solution);
   void reset();
   void resize_vectors(problem_t<i_t, f_t>& problem, const raft::handle_t* handle_ptr);
-  bool random_round_with_fj(solution_t<i_t, f_t>& solution, work_limit_timer_t& round_timer);
+  bool random_round_with_fj(solution_t<i_t, f_t>& solution, timer_t& round_timer);
   bool round_multiple_points(solution_t<i_t, f_t>& solution);
   void relax_general_integers(solution_t<i_t, f_t>& solution);
   void revert_relaxation(solution_t<i_t, f_t>& solution);
@@ -135,6 +136,7 @@ class feasibility_pump_t {
   mip_solver_context_t<i_t, f_t>& context;
   // keep a reference from upstream local search
   fj_t<i_t, f_t>& fj;
+  // fj_tree_t<i_t, f_t>& fj_tree;
   line_segment_search_t<i_t, f_t>& line_segment_search;
   cycle_queue_t<i_t, f_t> cycle_queue;
   constraint_prop_t<i_t, f_t>& constraint_prop;
@@ -153,7 +155,7 @@ class feasibility_pump_t {
   f_t proj_begin;
   i_t n_fj_single_descents;
   i_t max_n_of_integers = 0;
-  cuopt::work_limit_timer_t timer;
+  cuopt::timer_t timer;
 };
 
 }  // namespace cuopt::linear_programming::detail

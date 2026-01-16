@@ -36,9 +36,9 @@ class sub_mip_recombiner_t : public recombiner_t<i_t, f_t> {
     solution_vector.push_back(solution);
   }
 
-  std::tuple<solution_t<i_t, f_t>, bool, double> recombine(solution_t<i_t, f_t>& a,
-                                                           solution_t<i_t, f_t>& b,
-                                                           const weight_t<i_t, f_t>& weights)
+  std::pair<solution_t<i_t, f_t>, bool> recombine(solution_t<i_t, f_t>& a,
+                                                  solution_t<i_t, f_t>& b,
+                                                  const weight_t<i_t, f_t>& weights)
   {
     raft::common::nvtx::range fun_scope("Sub-MIP recombiner");
     solution_vector.clear();
@@ -64,10 +64,8 @@ class sub_mip_recombiner_t : public recombiner_t<i_t, f_t> {
     i_t n_vars_from_guiding = a.problem_ptr->n_integer_vars - n_vars_from_other;
     if (n_vars_from_other == 0 || n_vars_from_guiding == 0) {
       CUOPT_LOG_DEBUG("Returning false because all vars are common or different");
-      return std::make_tuple(offspring, false, 0.0);
+      return std::make_pair(offspring, false);
     }
-    // TODO: CHANGE
-    double work = static_cast<double>(n_vars_from_other);
     CUOPT_LOG_DEBUG(
       "n_vars_from_guiding %d n_vars_from_other %d", n_vars_from_guiding, n_vars_from_other);
     this->compute_vars_to_fix(offspring, vars_to_fix, n_vars_from_other, n_vars_from_guiding);
@@ -188,9 +186,9 @@ class sub_mip_recombiner_t : public recombiner_t<i_t, f_t> {
                                            !guiding_solution.get_feasible();
     if (better_cost_than_parents || better_feasibility_than_parents) {
       CUOPT_LOG_DEBUG("Offspring is feasible or better than both parents");
-      return std::make_tuple(offspring, true, work);
+      return std::make_pair(offspring, true);
     }
-    return std::make_tuple(offspring, !std::isnan(branch_and_bound_solution.objective), work);
+    return std::make_pair(offspring, !std::isnan(branch_and_bound_solution.objective));
   }
   rmm::device_uvector<i_t> vars_to_fix;
   mip_solver_context_t<i_t, f_t>& context;

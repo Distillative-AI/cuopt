@@ -37,15 +37,9 @@ ConfigureTest(PRESOLVE_TEST
     ${CMAKE_CURRENT_SOURCE_DIR}/presolve_test.cu
 )
 # Disable for now
-ConfigureTest(FEASIBILITY_JUMP_TEST
-   ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump_tests.cu
-)
+# ConfigureTest(FEASIBILITY_JUMP_TEST
+#    ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump_tests.cu
+# )
 ConfigureTest(MIP_TERMINATION_STATUS_TEST
     ${CMAKE_CURRENT_SOURCE_DIR}/termination_test.cu
-)
-ConfigureTest(LOCAL_SEARCH_TEST
-    ${CMAKE_CURRENT_SOURCE_DIR}/local_search_test.cu
-)
-ConfigureTest(DIVERSITY_TEST
-    ${CMAKE_CURRENT_SOURCE_DIR}/diversity_test.cu
 )

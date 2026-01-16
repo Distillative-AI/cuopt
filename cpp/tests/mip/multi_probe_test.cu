@@ -6,7 +6,6 @@
 /* clang-format on */
 
 #include "../linear_programming/utilities/pdlp_test_utilities.cuh"
-#include "determinism_utils.cuh"
 #include "mip_utils.cuh"
 
 #include <raft/sparse/detail/cusparse_wrappers.h>
@@ -14,7 +13,6 @@
 #include <linear_programming/utilities/problem_checking.cuh>
 #include <mip/presolve/bounds_presolve.cuh>
 #include <mip/presolve/multi_probe.cuh>
-#include <mip/utils.cuh>
 #include <mps_parser/parser.hpp>
 #include <raft/core/handle.hpp>
 #include <raft/util/cudart_utils.hpp>
@@ -45,10 +43,9 @@ void init_handler(const raft::handle_t* handle_ptr)
 }
 
 std::tuple<std::vector<int>, std::vector<double>, std::vector<double>> select_k_random(
-  detail::problem_t<int, double>& problem,
-  int sample_size,
-  unsigned long seed = std::random_device{}())
+  detail::problem_t<int, double>& problem, int sample_size)
 {
+  auto seed = std::random_device{}();
   std::cerr << "Tested with seed " << seed << "\n";
   problem.compute_n_integer_vars();
   auto [v_lb, v_ub] = extract_host_bounds<double>(problem.variable_bounds, problem.handle_ptr);
@@ -141,7 +138,7 @@ multi_probe_results(
     std::move(h_lb_0), std::move(h_ub_0), std::move(h_lb_1), std::move(h_ub_1));
 }
 
-uint32_t test_multi_probe(std::string path, unsigned long seed = std::random_device{}())
+void test_multi_probe(std::string path)
 {
   auto memory_resource = make_async();
   rmm::mr::set_current_device_resource(memory_resource.get());
@@ -162,12 +159,12 @@ uint32_t test_multi_probe(std::string path, unsigned long seed = std::random_dev
                                                                problem.reverse_constraints,
                                                                nullptr,
                                                                true);
-  detail::mip_solver_t<int, double> solver(problem, default_settings, scaling, timer_t(0));
+  detail::mip_solver_t<int, double> solver(problem, default_settings, scaling, cuopt::timer_t(0));
   detail::bound_presolve_t<int, double> bnd_prb_0(solver.context);
   detail::bound_presolve_t<int, double> bnd_prb_1(solver.context);
   detail::multi_probe_t<int, double> multi_probe_prs(solver.context);
 
-  auto probe_tuple       = select_k_random(problem, 100, seed);
+  auto probe_tuple       = select_k_random(problem, 100);
   auto bounds_probe_vals = convert_probe_tuple(probe_tuple);
 
   auto [bnd_lb_0, bnd_ub_0, bnd_lb_1, bnd_ub_1] =
@@ -186,16 +183,6 @@ uint32_t test_multi_probe(std::string path, unsigned long seed = std::random_dev
   auto mlp_min_act_1 = host_copy(multi_probe_prs.upd_1.min_activity, stream);
   auto mlp_max_act_1 = host_copy(multi_probe_prs.upd_1.max_activity, stream);
 
-  std::vector<uint32_t> hashes;
-  hashes.push_back(detail::compute_hash(bnd_min_act_0));
-  hashes.push_back(detail::compute_hash(bnd_min_act_1));
-  hashes.push_back(detail::compute_hash(bnd_max_act_0));
-  hashes.push_back(detail::compute_hash(bnd_max_act_1));
-  hashes.push_back(detail::compute_hash(bnd_lb_0));
-  hashes.push_back(detail::compute_hash(bnd_ub_0));
-  hashes.push_back(detail::compute_hash(bnd_lb_1));
-  hashes.push_back(detail::compute_hash(bnd_ub_1));
-
   for (int i = 0; i < (int)bnd_min_act_0.size(); ++i) {
     EXPECT_DOUBLE_EQ(bnd_min_act_0[i], mlp_min_act_0[i]);
     EXPECT_DOUBLE_EQ(bnd_max_act_0[i], mlp_max_act_0[i]);
@@ -209,45 +196,17 @@ uint32_t test_multi_probe(std::string path, unsigned long seed = std::random_dev
     EXPECT_DOUBLE_EQ(bnd_lb_1[i], m_lb_1[i]);
     EXPECT_DOUBLE_EQ(bnd_ub_1[i], m_ub_1[i]);
   }
-
-  // return a composite hash of all the hashes to check for determinism
-  return detail::compute_hash(hashes);
 }
 
-// TEST(presolve, multi_probe)
-// {
-//   std::vector<std::string> test_instances = {
-//     "mip/50v-10-free-bound.mps", "mip/neos5-free-bound.mps", "mip/neos5.mps"};
-//   for (const auto& test_instance : test_instances) {
-//     std::cout << "Running: " << test_instance << std::endl;
-//     auto path = make_path_absolute(test_instance);
-//     test_multi_probe(path);
-//   }
-// }
-
-TEST(presolve, multi_probe_deterministic)
+TEST(presolve, multi_probe)
 {
-  spin_stream_raii_t spin_stream_1;
-
   std::vector<std::string> test_instances = {
-    "mip/50v-10-free-bound.mps",
-    "mip/neos5-free-bound.mps",
-    "mip/neos5.mps",
-    "mip/50v-10.mps",
-  };
+    "mip/50v-10-free-bound.mps", "mip/neos5-free-bound.mps", "mip/neos5.mps"};
   for (const auto& test_instance : test_instances) {
     std::cout << "Running: " << test_instance << std::endl;
-    unsigned long seed = std::random_device{}();
-    auto path          = make_path_absolute(test_instance);
-    uint32_t gold_hash = 0;
-    for (int i = 0; i < 10; ++i) {
-      auto hash = test_multi_probe(path, seed);
-      if (i == 0) {
-        gold_hash = hash;
-      } else {
-        EXPECT_EQ(hash, gold_hash);
-      }
-    }
+    auto path = make_path_absolute(test_instance);
+    test_multi_probe(path);
   }
 }
+
 }  // namespace cuopt::linear_programming::test

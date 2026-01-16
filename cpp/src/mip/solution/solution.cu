@@ -623,7 +623,7 @@ mip_solution_t<i_t, f_t> solution_t<i_t, f_t>::get_solution(bool output_feasible
         "Solution objective: %f , relative_mip_gap %f solution_bound %f presolve_time %f "
         "total_solve_time %f "
         "max constraint violation %f max int violation %f max var bounds violation %f "
-        "nodes %d simplex_iterations %d hash %x",
+        "nodes %d simplex_iterations %d",
         h_user_obj,
         rel_mip_gap,
         solution_bound,
@@ -633,8 +633,7 @@ mip_solution_t<i_t, f_t> solution_t<i_t, f_t>::get_solution(bool output_feasible
         max_int_violation,
         max_variable_bound_violation,
         num_nodes,
-        num_simplex_iterations,
-        get_hash());
+        num_simplex_iterations);
     }
     const bool not_optimal = rel_mip_gap > problem_ptr->tolerances.relative_mip_gap &&
                              abs_mip_gap > problem_ptr->tolerances.absolute_mip_gap;
@@ -656,12 +655,6 @@ mip_solution_t<i_t, f_t> solution_t<i_t, f_t>::get_solution(bool output_feasible
                                     stats,
                                     handle_ptr->get_stream()};
   }
-}
-
-template <typename i_t, typename f_t>
-uint32_t solution_t<i_t, f_t>::get_hash() const
-{
-  return compute_hash(assignment);
 }
 
 #if MIP_INSTANTIATE_FLOAT

@@ -28,22 +28,20 @@ HDI f_t fj_kahan_babushka_neumaier_sum(Iterator begin, Iterator end)
 }
 
 // Returns the current slack, and the variable delta that would nullify this slack ("tighten" it)
-template <typename i_t, typename f_t, typename ArrayType>
+template <typename i_t, typename f_t>
 HDI thrust::tuple<f_t, f_t> get_mtm_for_bound(
   const typename fj_t<i_t, f_t>::climber_data_t::view_t& fj,
   i_t var_idx,
   i_t cstr_idx,
   f_t cstr_coeff,
   f_t bound,
-  f_t sign,
-  const ArrayType& assignment,
-  const ArrayType& lhs_vector)
+  f_t sign)
 {
   f_t delta_ij = 0;
   f_t slack    = 0;
-  f_t old_val  = assignment[var_idx];
+  f_t old_val  = fj.incumbent_assignment[var_idx];
 
-  f_t lhs = lhs_vector[cstr_idx] * sign;
+  f_t lhs = fj.incumbent_lhs[cstr_idx] * sign;
   f_t rhs = bound * sign;
   slack   = rhs - lhs;  // bound might be infinite. let the caller handle this case
 
@@ -52,24 +50,22 @@ HDI thrust::tuple<f_t, f_t> get_mtm_for_bound(
   return {delta_ij, slack};
 }
 
-template <typename i_t, typename f_t, MTMMoveType move_type, typename ArrayType>
+template <typename i_t, typename f_t, MTMMoveType move_type>
 HDI thrust::tuple<f_t, f_t, f_t, f_t> get_mtm_for_constraint(
   const typename fj_t<i_t, f_t>::climber_data_t::view_t& fj,
   i_t var_idx,
   i_t cstr_idx,
   f_t cstr_coeff,
   f_t c_lb,
-  f_t c_ub,
-  const ArrayType& assignment,
-  const ArrayType& lhs_vector)
+  f_t c_ub)
 {
   f_t sign     = -1;
   f_t delta_ij = 0;
   f_t slack    = 0;
 
-  f_t cstr_tolerance = fj.get_corrected_tolerance(cstr_idx, c_lb, c_ub);
+  f_t cstr_tolerance = fj.get_corrected_tolerance(cstr_idx);
 
-  f_t old_val = assignment[var_idx];
+  f_t old_val = fj.incumbent_assignment[var_idx];
 
   // process each bound as two separate constraints
   f_t bounds[2] = {c_lb, c_ub};
@@ -81,7 +77,7 @@ HDI thrust::tuple<f_t, f_t, f_t, f_t> get_mtm_for_constraint(
     // factor to correct the lhs/rhs to turn a lb <= lhs <= ub constraint into
     // two virtual constraints lhs <= ub and -lhs <= -lb
     sign    = bound_idx == 0 ? -1 : 1;
-    f_t lhs = lhs_vector[cstr_idx] * sign;
+    f_t lhs = fj.incumbent_lhs[cstr_idx] * sign;
     f_t rhs = bounds[bound_idx] * sign;
     slack   = rhs - lhs;
 
@@ -107,9 +103,7 @@ HDI std::pair<f_t, f_t> feas_score_constraint(
   f_t cstr_coeff,
   f_t c_lb,
   f_t c_ub,
-  f_t current_lhs,
-  f_t left_weight,
-  f_t right_weight)
+  f_t current_lhs)
 {
   cuopt_assert(isfinite(delta), "invalid delta");
   cuopt_assert(cstr_coeff != 0 && isfinite(cstr_coeff), "invalid coefficient");
@@ -129,13 +123,14 @@ HDI std::pair<f_t, f_t> feas_score_constraint(
     // TODO: broadcast left/right weights to a csr_offset-indexed table? local minimums
     // usually occur on a rarer basis (around 50 iteratiosn to 1 local minimum)
     // likely unreasonable and overkill however
-    f_t cstr_weight = bound_idx == 0 ? left_weight : right_weight;
-    f_t sign        = bound_idx == 0 ? -1 : 1;
-    f_t rhs         = bounds[bound_idx] * sign;
-    f_t old_lhs     = current_lhs * sign;
-    f_t new_lhs     = (current_lhs + cstr_coeff * delta) * sign;
-    f_t old_slack   = rhs - old_lhs;
-    f_t new_slack   = rhs - new_lhs;
+    f_t cstr_weight =
+      bound_idx == 0 ? fj.cstr_left_weights[cstr_idx] : fj.cstr_right_weights[cstr_idx];
+    f_t sign      = bound_idx == 0 ? -1 : 1;
+    f_t rhs       = bounds[bound_idx] * sign;
+    f_t old_lhs   = current_lhs * sign;
+    f_t new_lhs   = (current_lhs + cstr_coeff * delta) * sign;
+    f_t old_slack = rhs - old_lhs;
+    f_t new_slack = rhs - new_lhs;
 
     cuopt_assert(isfinite(cstr_weight), "invalid weight");
     cuopt_assert(cstr_weight >= 0, "invalid weight");
@@ -143,7 +138,7 @@ HDI std::pair<f_t, f_t> feas_score_constraint(
     cuopt_assert(isfinite(new_lhs), "");
     cuopt_assert(isfinite(old_slack) && isfinite(new_slack), "");
 
-    f_t cstr_tolerance = fj.get_corrected_tolerance(cstr_idx, c_lb, c_ub);
+    f_t cstr_tolerance = fj.get_corrected_tolerance(cstr_idx);
 
     bool old_viol = fj.excess_score(cstr_idx, current_lhs, c_lb, c_ub) < -cstr_tolerance;
     bool new_viol =
