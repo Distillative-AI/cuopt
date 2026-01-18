@@ -148,6 +148,7 @@ int run_single_file(std::string file_path,
                     bool write_log_file,
                     bool log_to_console,
                     double time_limit,
+                    double work_limit,
                     bool deterministic)
 {
   const raft::handle_t handle_{};
@@ -199,6 +200,7 @@ int run_single_file(std::string file_path,
   }
 
   settings.time_limit       = time_limit;
+  settings.work_limit       = work_limit;
   settings.heuristics_only  = heuristics_only;
   settings.num_cpu_threads  = num_cpu_threads;
   settings.log_to_console   = log_to_console;
@@ -259,6 +261,7 @@ void run_single_file_mp(std::string file_path,
                         bool write_log_file,
                         bool log_to_console,
                         double time_limit,
+                        double work_limit,
                         bool deterministic)
 {
   std::cout << "running file " << file_path << " on gpu : " << device << std::endl;
@@ -275,6 +278,7 @@ void run_single_file_mp(std::string file_path,
                                   write_log_file,
                                   log_to_console,
                                   time_limit,
+                                  work_limit,
                                   deterministic);
   // this is a bad design to communicate the result but better than adding complexity of IPC or
   // pipes
@@ -345,7 +349,12 @@ int main(int argc, char* argv[])
     .default_value(std::string("t"));
 
   program.add_argument("--time-limit")
-    .help("time limit")
+    .help("time limit in seconds")
+    .scan<'g', double>()
+    .default_value(std::numeric_limits<double>::infinity());
+
+  program.add_argument("--work-limit")
+    .help("work unit limit (for deterministic mode)")
     .scan<'g', double>()
     .default_value(std::numeric_limits<double>::infinity());
 
@@ -377,6 +386,7 @@ int main(int argc, char* argv[])
   std::string run_dir_arg = program.get<std::string>("--run-dir");
   bool run_dir            = run_dir_arg[0] == 't';
   double time_limit       = program.get<double>("--time-limit");
+  double work_limit       = program.get<double>("--work-limit");
 
   bool run_selected = program.get<std::string>("--run-selected")[0] == 't';
   int n_gpus        = program.get<int>("--n-gpus");
@@ -480,6 +490,7 @@ int main(int argc, char* argv[])
                                write_log_file,
                                log_to_console,
                                time_limit,
+                               work_limit,
                                deterministic);
           } else if (sys_pid < 0) {
             std::cerr << "Fork failed!" << std::endl;
@@ -521,6 +532,7 @@ int main(int argc, char* argv[])
                     write_log_file,
                     log_to_console,
                     time_limit,
+                    work_limit,
                     deterministic);
   }
 

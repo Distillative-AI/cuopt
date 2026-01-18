@@ -2018,6 +2018,14 @@ void branch_and_bound_t<i_t, f_t>::run_worker_loop(bb_worker_state_t<i_t, f_t>& 
   // The scheduler handles synchronization at horizon boundaries via record_work()
   while (!bsp_terminated_.load() && !bsp_scheduler_->is_stopped() &&
          solver_status_ == mip_status_t::UNSET) {
+    // Check time limit directly - don't wait for sync if time is up
+    if (toc(exploration_stats_.start_time) > settings_.time_limit) {
+      solver_status_ = mip_status_t::TIME_LIMIT;
+      bsp_terminated_.store(true);
+      bsp_scheduler_->stop();  // Wake up workers waiting at barrier
+      break;
+    }
+
     if (worker.has_work()) {
       mip_node_t<i_t, f_t>* node = worker.dequeue_node();
       if (node == nullptr) { continue; }
@@ -2048,19 +2056,12 @@ void branch_and_bound_t<i_t, f_t>::run_worker_loop(bb_worker_state_t<i_t, f_t>& 
       worker.last_solved_node = node;
 
       // Handle result
+      worker.current_node = nullptr;
       if (status == node_solve_info_t::TIME_LIMIT || status == node_solve_info_t::WORK_LIMIT) {
-        worker.current_node = nullptr;
-        // Don't set solver_status_ or bsp_terminated_ here - that would cause a race
-        // where other workers see the flag and exit before reaching the sync point.
-        // The sync callback will check the work/time limit and set termination flags
-        // when all workers are safely at the barrier.
-        bsp_scheduler_->wait_for_next_sync(worker.work_context);
-        break;
-      } else {
-        // Node completed successfully
-        worker.current_node = nullptr;
+        // Time/work limit hit - the loop head will detect this and terminate properly
         continue;
       }
+      // Node completed successfully - continue to next iteration
     }
 
     // No work available - advance to next sync point to participate in barrier
@@ -2388,13 +2389,17 @@ node_solve_info_t branch_and_bound_t<i_t, f_t>::solve_node_bsp(bb_worker_state_t
                                               worker.node_presolver->bounds_changed);
   }
 
+  // Check if time limit already exceeded - return immediately if so
+  double remaining_time = settings_.time_limit - toc(exploration_stats_.start_time);
+  if (remaining_time <= 0) { return node_solve_info_t::TIME_LIMIT; }
+
   // Bounds strengthening
   simplex_solver_settings_t<i_t, f_t> lp_settings = settings_;
   lp_settings.set_log(false);
   // Use worker-local upper bound for LP cutoff (deterministic)
   lp_settings.cut_off    = worker.local_upper_bound + settings_.dual_tol;
   lp_settings.inside_mip = 2;
-  lp_settings.time_limit = settings_.time_limit - toc(exploration_stats_.start_time);
+  lp_settings.time_limit = remaining_time;
   // Work limit: use GLOBAL work limit
   // The check in dual_phase2 compares global_work_units_elapsed against settings.work_limit
   // so work_limit must be the GLOBAL limit, not remaining budget
@@ -3355,6 +3360,14 @@ void branch_and_bound_t<i_t, f_t>::run_diving_worker_loop(
 
   while (!bsp_terminated_.load() && !bsp_scheduler_->is_stopped() &&
          solver_status_ == mip_status_t::UNSET) {
+    // Check time limit directly - don't wait for sync if time is up
+    if (toc(exploration_stats_.start_time) > settings_.time_limit) {
+      solver_status_ = mip_status_t::TIME_LIMIT;
+      bsp_terminated_.store(true);
+      bsp_scheduler_->stop();  // Wake up workers waiting at barrier
+      break;
+    }
+
     // Process dives from queue until empty or horizon exhausted
     auto node_opt = worker.dequeue_dive_node();
     if (node_opt.has_value()) {
@@ -3394,6 +3407,14 @@ void branch_and_bound_t<i_t, f_t>::dive_from_bsp(bsp_diving_worker_state_t<i_t, 
 
   while (!stack.empty() && solver_status_ == mip_status_t::UNSET && !bsp_terminated_.load() &&
          nodes_this_dive < max_nodes_per_dive) {
+    // Check time limit directly
+    if (toc(exploration_stats_.start_time) > settings_.time_limit) {
+      solver_status_ = mip_status_t::TIME_LIMIT;
+      bsp_terminated_.store(true);
+      bsp_scheduler_->stop();  // Wake up workers waiting at barrier
+      break;
+    }
+
     // Check horizon budget
     if (worker.work_context.global_work_units_elapsed >= worker.horizon_end) {
       bsp_scheduler_->wait_for_next_sync(worker.work_context);
@@ -3426,12 +3447,16 @@ void branch_and_bound_t<i_t, f_t>::dive_from_bsp(bsp_diving_worker_state_t<i_t, 
                                                 worker.node_presolver->bounds_changed);
     }
 
+    // Check if time limit already exceeded - just break, outer loop will handle termination
+    double remaining_time = settings_.time_limit - toc(exploration_stats_.start_time);
+    if (remaining_time <= 0) { break; }
+
     // Setup LP settings
     simplex_solver_settings_t<i_t, f_t> lp_settings = settings_;
     lp_settings.set_log(false);
     lp_settings.cut_off       = worker.local_upper_bound + settings_.dual_tol;
     lp_settings.inside_mip    = 2;
-    lp_settings.time_limit    = settings_.time_limit - toc(exploration_stats_.start_time);
+    lp_settings.time_limit    = remaining_time;
     lp_settings.work_limit    = settings_.work_limit;
     lp_settings.scale_columns = false;
 
@@ -3465,11 +3490,10 @@ void branch_and_bound_t<i_t, f_t>::dive_from_bsp(bsp_diving_worker_state_t<i_t, 
     // Update worker clock from work context
     worker.clock = worker.work_context.global_work_units_elapsed;
 
-    if (lp_status == dual::status_t::TIME_LIMIT) {
-      solver_status_ = mip_status_t::TIME_LIMIT;
+    // Time/work limit - just break, outer loop will handle termination properly
+    if (lp_status == dual::status_t::TIME_LIMIT || lp_status == dual::status_t::WORK_LIMIT) {
       break;
     }
-    if (lp_status == dual::status_t::WORK_LIMIT) { break; }
 
     if (lp_status == dual::status_t::DUAL_UNBOUNDED || lp_status == dual::status_t::CUTOFF) {
       worker.recompute_bounds_and_basis = true;

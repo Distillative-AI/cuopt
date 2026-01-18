@@ -2613,7 +2613,7 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     f_t max_val;
     timers.start_timer();
     {
-      // raft::common::nvtx::range scope_pricing("DualSimplex::pricing");
+      raft::common::nvtx::range scope_pricing("DualSimplex::pricing");
       if (settings.use_steepest_edge_pricing) {
         leaving_index = phase2::steepest_edge_pricing_with_infeasibilities(lp,
                                                                            settings,
@@ -2658,7 +2658,7 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     delta_y_sparse.clear();
     UTsol_sparse.clear();
     {
-      // raft::common::nvtx::range scope_btran("DualSimplex::btran");
+      raft::common::nvtx::range scope_btran("DualSimplex::btran");
       phase2::compute_delta_y(ft, basic_leaving_index, direction, delta_y_sparse, UTsol_sparse);
     }
     timers.btran_time += timers.stop_timer();
@@ -2688,7 +2688,7 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     delta_y_nz_percentage    = delta_y_nz0 / static_cast<f_t>(m) * 100.0;
     const bool use_transpose = delta_y_nz_percentage <= 30.0;
     {
-      // raft::common::nvtx::range scope_compute_delta_z("DualSimplex::delta_z");
+      raft::common::nvtx::range scope_compute_delta_z("DualSimplex::delta_z");
       if (use_transpose) {
         sparse_delta_z++;
         phase2::compute_delta_z(A_transpose,
@@ -2733,7 +2733,7 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     const bool harris_ratio     = settings.use_harris_ratio;
     const bool bound_flip_ratio = settings.use_bound_flip_ratio;
     {
-      // raft::common::nvtx::range scope_ratio("DualSimplex::ratio_test");
+      raft::common::nvtx::range scope_ratio("DualSimplex::ratio_test");
       if (harris_ratio) {
         f_t max_step_length =
           phase2::first_stage_harris(lp, vstatus, nonbasic_list, sol.z, delta_z);
@@ -2992,7 +2992,7 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     scaled_delta_xB_sparse.clear();
     rhs_sparse.from_csc_column(lp.A, entering_index);
     {
-      // raft::common::nvtx::range scope_ftran("DualSimplex::ftran");
+      raft::common::nvtx::range scope_ftran("DualSimplex::ftran");
       if (phase2::compute_delta_x(lp,
                                   ft,
                                   entering_index,
@@ -3139,7 +3139,7 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     timers.start_timer();
     // Refactor or update the basis factorization
     {
-      // raft::common::nvtx::range scope_update("DualSimplex::basis_update");
+      raft::common::nvtx::range scope_update("DualSimplex::basis_update");
       bool should_refactor = ft.num_updates() > settings.refactor_frequency;
       if (!should_refactor) {
         i_t recommend_refactor = ft.update(utilde_sparse, UTsol_sparse, basic_leaving_index);

@@ -55,6 +55,9 @@ class work_unit_scheduler_t {
   void set_sync_callback(sync_callback_t callback);
   bool is_stopped() const;
 
+  // Stop the scheduler immediately and wake up all waiting workers
+  void stop();
+
   // Wait for next sync point (for idle workers with no work)
   sync_result_t wait_for_next_sync(work_limit_context_t& ctx);
 

@@ -23,6 +23,7 @@
 #include <raft/sparse/detail/cusparse_macros.h>
 #include <raft/sparse/detail/cusparse_wrappers.h>
 
+#include <cmath>
 #include <future>
 #include <memory>
 #include <thread>
@@ -167,20 +168,27 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
     branch_and_bound_solution.resize(branch_and_bound_problem.num_cols);
 
     // Fill in the settings for branch and bound
-    branch_and_bound_settings.time_limit = timer_.remaining_time();
-    if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
-      branch_and_bound_settings.time_limit = std::numeric_limits<f_t>::infinity();
-    }
+    // Time limit applies in both modes
+    branch_and_bound_settings.time_limit           = timer_.remaining_time();
     branch_and_bound_settings.print_presolve_stats = false;
     branch_and_bound_settings.absolute_mip_gap_tol = context.settings.tolerances.absolute_mip_gap;
     branch_and_bound_settings.relative_mip_gap_tol = context.settings.tolerances.relative_mip_gap;
     branch_and_bound_settings.integer_tol = context.settings.tolerances.integrality_tolerance;
     branch_and_bound_settings.deterministic =
       context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC;
-    branch_and_bound_settings.work_limit =
-      context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC
-        ? context.settings.time_limit
-        : std::numeric_limits<f_t>::infinity();
+
+    // Work limit: use user-specified work_limit, with backward compatibility
+    // (if work_limit is infinity in deterministic mode and time_limit is finite,
+    // fall back to time_limit as work units for backward compatibility)
+    if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
+      if (std::isinf(context.settings.work_limit) && !std::isinf(context.settings.time_limit)) {
+        branch_and_bound_settings.work_limit = context.settings.time_limit;
+      } else {
+        branch_and_bound_settings.work_limit = context.settings.work_limit;
+      }
+    } else {
+      branch_and_bound_settings.work_limit = std::numeric_limits<f_t>::infinity();
+    }
 
     if (context.settings.num_cpu_threads < 0) {
       branch_and_bound_settings.num_threads = omp_get_max_threads() - 1;

@@ -84,6 +84,12 @@ void work_unit_scheduler_t::set_sync_callback(sync_callback_t callback)
 
 bool work_unit_scheduler_t::is_stopped() const { return stopped_.load(); }
 
+void work_unit_scheduler_t::stop()
+{
+  stopped_.store(true);
+  cv_.notify_all();
+}
+
 sync_result_t work_unit_scheduler_t::wait_for_next_sync(work_limit_context_t& ctx)
 {
   if (stopped_.load()) { return sync_result_t::STOPPED; }
@@ -148,8 +154,14 @@ void work_unit_scheduler_t::wait_at_sync_point(work_limit_context_t& ctx, double
     }
     cv_.notify_all();
   } else {
-    cv_.wait(lock, [&] { return barrier_generation_ != my_generation; });
+    cv_.wait(lock, [&] { return barrier_generation_ != my_generation || stopped_.load(); });
     if (verbose) { CUOPT_LOG_DEBUG("[%s] Woke up from first wait", ctx.name.c_str()); }
+    if (stopped_.load()) {
+      // Decrement barrier count before returning to avoid leaving others stuck
+      contexts_at_barrier_--;
+      cv_.notify_all();
+      return;
+    }
   }
 
   size_t my_exit_generation = exit_generation_;
@@ -176,7 +188,7 @@ void work_unit_scheduler_t::wait_at_sync_point(work_limit_context_t& ctx, double
                       ctx.name.c_str(),
                       contexts_at_barrier_);
     }
-    cv_.wait(lock, [&] { return exit_generation_ != my_exit_generation; });
+    cv_.wait(lock, [&] { return exit_generation_ != my_exit_generation || stopped_.load(); });
     if (verbose) { CUOPT_LOG_DEBUG("[%s] Woke up from second wait", ctx.name.c_str()); }
   }
 
