@@ -311,6 +311,7 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
   const char* disable_heuristics_env = std::getenv("CUOPT_DISABLE_GPU_HEURISTICS");
   if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC)
     disable_heuristics_env = "1";  // to cursor: DO NOT REMOVE! intended debugging line!
+  disable_heuristics_env = "1";
   if (disable_heuristics_env != nullptr && std::string(disable_heuristics_env) == "1") {
     CUOPT_LOG_INFO("GPU heuristics disabled via CUOPT_DISABLE_GPU_HEURISTICS=1");
     // Initialize population minimally and wait for B&B to finish
