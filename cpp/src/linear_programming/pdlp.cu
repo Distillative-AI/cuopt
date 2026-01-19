@@ -610,6 +610,8 @@ template <typename i_t, typename f_t>
 std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>::check_batch_termination(
   const timer_t& timer)
 {
+  raft::common::nvtx::range fun_scope("check_batch_termination");
+
   // Forced to do it in two lines because of macro template interaction
   [[maybe_unused]] const bool is_cupdlpx = is_cupdlpx_restart<i_t, f_t>(settings_.hyper_params);
   cuopt_assert(is_cupdlpx, "Batch termination handling only supported with cuPDLPx restart");
@@ -645,10 +647,13 @@ std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>
         raft::copy(batch_solution_to_return_.get_primal_solution().data() + climber_strategies_[i].original_index * primal_size_h_, pdhg_solver_.get_potential_next_primal_solution().data() + i * primal_size_h_, primal_size_h_, stream_view_);
         raft::copy(batch_solution_to_return_.get_dual_solution().data() + climber_strategies_[i].original_index * dual_size_h_, pdhg_solver_.get_potential_next_dual_solution().data() + i * dual_size_h_, dual_size_h_, stream_view_);
         raft::copy(batch_solution_to_return_.get_reduced_cost().data() + i * primal_size_h_, current_termination_strategy_.get_convergence_information().get_reduced_cost().data() + i * primal_size_h_, primal_size_h_, stream_view_);
-        current_termination_strategy_.fill_term_stats(batch_solution_to_return_.get_additional_termination_informations()[climber_strategies_[i].original_index],
-        i, total_pdlp_iterations_, pdhg_solver_, current_termination_strategy_.get_convergence_information(), current_termination_strategy_.get_infeasibility_information(), current_termination_strategy_.get_termination_status(i));
+        batch_solution_to_return_.get_additional_termination_informations()[climber_strategies_[i].original_index].number_of_steps_taken           = total_pdlp_iterations_;
+        batch_solution_to_return_.get_additional_termination_informations()[climber_strategies_[i].original_index].total_number_of_attempted_steps = pdhg_solver_.get_total_pdhg_iterations();
+        batch_solution_to_return_.get_additional_termination_informations()[climber_strategies_[i].original_index].solved_by_pdlp = (current_termination_strategy_.get_termination_status(i) != pdlp_termination_status_t::ConcurrentLimit);
       }
+      current_termination_strategy_.fill_gpu_terms_stats(total_pdlp_iterations_);
       RAFT_CUDA_TRY(cudaStreamSynchronize(stream_view_));
+      current_termination_strategy_.convert_gpu_terms_stats_to_host(batch_solution_to_return_.get_additional_termination_informations());
       // Resize the vectors before returning them: the found values are still there, they just got swapped to the end
       return optimization_problem_solution_t<i_t, f_t>{
         batch_solution_to_return_.get_primal_solution(),
@@ -673,10 +678,12 @@ std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>
   }
   else if (enable_batch_resizing) // Some might be optimal, let's remove them from the batch
   {
+    raft::common::nvtx::range fun_scope("remove_done_climbers");
     std::unordered_set<i_t> to_remove;
     for (size_t i = 0; i < current_termination_strategy_.get_terminations_status().size(); ++i) {
       // Found one that is done
       if (current_termination_strategy_.is_done(current_termination_strategy_.get_termination_status(i))) {
+        raft::common::nvtx::range fun_scope("remove_done_climber");
         #ifdef BATCH_VERBOSE_MODE
         std::cout << "Removing climber " << i << " because it is done. Its original index is " << climber_strategies_[i].original_index << std::endl;
         #endif
@@ -686,11 +693,13 @@ std::optional<optimization_problem_solution_t<i_t, f_t>> pdlp_solver_t<i_t, f_t>
         raft::copy(batch_solution_to_return_.get_primal_solution().data() + climber_strategies_[i].original_index * primal_size_h_, pdhg_solver_.get_potential_next_primal_solution().data() + i * primal_size_h_, primal_size_h_, stream_view_);
         raft::copy(batch_solution_to_return_.get_dual_solution().data() + climber_strategies_[i].original_index * dual_size_h_, pdhg_solver_.get_potential_next_dual_solution().data() + i * dual_size_h_, dual_size_h_, stream_view_);
         raft::copy(batch_solution_to_return_.get_reduced_cost().data() + i * primal_size_h_, current_termination_strategy_.get_convergence_information().get_reduced_cost().data() + i * primal_size_h_, primal_size_h_, stream_view_);
-        current_termination_strategy_.fill_term_stats(batch_solution_to_return_.get_additional_termination_informations()[climber_strategies_[i].original_index],
-        i, total_pdlp_iterations_, pdhg_solver_, current_termination_strategy_.get_convergence_information(), current_termination_strategy_.get_infeasibility_information(), current_termination_strategy_.get_termination_status(i));
+        batch_solution_to_return_.get_additional_termination_informations()[climber_strategies_[i].original_index].number_of_steps_taken           = total_pdlp_iterations_;
+        batch_solution_to_return_.get_additional_termination_informations()[climber_strategies_[i].original_index].total_number_of_attempted_steps = pdhg_solver_.get_total_pdhg_iterations();
+        batch_solution_to_return_.get_additional_termination_informations()[climber_strategies_[i].original_index].solved_by_pdlp = (current_termination_strategy_.get_termination_status(i) != pdlp_termination_status_t::ConcurrentLimit);
       }
     }
     if (to_remove.size() > 0) {
+      current_termination_strategy_.fill_gpu_terms_stats(total_pdlp_iterations_);
       #ifdef BATCH_VERBOSE_MODE
       std::cout << "Removing " << to_remove.size() << " climbers from the batch" << std::endl;
       #endif
@@ -1303,6 +1312,8 @@ void pdlp_solver_t<i_t, f_t>::resize_context(i_t new_size)
 template <typename i_t, typename f_t>
 void pdlp_solver_t<i_t, f_t>::swap_all_context(i_t left_swap_index, i_t right_swap_index)
 {
+  raft::common::nvtx::range fun_scope("swap_one_id");
+
   // Resize PDHG, its saddle point and its new bounds
   pdhg_solver_.swap_context(left_swap_index, right_swap_index);
   // Resize restart strategy and its duality gap container
@@ -1323,6 +1334,8 @@ void pdlp_solver_t<i_t, f_t>::swap_all_context(i_t left_swap_index, i_t right_sw
 template <typename i_t, typename f_t>
 void pdlp_solver_t<i_t, f_t>::resize_all_context(i_t new_size)
 {
+  raft::common::nvtx::range fun_scope("resize_all_context");
+
   // Resize PDHG, its saddle point and its new bounds
   pdhg_solver_.resize_context(new_size);
   // Resize restart strategy and its duality gap container

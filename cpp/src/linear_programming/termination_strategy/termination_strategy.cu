@@ -50,6 +50,8 @@ pdlp_termination_strategy_t<i_t, f_t>::pdlp_termination_strategy_t(
                               settings.hyper_params},
     termination_status_(climber_strategies.size()),
     settings_(settings),
+    gpu_batch_additional_termination_information_{climber_strategies.size()},
+    original_index_(climber_strategies.size()),
     climber_strategies_(climber_strategies)
 {
   std::fill(termination_status_.begin(), termination_status_.end(), (i_t)pdlp_termination_status_t::NoTermination);
@@ -357,7 +359,7 @@ bool pdlp_termination_strategy_t<i_t, f_t>::all_optimal_status() const
 }
 
 template <typename i_t, typename f_t>
-bool pdlp_termination_strategy_t<i_t, f_t>::is_done(pdlp_termination_status_t termination_status)
+__host__ __device__ bool pdlp_termination_strategy_t<i_t, f_t>::is_done(pdlp_termination_status_t termination_status)
 {
   return termination_status == pdlp_termination_status_t::Optimal || termination_status == pdlp_termination_status_t::PrimalInfeasible || termination_status == pdlp_termination_status_t::DualInfeasible; 
 }
@@ -390,66 +392,72 @@ void pdlp_termination_strategy_t<i_t, f_t>::check_termination_criteria()
 }
 
 template <typename i_t, typename f_t>
-void  pdlp_termination_strategy_t<i_t, f_t>::fill_term_stats(typename optimization_problem_solution_t<i_t, f_t>::additional_termination_information_t& term_stats, i_t i, i_t number_of_iterations, pdhg_solver_t<i_t, f_t>& current_pdhg_solver,
-const convergence_information_t<i_t, f_t>& convergence_information,
-const infeasibility_information_t<i_t, f_t>& infeasibility_information,
-pdlp_termination_status_t termination_status)
+__global__ void fill_gpu_terms_stats_kernel(raft::device_span<i_t> termination_status,
+  raft::device_span<i_t> original_indices,
+  typename pdlp_termination_strategy_t<i_t, f_t>::gpu_batch_additional_termination_information_t::view_t additional_termination_information,
+  typename convergence_information_t<i_t, f_t>::view_t convergence_information_view,
+  i_t number_of_steps_taken)
+{
+  const int idx = threadIdx.x + blockIdx.x * blockDim.x;
+  if (idx >= termination_status.size()) { return; }
+
+  // TODO later batch mode: add infeasibility information here
+  // TODO later batch mode: handle per climber rhs and objective
+
+  // Will be removed store its data in the struct
+  if (pdlp_termination_strategy_t<i_t, f_t>::is_done((pdlp_termination_status_t)termination_status[idx])) {
+    const i_t original_index = original_indices[idx];
+    additional_termination_information.number_of_steps_taken[original_index] = number_of_steps_taken;
+    additional_termination_information.total_number_of_attempted_steps[original_index] = number_of_steps_taken;
+    additional_termination_information.l2_primal_residual[original_index] = convergence_information_view.l2_primal_residual[idx];
+    additional_termination_information.l2_relative_primal_residual[original_index] = convergence_information_view.l2_primal_residual[idx] / (f_t(1.0) + *convergence_information_view.l2_norm_primal_right_hand_side);
+    additional_termination_information.l2_dual_residual[original_index] = convergence_information_view.l2_dual_residual[idx];
+    additional_termination_information.l2_relative_dual_residual[original_index] = convergence_information_view.l2_dual_residual[idx] / (f_t(1.0) + *convergence_information_view.l2_norm_primal_linear_objective);
+    additional_termination_information.primal_objective[original_index] = convergence_information_view.primal_objective[idx];
+    additional_termination_information.dual_objective[original_index] = convergence_information_view.dual_objective[idx];
+    additional_termination_information.gap[original_index] = convergence_information_view.gap[idx];
+    additional_termination_information.relative_gap[original_index] = convergence_information_view.gap[idx] / (f_t(1.0) + convergence_information_view.abs_objective[idx]);
+  }
+}
+
+template <typename i_t, typename f_t>
+void  pdlp_termination_strategy_t<i_t, f_t>::fill_gpu_terms_stats(i_t number_of_iterations)
 {
   typename convergence_information_t<i_t, f_t>::view_t convergence_information_view =
   convergence_information_.view();
-typename infeasibility_information_t<i_t, f_t>::view_t infeasibility_information_view =
-  infeasibility_information_.view();
 
-  term_stats.number_of_steps_taken           = number_of_iterations;
-  term_stats.total_number_of_attempted_steps = current_pdhg_solver.get_total_pdhg_iterations();
+  // Update original index pinned view so that we can read it safely from the kernel
+  for (size_t i = 0; i < climber_strategies_.size(); ++i) {
+    original_index_[i] = climber_strategies_[i].original_index;
+  }
+  
+  const auto [grid_size, block_size] = kernel_config_from_batch_size(climber_strategies_.size());
+  fill_gpu_terms_stats_kernel<i_t, f_t>
+    <<<grid_size, block_size, 0, stream_view_>>>(make_span(termination_status_),
+    make_span(original_index_),
+    gpu_batch_additional_termination_information_.view(),
+    convergence_information_view,
+    number_of_iterations);
 
-  cuopt_assert(i < climber_strategies_.size(), "i too big for batch size");
-
-  raft::copy(&term_stats.l2_primal_residual,
-          (settings_.per_constraint_residual)
-            ? convergence_information_view.relative_l_inf_primal_residual // TODO later batch mode: handle per climber overall residual
-      : convergence_information_view.l2_primal_residual.data() + i,
-      1,
-    stream_view_);
-
-  term_stats.l2_relative_primal_residual =
-  convergence_information_.get_relative_l2_primal_residual_value(i);
-
-  raft::copy(&term_stats.l2_dual_residual,
-    (settings_.per_constraint_residual)
-    ? convergence_information_view.relative_l_inf_dual_residual
-    : convergence_information_view.l2_dual_residual.data() + i,
-    1,
-    stream_view_);
-    
-    term_stats.l2_relative_dual_residual =
-      convergence_information_.get_relative_l2_dual_residual_value(i);
-
-  raft::copy(
-  &term_stats.primal_objective, convergence_information_view.primal_objective.data() + i, 1, stream_view_);
-raft::copy(
-  &term_stats.dual_objective, convergence_information_view.dual_objective.data() + i, 1, stream_view_);
-raft::copy(&term_stats.gap, convergence_information_view.gap.data() + i, 1, stream_view_);
-term_stats.relative_gap = convergence_information_.get_relative_gap_value(i);
-raft::copy(&term_stats.max_primal_ray_infeasibility,
-          &infeasibility_information_view.max_primal_ray_infeasibility[i],
-          1,
-          stream_view_);
-raft::copy(&term_stats.primal_ray_linear_objective,
-          &infeasibility_information_view.primal_ray_linear_objective[i],
-          1,
-          stream_view_);
-raft::copy(&term_stats.max_dual_ray_infeasibility,
-          &infeasibility_information_view.max_dual_ray_infeasibility[i],
-          1,
-          stream_view_);
-raft::copy(&term_stats.dual_ray_linear_objective,
-          &infeasibility_information_view.dual_ray_linear_objective[i],
-          1,
-          stream_view_);
-term_stats.solved_by_pdlp = (termination_status != pdlp_termination_status_t::ConcurrentLimit);
+  RAFT_CUDA_TRY(cudaStreamSynchronize(stream_view_));
 }
 
+template <typename i_t, typename f_t>
+void pdlp_termination_strategy_t<i_t, f_t>::convert_gpu_terms_stats_to_host(std::vector<typename optimization_problem_solution_t<i_t, f_t>::additional_termination_information_t>& additional_termination_informations)
+{
+  for (size_t i = 0; i < additional_termination_informations.size(); ++i) {
+    additional_termination_informations[i].number_of_steps_taken = gpu_batch_additional_termination_information_.number_of_steps_taken[i];
+    additional_termination_informations[i].total_number_of_attempted_steps = gpu_batch_additional_termination_information_.total_number_of_attempted_steps[i];
+    additional_termination_informations[i].l2_primal_residual = gpu_batch_additional_termination_information_.l2_primal_residual[i];
+    additional_termination_informations[i].l2_relative_primal_residual = gpu_batch_additional_termination_information_.l2_relative_primal_residual[i];
+    additional_termination_informations[i].l2_dual_residual = gpu_batch_additional_termination_information_.l2_dual_residual[i];
+    additional_termination_informations[i].l2_relative_dual_residual = gpu_batch_additional_termination_information_.l2_relative_dual_residual[i];
+    additional_termination_informations[i].primal_objective = gpu_batch_additional_termination_information_.primal_objective[i];
+    additional_termination_informations[i].dual_objective = gpu_batch_additional_termination_information_.dual_objective[i];
+    additional_termination_informations[i].gap = gpu_batch_additional_termination_information_.gap[i];
+    additional_termination_informations[i].relative_gap = gpu_batch_additional_termination_information_.relative_gap[i];
+  }
+}
 template <typename i_t, typename f_t>
 optimization_problem_solution_t<i_t, f_t>
 pdlp_termination_strategy_t<i_t, f_t>::fill_return_problem_solution(
