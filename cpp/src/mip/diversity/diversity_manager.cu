@@ -310,8 +310,23 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
   // Debug: Allow disabling GPU heuristics to test B&B tree determinism in isolation
   const char* disable_heuristics_env = std::getenv("CUOPT_DISABLE_GPU_HEURISTICS");
   if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
-    CUOPT_LOG_INFO("Determinism is only supported for the B&B search. Disabling GPU heuristics");
-    disable_heuristics_env = "1";
+    CUOPT_LOG_INFO("Running deterministic mode with CPUFJ heuristic");
+    population.initialize_population();
+    population.allocate_solutions();
+
+    // Start CPUFJ in deterministic mode with B&B integration
+    if (context.branch_and_bound_ptr != nullptr) {
+      ls.start_cpufj_deterministic(*context.branch_and_bound_ptr);
+    }
+
+    while (!check_b_b_preemption()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    // Stop CPUFJ when B&B is done
+    ls.stop_cpufj_deterministic();
+
+    return population.best_feasible();
   }
   if (disable_heuristics_env != nullptr && std::string(disable_heuristics_env) == "1") {
     CUOPT_LOG_INFO("GPU heuristics disabled via CUOPT_DISABLE_GPU_HEURISTICS=1");

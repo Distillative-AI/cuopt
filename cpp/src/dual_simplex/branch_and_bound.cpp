@@ -2060,6 +2060,10 @@ void branch_and_bound_t<i_t, f_t>::bsp_sync_callback(int worker_id)
   double horizon_start = bsp_current_horizon_ - bsp_horizon_step_;
   double horizon_end   = bsp_current_horizon_;
 
+  // Wait for external producers (CPUFJ) to reach horizon_start before processing
+  // This ensures we don't process B&B events before producers have caught up
+  producer_sync_.wait_for_producers(horizon_start);
+
   work_unit_context_.global_work_units_elapsed = horizon_end;
 
   BSP_DEBUG_LOG_HORIZON_START(
@@ -2654,10 +2658,21 @@ void branch_and_bound_t<i_t, f_t>::process_history_and_sync(
     }
   }
 
+  // Extract heuristic solutions, keeping future solutions for next horizon
+  // Use bsp_current_horizon_ as the upper bound (horizon_end)
   std::vector<queued_heuristic_solution_t> heuristic_solutions;
   mutex_heuristic_queue_.lock();
-  heuristic_solutions = std::move(heuristic_solution_queue_);
-  heuristic_solution_queue_.clear();
+  {
+    std::vector<queued_heuristic_solution_t> future_solutions;
+    for (auto& sol : heuristic_solution_queue_) {
+      if (sol.vt_timestamp < bsp_current_horizon_) {
+        heuristic_solutions.push_back(std::move(sol));
+      } else {
+        future_solutions.push_back(std::move(sol));
+      }
+    }
+    heuristic_solution_queue_ = std::move(future_solutions);
+  }
   mutex_heuristic_queue_.unlock();
 
   // sort by work unit timestamp, with objective and solution values as tie-breakers

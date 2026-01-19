@@ -23,6 +23,7 @@
 #include <utilities/macros.cuh>
 
 #include <utilities/omp_helpers.hpp>
+#include <utilities/producer_sync.hpp>
 #include <utilities/work_limit_timer.hpp>
 #include <utilities/work_unit_predictor.hpp>
 #include <utilities/work_unit_scheduler.hpp>
@@ -135,6 +136,9 @@ class branch_and_bound_t {
   mip_status_t solve(mip_solution_t<i_t, f_t>& solution);
 
   work_limit_context_t& get_work_unit_context() { return work_unit_context_; }
+
+  // Get producer sync for external heuristics (e.g., CPUFJ) to register
+  producer_sync_t& get_producer_sync() { return producer_sync_; }
 
  private:
   const user_problem_t<i_t, f_t>& original_problem_;
@@ -360,6 +364,10 @@ class branch_and_bound_t {
   double bsp_current_horizon_{0.0};  // Current horizon target
   bool bsp_mode_enabled_{false};     // Whether BSP mode is active
   int bsp_horizon_number_{0};        // Current horizon number (for debugging)
+
+  // Producer synchronization for external heuristics (CPUFJ)
+  // B&B waits for registered producers at each horizon sync
+  producer_sync_t producer_sync_;
 
   // BSP node heap - priority queue for unexplored nodes (ordered by lower bound)
   struct node_ptr_lower_bound_comp {
