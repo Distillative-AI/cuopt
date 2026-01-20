@@ -496,7 +496,7 @@ struct memop_instrumentation_wrapper_t : public memory_instrumentation_base_t {
   using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
   // Constructors
-  memop_instrumentation_wrapper_t() : array_()
+  memop_instrumentation_wrapper_t() : array_(), wrapped_ptr(nullptr)
   {
     if constexpr (type_traits_utils::has_data<T>::value) {
       data_ptr = array_.data();
@@ -541,8 +541,11 @@ struct memop_instrumentation_wrapper_t : public memory_instrumentation_base_t {
     }
   }
 
+  // Copy constructor - copy from wrapped array if wrapping, never share wrapped pointer
   memop_instrumentation_wrapper_t(const memop_instrumentation_wrapper_t& other)
-    : memory_instrumentation_base_t(other), array_(other.array_)
+    : memory_instrumentation_base_t(other),
+      array_(other.wrapped_ptr ? *other.wrapped_ptr : other.array_),
+      wrapped_ptr(nullptr)
   {
     if constexpr (type_traits_utils::has_data<T>::value) {
       data_ptr = array_.data();
@@ -551,8 +554,12 @@ struct memop_instrumentation_wrapper_t : public memory_instrumentation_base_t {
     }
   }
 
+  // Move constructor - copy from wrapped array if wrapping (can't move wrapped), never share
+  // pointer
   memop_instrumentation_wrapper_t(memop_instrumentation_wrapper_t&& other) noexcept
-    : memory_instrumentation_base_t(std::move(other)), array_(std::move(other.array_))
+    : memory_instrumentation_base_t(std::move(other)),
+      array_(other.wrapped_ptr ? *other.wrapped_ptr : std::move(other.array_)),
+      wrapped_ptr(nullptr)
   {
     if constexpr (type_traits_utils::has_data<T>::value) {
       data_ptr = array_.data();
@@ -561,13 +568,21 @@ struct memop_instrumentation_wrapper_t : public memory_instrumentation_base_t {
     }
   }
 
+  // Copy assignment - handle both source and destination wrapping cases
   memop_instrumentation_wrapper_t& operator=(const memop_instrumentation_wrapper_t& other)
   {
     if (this != &other) {
       memory_instrumentation_base_t::operator=(other);
-      array_ = other.array_;
+      // Get source data (from wrapped or owned array)
+      const T& source = other.wrapped_ptr ? *other.wrapped_ptr : other.array_;
+      // Write to destination (wrapped or owned array)
+      if (wrapped_ptr) {
+        *wrapped_ptr = source;
+      } else {
+        array_ = source;
+      }
       if constexpr (type_traits_utils::has_data<T>::value) {
-        data_ptr = array_.data();
+        data_ptr = wrapped_ptr ? wrapped_ptr->data() : array_.data();
       } else {
         data_ptr = nullptr;
       }
@@ -575,13 +590,19 @@ struct memop_instrumentation_wrapper_t : public memory_instrumentation_base_t {
     return *this;
   }
 
+  // Move assignment - handle both source and destination wrapping cases
   memop_instrumentation_wrapper_t& operator=(memop_instrumentation_wrapper_t&& other) noexcept
   {
     if (this != &other) {
       memory_instrumentation_base_t::operator=(std::move(other));
-      array_ = std::move(other.array_);
+      // Get source data (copy from wrapped, move from owned)
+      if (wrapped_ptr) {
+        *wrapped_ptr = other.wrapped_ptr ? *other.wrapped_ptr : std::move(other.array_);
+      } else {
+        array_ = other.wrapped_ptr ? *other.wrapped_ptr : std::move(other.array_);
+      }
       if constexpr (type_traits_utils::has_data<T>::value) {
-        data_ptr = array_.data();
+        data_ptr = wrapped_ptr ? wrapped_ptr->data() : array_.data();
       } else {
         data_ptr = nullptr;
       }
@@ -765,11 +786,30 @@ struct memop_instrumentation_wrapper_t : public memory_instrumentation_base_t {
 
   T&& release_array() { return std::move(array_); }
 
-  T& underlying() { return array_; }
-  const T& underlying() const { return array_; }
+  // Wrap an external vector without taking ownership
+  void wrap(T& external_array)
+  {
+    wrapped_ptr = &external_array;
+    if constexpr (type_traits_utils::has_data<T>::value) { data_ptr = external_array.data(); }
+  }
+
+  // Stop wrapping and return to using the owned array
+  void unwrap()
+  {
+    wrapped_ptr = nullptr;
+    if constexpr (type_traits_utils::has_data<T>::value) { data_ptr = array_.data(); }
+  }
+
+  // Check if currently wrapping an external array
+  bool is_wrapping() const { return wrapped_ptr != nullptr; }
+
+  // Get the underlying container (wrapped or owned)
+  T& underlying() { return wrapped_ptr ? *wrapped_ptr : array_; }
+  const T& underlying() const { return wrapped_ptr ? *wrapped_ptr : array_; }
 
  private:
   T array_;
+  T* wrapped_ptr{nullptr};
   value_type* data_ptr{nullptr};
 };
 
@@ -794,8 +834,8 @@ struct memop_instrumentation_wrapper_t : public memory_instrumentation_base_t {
 
   // Constructors - forward everything to the underlying container
   memop_instrumentation_wrapper_t() = default;
-  memop_instrumentation_wrapper_t(const T& arr) : array_(arr) {}
-  memop_instrumentation_wrapper_t(T&& arr) : array_(std::move(arr)) {}
+  memop_instrumentation_wrapper_t(const T& arr) : array_(arr), wrapped_ptr_(nullptr) {}
+  memop_instrumentation_wrapper_t(T&& arr) : array_(std::move(arr)), wrapped_ptr_(nullptr) {}
 
   template <typename Arg,
             typename... Args,
@@ -804,29 +844,46 @@ struct memop_instrumentation_wrapper_t : public memory_instrumentation_base_t {
               !std::is_same_v<std::decay_t<Arg>, T> &&
               (sizeof...(Args) > 0 || !std::is_convertible_v<Arg, T>)>>
   explicit memop_instrumentation_wrapper_t(Arg&& arg, Args&&... args)
-    : array_(std::forward<Arg>(arg), std::forward<Args>(args)...)
+    : array_(std::forward<Arg>(arg), std::forward<Args>(args)...), wrapped_ptr_(nullptr)
   {
   }
 
+  // Copy constructor - always copy the data, never share wrapped pointer
   memop_instrumentation_wrapper_t(const memop_instrumentation_wrapper_t& other)
-    : array_(other.array_)
+    : array_(other.wrapped_ptr_ ? *other.wrapped_ptr_ : other.array_), wrapped_ptr_(nullptr)
   {
   }
 
+  // Move constructor - take ownership of array, never share wrapped pointer
   memop_instrumentation_wrapper_t(memop_instrumentation_wrapper_t&& other) noexcept
-    : array_(std::move(other.array_))
+    : array_(other.wrapped_ptr_ ? *other.wrapped_ptr_ : std::move(other.array_)),
+      wrapped_ptr_(nullptr)
   {
   }
 
+  // Copy assignment - always copy the data
   memop_instrumentation_wrapper_t& operator=(const memop_instrumentation_wrapper_t& other)
   {
-    if (this != &other) { array_ = other.array_; }
+    if (this != &other) {
+      if (wrapped_ptr_) {
+        *wrapped_ptr_ = other.wrapped_ptr_ ? *other.wrapped_ptr_ : other.array_;
+      } else {
+        array_ = other.wrapped_ptr_ ? *other.wrapped_ptr_ : other.array_;
+      }
+    }
     return *this;
   }
 
+  // Move assignment - take the data
   memop_instrumentation_wrapper_t& operator=(memop_instrumentation_wrapper_t&& other) noexcept
   {
-    if (this != &other) { array_ = std::move(other.array_); }
+    if (this != &other) {
+      if (wrapped_ptr_) {
+        *wrapped_ptr_ = other.wrapped_ptr_ ? *other.wrapped_ptr_ : std::move(other.array_);
+      } else {
+        array_ = other.wrapped_ptr_ ? *other.wrapped_ptr_ : std::move(other.array_);
+      }
+    }
     return *this;
   }
 
@@ -890,11 +947,18 @@ struct memop_instrumentation_wrapper_t : public memory_instrumentation_base_t {
 
   T&& release_array() { return std::move(array_); }
 
-  T& underlying() { return array_; }
-  const T& underlying() const { return array_; }
+  // Wrap/unwrap interface (for compatibility, but wrap is essentially a no-op for perf)
+  void wrap(T& external_array) { wrapped_ptr_ = &external_array; }
+  void unwrap() { wrapped_ptr_ = nullptr; }
+  bool is_wrapping() const { return wrapped_ptr_ != nullptr; }
+
+  // Get the underlying container
+  T& underlying() { return wrapped_ptr_ ? *wrapped_ptr_ : array_; }
+  const T& underlying() const { return wrapped_ptr_ ? *wrapped_ptr_ : array_; }
 
  private:
   T array_;
+  T* wrapped_ptr_{nullptr};
 };
 
 #endif  // CUOPT_ENABLE_MEMORY_INSTRUMENTATION
