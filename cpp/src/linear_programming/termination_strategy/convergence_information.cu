@@ -170,21 +170,66 @@ convergence_information_t<i_t, f_t>::convergence_information_t(
 }
 
 template <typename i_t, typename f_t>
-void convergence_information_t<i_t, f_t>::swap_context(i_t left_swap_index, i_t right_swap_index)
+__global__ void convergence_information_swap_device_vectors_kernel(
+  const swap_pair_t<i_t>* swap_pairs,
+  i_t swap_count,
+  raft::device_span<f_t> primal_objective,
+  raft::device_span<f_t> dual_objective,
+  raft::device_span<f_t> l2_primal_residual,
+  raft::device_span<f_t> l2_dual_residual,
+  raft::device_span<f_t> gap,
+  raft::device_span<f_t> abs_objective,
+  raft::device_span<f_t> dual_dot,
+  raft::device_span<f_t> sum_primal_slack)
 {
-  matrix_swap(primal_residual_, dual_size_h_, left_swap_index, right_swap_index);
-  matrix_swap(dual_residual_, primal_size_h_, left_swap_index, right_swap_index);
-  matrix_swap(reduced_cost_, primal_size_h_, left_swap_index, right_swap_index);
-  matrix_swap(primal_slack_, dual_size_h_, left_swap_index, right_swap_index);
+  const i_t idx = static_cast<i_t>(blockIdx.x * blockDim.x + threadIdx.x);
+  if (idx >= swap_count) { return; }
 
-  device_vector_swap(primal_objective_, left_swap_index, right_swap_index);
-  device_vector_swap(dual_objective_, left_swap_index, right_swap_index);
-  device_vector_swap(l2_primal_residual_, left_swap_index, right_swap_index);
-  device_vector_swap(l2_dual_residual_, left_swap_index, right_swap_index);
-  device_vector_swap(gap_, left_swap_index, right_swap_index);
-  device_vector_swap(abs_objective_, left_swap_index, right_swap_index);
-  device_vector_swap(dual_dot_, left_swap_index, right_swap_index);
-  device_vector_swap(sum_primal_slack_, left_swap_index, right_swap_index);
+  const i_t left  = swap_pairs[idx].left;
+  const i_t right = swap_pairs[idx].right;
+  cuda::std::swap(primal_objective[left], primal_objective[right]);
+  cuda::std::swap(dual_objective[left], dual_objective[right]);
+  cuda::std::swap(l2_primal_residual[left], l2_primal_residual[right]);
+  cuda::std::swap(l2_dual_residual[left], l2_dual_residual[right]);
+  cuda::std::swap(gap[left], gap[right]);
+  cuda::std::swap(abs_objective[left], abs_objective[right]);
+  cuda::std::swap(dual_dot[left], dual_dot[right]);
+  cuda::std::swap(sum_primal_slack[left], sum_primal_slack[right]);
+}
+
+template <typename i_t, typename f_t>
+void convergence_information_t<i_t, f_t>::swap_context(
+  const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs)
+{
+  if (swap_pairs.empty()) { return; }
+
+  const auto batch_size = static_cast<i_t>(primal_objective_.size());
+  cuopt_assert(batch_size > 0, "Batch size must be greater than 0");
+  for (const auto& pair : swap_pairs) {
+    cuopt_assert(pair.left < pair.right, "Left swap index must be less than right swap index");
+    cuopt_assert(pair.left < batch_size, "Left swap index is out of bounds");
+    cuopt_assert(pair.right < batch_size, "Right swap index is out of bounds");
+  }
+
+  matrix_swap(primal_residual_, dual_size_h_, swap_pairs);
+  matrix_swap(dual_residual_, primal_size_h_, swap_pairs);
+  matrix_swap(reduced_cost_, primal_size_h_, swap_pairs);
+  matrix_swap(primal_slack_, dual_size_h_, swap_pairs);
+
+  const auto [grid_size, block_size] =
+    kernel_config_from_batch_size(static_cast<i_t>(swap_pairs.size()));
+  convergence_information_swap_device_vectors_kernel<i_t, f_t>
+    <<<grid_size, block_size, 0, stream_view_>>>(thrust::raw_pointer_cast(swap_pairs.data()),
+                                                 static_cast<i_t>(swap_pairs.size()),
+                                                 make_span(primal_objective_),
+                                                 make_span(dual_objective_),
+                                                 make_span(l2_primal_residual_),
+                                                 make_span(l2_dual_residual_),
+                                                 make_span(gap_),
+                                                 make_span(abs_objective_),
+                                                 make_span(dual_dot_),
+                                                 make_span(sum_primal_slack_));
+  RAFT_CUDA_TRY(cudaPeekAtLastError());
 }
 
 template <typename i_t, typename f_t>

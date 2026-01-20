@@ -17,6 +17,7 @@
 #include <linear_programming/step_size_strategy/adaptive_step_size_strategy.hpp>
 #include <linear_programming/termination_strategy/termination_strategy.hpp>
 #include <linear_programming/pdlp_climber_strategy.hpp>
+#include <linear_programming/swap_and_resize_helper.cuh>
 
 #include <mip/problem/problem.cuh>
 
@@ -71,9 +72,9 @@ class pdlp_solver_t {
   f_t get_relative_primal_tolerance_factor() const;
   detail::pdlp_termination_strategy_t<i_t, f_t>& get_current_termination_strategy();
 
-  void swap_context(i_t left_swap_index, i_t right_swap_index);
+  void swap_context(const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs);
   void resize_context(i_t new_size);
-  void swap_all_context(i_t left_swap_index, i_t right_swap_index);
+  void swap_all_context(const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs);
   void resize_all_context(i_t new_size);
   void resize_and_swap_all_context_loop(const std::unordered_set<i_t>& climber_strategies_to_remove);
 

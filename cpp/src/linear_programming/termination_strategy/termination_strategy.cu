@@ -58,13 +58,18 @@ pdlp_termination_strategy_t<i_t, f_t>::pdlp_termination_strategy_t(
 }
 
 template <typename i_t, typename f_t>
-void pdlp_termination_strategy_t<i_t, f_t>::swap_context(i_t left_swap_index, i_t right_swap_index)
+void pdlp_termination_strategy_t<i_t, f_t>::swap_context(
+  const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs)
 {
-  convergence_information_.swap_context(left_swap_index, right_swap_index);
+  if (swap_pairs.empty()) { return; }
+
+  convergence_information_.swap_context(swap_pairs);
   cuopt_assert(!settings_.detect_infeasibility, "Infeasibility detection must be disabled to swap the termination status");
-  //infeasibility_information_.swap_context(id);
+  //infeasibility_information_.swap_context(swap_pairs);
   cuopt_assert(!termination_status_.empty(), "Termination status must not be empty");
-  host_vector_swap(termination_status_, left_swap_index, right_swap_index);
+  for (const auto& pair : swap_pairs) {
+    host_vector_swap(termination_status_, pair.left, pair.right);
+  }
 }
 
 template <typename i_t, typename f_t>

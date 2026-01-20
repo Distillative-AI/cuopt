@@ -8,6 +8,7 @@
 
 #include <cuopt/linear_programming/pdlp/pdlp_hyper_params.cuh>
 #include <linear_programming/pdlp_climber_strategy.hpp>
+#include <linear_programming/swap_and_resize_helper.cuh>
 
 #include <raft/core/handle.hpp>
 #include <raft/core/device_span.hpp>
@@ -51,7 +52,7 @@ struct localized_duality_gap_container_t {
     pdlp_hyper_params::pdlp_hyper_params_t hyper_params;
   };
 
-  void swap_context(i_t left_swap_index, i_t right_swap_index);
+  void swap_context(const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs);
   void resize_context(i_t new_size);
 
   /**

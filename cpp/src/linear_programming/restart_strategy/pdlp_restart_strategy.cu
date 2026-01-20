@@ -960,17 +960,22 @@ void pdlp_restart_strategy_t<i_t, f_t>::cupdlpx_restart(
 }
 
 template <typename i_t, typename f_t>
-void pdlp_restart_strategy_t<i_t, f_t>::swap_context(i_t left_swap_index, i_t right_swap_index)
+void pdlp_restart_strategy_t<i_t, f_t>::swap_context(
+  const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs)
 {
-  last_restart_duality_gap_.swap_context(left_swap_index, right_swap_index);
+  if (swap_pairs.empty()) { return; }
+
+  last_restart_duality_gap_.swap_context(swap_pairs);
 
   cuopt_assert(!fixed_point_error_.empty(), "Fixed point error must not be empty");
-  host_vector_swap(fixed_point_error_, left_swap_index, right_swap_index);
-  host_vector_swap(initial_fixed_point_error_, left_swap_index, right_swap_index);
-  host_vector_swap(last_trial_fixed_point_error_, left_swap_index, right_swap_index);
-  host_vector_swap(primal_weight_error_sum_, left_swap_index, right_swap_index);
-  host_vector_swap(primal_weight_last_error_, left_swap_index, right_swap_index);
-  host_vector_swap(best_primal_dual_residual_gap_, left_swap_index, right_swap_index);
+  for (const auto& pair : swap_pairs) {
+    host_vector_swap(fixed_point_error_, pair.left, pair.right);
+    host_vector_swap(initial_fixed_point_error_, pair.left, pair.right);
+    host_vector_swap(last_trial_fixed_point_error_, pair.left, pair.right);
+    host_vector_swap(primal_weight_error_sum_, pair.left, pair.right);
+    host_vector_swap(primal_weight_last_error_, pair.left, pair.right);
+    host_vector_swap(best_primal_dual_residual_gap_, pair.left, pair.right);
+  }
 }
 
 template <typename i_t, typename f_t>

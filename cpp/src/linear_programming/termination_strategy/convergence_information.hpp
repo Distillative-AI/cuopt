@@ -10,6 +10,7 @@
 #include <linear_programming/pdhg.hpp>
 #include <linear_programming/saddle_point.hpp>
 #include <linear_programming/pdlp_climber_strategy.hpp>
+#include <linear_programming/swap_and_resize_helper.cuh>
 
 #include <cuopt/linear_programming/pdlp/pdlp_hyper_params.cuh>
 #include <cuopt/linear_programming/pdlp/solver_settings.hpp>
@@ -122,7 +123,7 @@ class convergence_information_t {
                                rmm::device_uvector<f_t>& tmp_dual,
                                [[maybe_unused]] const rmm::device_uvector<f_t>& dual_iterate);
 
-  void swap_context(i_t left_swap_index, i_t right_swap_index);
+  void swap_context(const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs);
   void resize_context(i_t new_size);
 
  private:

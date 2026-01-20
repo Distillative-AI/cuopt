@@ -117,30 +117,58 @@ pdhg_solver_t<i_t, f_t>::pdhg_solver_t(raft::handle_t const* handle_ptr,
 }
 
 template <typename i_t, typename f_t>
-void pdhg_solver_t<i_t, f_t>::swap_context(i_t left_swap_index, i_t right_swap_index)
+__global__ void pdhg_swap_bounds_kernel(const swap_pair_t<i_t>* swap_pairs,
+                                        i_t swap_count,
+                                        raft::device_span<i_t> new_bounds_idx,
+                                        raft::device_span<f_t> new_bounds_lower,
+                                        raft::device_span<f_t> new_bounds_upper)
 {
-  [[maybe_unused]] const auto batch_size = static_cast<i_t>(tmp_primal_.size() / primal_size_h_);
-  cuopt_assert(batch_size > 0, "Batch size must be greater than 0");
-  cuopt_assert(left_swap_index < right_swap_index, "Left swap index must be less than right swap index");
-  cuopt_assert(left_swap_index < batch_size, "Left swap index is out of bounds");
-  cuopt_assert(right_swap_index < batch_size, "Right swap index is out of bounds");
+  const i_t idx = static_cast<i_t>(blockIdx.x * blockDim.x + threadIdx.x);
+  if (idx >= swap_count) { return; }
 
-  matrix_swap(tmp_primal_, primal_size_h_, left_swap_index, right_swap_index);
-  matrix_swap(tmp_dual_, dual_size_h_, left_swap_index, right_swap_index);
-  matrix_swap(potential_next_primal_solution_, primal_size_h_, left_swap_index, right_swap_index);
-  matrix_swap(potential_next_dual_solution_, dual_size_h_, left_swap_index, right_swap_index);
-  matrix_swap(reflected_primal_, primal_size_h_, left_swap_index, right_swap_index);
-  matrix_swap(reflected_dual_, dual_size_h_, left_swap_index, right_swap_index);
-  matrix_swap(dual_slack_, primal_size_h_, left_swap_index, right_swap_index);
-  current_saddle_point_state_.swap_context(left_swap_index, right_swap_index);
+  const i_t left  = swap_pairs[idx].left;
+  const i_t right = swap_pairs[idx].right;
+
+  cuda::std::swap(new_bounds_idx[left], new_bounds_idx[right]);
+  cuda::std::swap(new_bounds_lower[left], new_bounds_lower[right]);
+  cuda::std::swap(new_bounds_upper[left], new_bounds_upper[right]);
+}
+
+template <typename i_t, typename f_t>
+void pdhg_solver_t<i_t, f_t>::swap_context(
+  const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs)
+{
+  if (swap_pairs.empty()) { return; }
+
+  const auto batch_size = static_cast<i_t>(tmp_primal_.size() / primal_size_h_);
+  cuopt_assert(batch_size > 0, "Batch size must be greater than 0");
+  for (const auto& pair : swap_pairs) {
+    cuopt_assert(pair.left < pair.right, "Left swap index must be less than right swap index");
+    cuopt_assert(pair.right < batch_size, "Right swap index is out of bounds");
+  }
+
+  matrix_swap(tmp_primal_, primal_size_h_, swap_pairs);
+  matrix_swap(tmp_dual_, dual_size_h_, swap_pairs);
+  matrix_swap(potential_next_primal_solution_, primal_size_h_, swap_pairs);
+  matrix_swap(potential_next_dual_solution_, dual_size_h_, swap_pairs);
+  matrix_swap(reflected_primal_, primal_size_h_, swap_pairs);
+  matrix_swap(reflected_dual_, dual_size_h_, swap_pairs);
+  matrix_swap(dual_slack_, primal_size_h_, swap_pairs);
+  current_saddle_point_state_.swap_context(swap_pairs);
   if (new_bounds_idx_.size() != 0) {
-    device_vector_swap(new_bounds_idx_, left_swap_index, right_swap_index);
-    device_vector_swap(new_bounds_lower_, left_swap_index, right_swap_index);
-    device_vector_swap(new_bounds_upper_, left_swap_index, right_swap_index);
+    const auto [grid_size, block_size] =
+      kernel_config_from_batch_size(static_cast<i_t>(swap_pairs.size()));
+    pdhg_swap_bounds_kernel<i_t, f_t>
+      <<<grid_size, block_size, 0, stream_view_>>>(thrust::raw_pointer_cast(swap_pairs.data()),
+                                                   static_cast<i_t>(swap_pairs.size()),
+                                                   make_span(new_bounds_idx_),
+                                                   make_span(new_bounds_lower_),
+                                                   make_span(new_bounds_upper_));
+    RAFT_CUDA_TRY(cudaPeekAtLastError());
   }
 
   #ifdef CUPDLP_DEBUG_MODE
-  std::cout << "Swap context for climber " << left_swap_index << " and " << right_swap_index << std::endl;
+  std::cout << "Swap context for " << swap_pairs.size() << " pairs" << std::endl;
   print("new_bounds_idx_", new_bounds_idx_);
   print("new_bounds_lower_", new_bounds_lower_);
   print("new_bounds_upper_", new_bounds_upper_);

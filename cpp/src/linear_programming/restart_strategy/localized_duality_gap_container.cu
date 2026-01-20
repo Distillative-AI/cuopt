@@ -9,6 +9,7 @@
 #include <linear_programming/restart_strategy/pdlp_restart_strategy.cuh>
 #include <linear_programming/pdlp_climber_strategy.hpp>
 #include <linear_programming/swap_and_resize_helper.cuh>
+#include <linear_programming/utils.cuh>
 
 #include <mip/mip_constants.hpp>
 
@@ -50,12 +51,47 @@ localized_duality_gap_container_t<i_t, f_t>::localized_duality_gap_container_t(
 }
 
 template <typename i_t, typename f_t>
-void localized_duality_gap_container_t<i_t, f_t>::swap_context(i_t left_swap_index, i_t right_swap_index)
+__global__ void localized_duality_gap_swap_device_vectors_kernel(
+  const swap_pair_t<i_t>* swap_pairs,
+  i_t swap_count,
+  raft::device_span<f_t> primal_distance_traveled,
+  raft::device_span<f_t> dual_distance_traveled)
 {
-  matrix_swap(primal_solution_, primal_size_h_, left_swap_index, right_swap_index);
-  matrix_swap(dual_solution_, dual_size_h_, left_swap_index, right_swap_index);
-  device_vector_swap(primal_distance_traveled_, left_swap_index, right_swap_index);
-  device_vector_swap(dual_distance_traveled_, left_swap_index, right_swap_index);
+  const i_t idx = static_cast<i_t>(blockIdx.x * blockDim.x + threadIdx.x);
+  if (idx >= swap_count) { return; }
+
+  const i_t left  = swap_pairs[idx].left;
+  const i_t right = swap_pairs[idx].right;
+
+  cuda::std::swap(primal_distance_traveled[left], primal_distance_traveled[right]);
+  cuda::std::swap(dual_distance_traveled[left], dual_distance_traveled[right]);
+}
+
+template <typename i_t, typename f_t>
+void localized_duality_gap_container_t<i_t, f_t>::swap_context(
+  const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs)
+{
+  if (swap_pairs.empty()) { return; }
+
+  const auto batch_size = static_cast<i_t>(primal_distance_traveled_.size());
+  cuopt_assert(batch_size > 0, "Batch size must be greater than 0");
+  for (const auto& pair : swap_pairs) {
+    cuopt_assert(pair.left < pair.right, "Left swap index must be less than right swap index");
+    cuopt_assert(pair.left < batch_size, "Left swap index is out of bounds");
+    cuopt_assert(pair.right < batch_size, "Right swap index is out of bounds");
+  }
+
+  matrix_swap(primal_solution_, primal_size_h_, swap_pairs);
+  matrix_swap(dual_solution_, dual_size_h_, swap_pairs);
+
+  const auto [grid_size, block_size] =
+    kernel_config_from_batch_size(static_cast<i_t>(swap_pairs.size()));
+  localized_duality_gap_swap_device_vectors_kernel<i_t, f_t>
+    <<<grid_size, block_size, 0, primal_solution_.stream()>>>(thrust::raw_pointer_cast(swap_pairs.data()),
+                                                              static_cast<i_t>(swap_pairs.size()),
+                                                              make_span(primal_distance_traveled_),
+                                                              make_span(dual_distance_traveled_));
+  RAFT_CUDA_TRY(cudaPeekAtLastError());
 }
 
 template <typename i_t, typename f_t>

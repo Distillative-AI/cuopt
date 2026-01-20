@@ -14,6 +14,7 @@
 #include <linear_programming/pdhg.hpp>
 #include <linear_programming/saddle_point.hpp>
 #include <linear_programming/pdlp_climber_strategy.hpp>
+#include <linear_programming/swap_and_resize_helper.cuh>
 
 #include <raft/core/handle.hpp>
 
@@ -84,7 +85,7 @@ class adaptive_step_size_strategy_t {
                                         cusparse_view_t<i_t, f_t>& cusparse_view,
                                         saddle_point_state_t<i_t, f_t>& current_saddle_point_state);
 
-  void swap_context(i_t left_swap_index, i_t right_swap_index);
+  void swap_context(const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs);
   void resize_context(i_t new_size);
 
  private:

@@ -12,7 +12,11 @@
 
 #include <cub/cub.cuh>
 
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/permutation_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
+#include <thrust/universal_vector.h>
 
 #include <cuda/std/tuple>
 
@@ -20,28 +24,57 @@
 
 namespace cuopt::linear_programming::detail {
 
-template <typename i_t, typename f_t>
-void matrix_swap(rmm::device_uvector<f_t>& matrix, i_t vector_size, i_t left_swap_index, i_t right_swap_index)
-{
-  const i_t batch_size = matrix.size() / vector_size;
+template <typename i_t>
+struct swap_pair_t {
+  i_t left;
+  i_t right;
+};
 
-  cuopt_assert(left_swap_index < right_swap_index, "Left swap index must be less than right swap index");
-  cuopt_assert(left_swap_index < batch_size, "Left swap index is out of bounds");
-  cuopt_assert(right_swap_index < batch_size, "Right swap index is out of bounds");
+template <typename i_t>
+struct matrix_swap_index_functor {
+  const swap_pair_t<i_t>* pairs;
+  i_t vector_size;
+  bool is_left;
+
+  HDI size_t operator()(size_t idx) const
+  {
+    const i_t swap_idx = static_cast<i_t>(idx / static_cast<size_t>(vector_size));
+    const i_t offset   = static_cast<i_t>(idx - static_cast<size_t>(swap_idx) * vector_size);
+    const i_t base     = is_left ? pairs[swap_idx].left : pairs[swap_idx].right;
+    return static_cast<size_t>(base) * vector_size + offset;
+  }
+};
+
+template <typename i_t, typename f_t>
+void matrix_swap(rmm::device_uvector<f_t>& matrix,
+                 i_t vector_size,
+                 const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs)
+{
+  if (swap_pairs.empty()) { return; }
+
+  const i_t batch_size = matrix.size() / vector_size;
   cuopt_assert(vector_size > 0, "Vector size must be greater than 0");
   cuopt_assert(batch_size > 0, "Batch size must be greater than 0");
-  
-  cub::DeviceTransform::Transform(
-    cuda::std::make_tuple(
-      matrix.data() + (left_swap_index * vector_size), 
-      matrix.data() + (right_swap_index * vector_size)),
-    thrust::make_zip_iterator(
-      matrix.data() + (left_swap_index * vector_size),
-      matrix.data() + (right_swap_index * vector_size)),
-    vector_size,
-    [] HD(f_t a, f_t b) { return thrust::make_tuple(b, a); },
-    matrix.stream()
-  );
+
+  const size_t swap_count = swap_pairs.size();
+  const size_t total_items = swap_count * static_cast<size_t>(vector_size);
+
+  auto counting = thrust::make_counting_iterator<size_t>(0);
+  auto left_index = thrust::make_transform_iterator(
+    counting, matrix_swap_index_functor<i_t>{thrust::raw_pointer_cast(swap_pairs.data()), vector_size, true});
+  auto right_index = thrust::make_transform_iterator(
+    counting, matrix_swap_index_functor<i_t>{thrust::raw_pointer_cast(swap_pairs.data()), vector_size, false});
+
+  auto left_perm  = thrust::make_permutation_iterator(matrix.data(), left_index);
+  auto right_perm = thrust::make_permutation_iterator(matrix.data(), right_index);
+  auto in_zip     = thrust::make_zip_iterator(left_perm, right_perm);
+  auto out_zip    = thrust::make_zip_iterator(left_perm, right_perm);
+
+  cub::DeviceTransform::Transform(in_zip,
+                                  out_zip,
+                                  total_items,
+                                  [] HD(thrust::tuple<f_t, f_t> values) -> thrust::tuple<f_t, f_t> { return thrust::make_tuple(thrust::get<1>(values), thrust::get<0>(values)); },
+                                  matrix.stream());
 }
 
 template <typename host_vector_t>
@@ -53,23 +86,5 @@ void host_vector_swap(host_vector_t& host_vector, int left_swap_index, int right
 
   // Swap the id to swap to the end
   std::swap(host_vector[left_swap_index], host_vector[right_swap_index]);
-}
-
-template <typename i_t, typename f_t>
-__global__ void device_scalar_swap(cuda::std::span<f_t> vector, i_t left_swap_index, i_t right_swap_index)
-{
-  cuopt_assert(threadIdx.x == 0 && blockIdx.x == 0, "This kernel should be launched with a single thread");
-  cuda::std::swap(vector[left_swap_index], vector[right_swap_index]);
-}
-
-template <typename i_t, typename f_t>
-void device_vector_swap(rmm::device_uvector<f_t>& device_vector, i_t left_swap_index, i_t right_swap_index)
-{
-  cuopt_assert(left_swap_index < device_vector.size(), "Left swap index is out of bounds");
-  cuopt_assert(right_swap_index < device_vector.size(), "Right swap index is out of bounds");
-  cuopt_assert(left_swap_index < right_swap_index, "Left swap index must be less than right swap index");
-
-  // Swap the id to swap to the end
-  device_scalar_swap<<<1, 1, 0, device_vector.stream()>>>(cuda::std::span(device_vector.data(), device_vector.size()), left_swap_index, right_swap_index);
 }
 }

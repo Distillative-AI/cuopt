@@ -11,6 +11,7 @@
 #include <linear_programming/saddle_point.hpp>
 #include <linear_programming/utilities/ping_pong_graph.cuh>
 #include <linear_programming/pdlp_climber_strategy.hpp>
+#include <linear_programming/swap_and_resize_helper.cuh>
 #include <mip/problem/problem.cuh>
 
 #include <raft/core/handle.hpp>
@@ -50,7 +51,7 @@ class pdhg_solver_t {
   i_t get_primal_size() const;
   i_t get_dual_size() const;
 
-  void swap_context(i_t left_swap_index, i_t right_swap_index);
+  void swap_context(const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs);
   void resize_context(i_t new_size);
   ping_pong_graph_t<i_t>& get_graph_all();
   

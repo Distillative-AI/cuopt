@@ -9,6 +9,7 @@
 #include <linear_programming/cusparse_view.hpp>
 #include <linear_programming/pdhg.hpp>
 #include <linear_programming/restart_strategy/localized_duality_gap_container.hpp>
+#include <linear_programming/swap_and_resize_helper.cuh>
 #include <linear_programming/restart_strategy/weighted_average_solution.hpp>
 #include <linear_programming/saddle_point.hpp>
 #include <linear_programming/termination_strategy/convergence_information.hpp>
@@ -107,7 +108,7 @@ class pdlp_restart_strategy_t {
     CUPDLPX_RESTART      = 3,
   };
 
-  void swap_context(i_t left_swap_index, i_t right_swap_index);
+  void swap_context(const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs);
   void resize_context(i_t new_size);
 
   pdlp_restart_strategy_t(raft::handle_t const* handle_ptr,

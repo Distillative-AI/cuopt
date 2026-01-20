@@ -13,6 +13,8 @@
 #include <rmm/device_scalar.hpp>
 #include <rmm/device_uvector.hpp>
 
+#include <linear_programming/swap_and_resize_helper.cuh>
+
 namespace cuopt::linear_programming::detail {
 /**
  * @brief Structure to hold the current solution to the saddle point problem
@@ -86,7 +88,7 @@ class saddle_point_state_t {
   rmm::device_uvector<f_t>& get_current_AtY();
   rmm::device_uvector<f_t>& get_next_AtY();
 
-  void swap_context(i_t left_swap_index, i_t right_swap_index);
+  void swap_context(const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs);
   void resize_context(i_t new_size);
 
   /**

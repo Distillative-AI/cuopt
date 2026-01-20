@@ -1281,13 +1281,51 @@ __global__ void kernel_compute_fixed_error(
 }
 
 template <typename i_t, typename f_t>
-void pdlp_solver_t<i_t, f_t>::swap_context(i_t left_swap_index, i_t right_swap_index)
+__global__ void pdlp_swap_device_vectors_kernel(const swap_pair_t<i_t>* swap_pairs,
+                                                i_t swap_count,
+                                                raft::device_span<f_t> primal_weight,
+                                                raft::device_span<f_t> best_primal_weight,
+                                                raft::device_span<f_t> step_size,
+                                                raft::device_span<f_t> primal_step_size,
+                                                raft::device_span<f_t> dual_step_size)
 {
-  device_vector_swap(primal_weight_, left_swap_index, right_swap_index);
-  device_vector_swap(best_primal_weight_, left_swap_index, right_swap_index);
-  device_vector_swap(step_size_, left_swap_index, right_swap_index);
-  device_vector_swap(primal_step_size_, left_swap_index, right_swap_index);
-  device_vector_swap(dual_step_size_, left_swap_index, right_swap_index);
+  const i_t idx = static_cast<i_t>(blockIdx.x * blockDim.x + threadIdx.x);
+  if (idx >= swap_count) { return; }
+
+  const i_t left  = swap_pairs[idx].left;
+  const i_t right = swap_pairs[idx].right;
+
+  cuda::std::swap(primal_weight[left], primal_weight[right]);
+  cuda::std::swap(best_primal_weight[left], best_primal_weight[right]);
+  cuda::std::swap(step_size[left], step_size[right]);
+  cuda::std::swap(primal_step_size[left], primal_step_size[right]);
+  cuda::std::swap(dual_step_size[left], dual_step_size[right]);
+}
+
+template <typename i_t, typename f_t>
+void pdlp_solver_t<i_t, f_t>::swap_context(
+  const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs)
+{
+  if (swap_pairs.empty()) { return; }
+
+  const auto batch_size = static_cast<i_t>(primal_weight_.size());
+  cuopt_assert(batch_size > 0, "Batch size must be greater than 0");
+  for (const auto& pair : swap_pairs) {
+    cuopt_assert(pair.left < pair.right, "Left swap index must be less than right swap index");
+    cuopt_assert(pair.right < batch_size, "Right swap index is out of bounds");
+  }
+
+  const auto [grid_size, block_size] =
+    kernel_config_from_batch_size(static_cast<i_t>(swap_pairs.size()));
+  pdlp_swap_device_vectors_kernel<i_t, f_t>
+    <<<grid_size, block_size, 0, stream_view_>>>(thrust::raw_pointer_cast(swap_pairs.data()),
+                                                 static_cast<i_t>(swap_pairs.size()),
+                                                 make_span(primal_weight_),
+                                                 make_span(best_primal_weight_),
+                                                 make_span(step_size_),
+                                                 make_span(primal_step_size_),
+                                                 make_span(dual_step_size_));
+  RAFT_CUDA_TRY(cudaPeekAtLastError());
 }
 
 template <typename i_t, typename f_t>
@@ -1310,23 +1348,22 @@ void pdlp_solver_t<i_t, f_t>::resize_context(i_t new_size)
 
 
 template <typename i_t, typename f_t>
-void pdlp_solver_t<i_t, f_t>::swap_all_context(i_t left_swap_index, i_t right_swap_index)
+void pdlp_solver_t<i_t, f_t>::swap_all_context(
+  const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs)
 {
-  raft::common::nvtx::range fun_scope("swap_one_id");
+  if (swap_pairs.empty()) { return; }
 
-  // Resize PDHG, its saddle point and its new bounds
-  pdhg_solver_.swap_context(left_swap_index, right_swap_index);
-  // Resize restart strategy and its duality gap container
-  restart_strategy_.swap_context(left_swap_index, right_swap_index);
-  // Resize PDLP own context
-  swap_context(left_swap_index, right_swap_index);
-  // Resize step size strategy
-  step_size_strategy_.swap_context(left_swap_index, right_swap_index);
-  // Resize current termination strategy and its convergence information
-  current_termination_strategy_.swap_context(left_swap_index, right_swap_index);
+  raft::common::nvtx::range fun_scope("swap_all_context");
 
-  // Remove the climber from the list (no need to restart it doesn't contain anything)
-  host_vector_swap(climber_strategies_, left_swap_index, right_swap_index);
+  pdhg_solver_.swap_context(swap_pairs);
+  restart_strategy_.swap_context(swap_pairs);
+  swap_context(swap_pairs);
+  step_size_strategy_.swap_context(swap_pairs);
+  current_termination_strategy_.swap_context(swap_pairs);
+
+  for (const auto& pair : swap_pairs) {
+    host_vector_swap(climber_strategies_, pair.left, pair.right);
+  }
 
   RAFT_CUDA_TRY(cudaStreamSynchronize(stream_view_));
 }
@@ -1351,13 +1388,18 @@ void pdlp_solver_t<i_t, f_t>::resize_all_context(i_t new_size)
 }
 
 template <typename i_t, typename f_t>
-void pdlp_solver_t<i_t, f_t>::resize_and_swap_all_context_loop(const std::unordered_set<i_t>& climber_strategies_to_remove)
+void pdlp_solver_t<i_t, f_t>::resize_and_swap_all_context_loop(
+  const std::unordered_set<i_t>& climber_strategies_to_remove)
 {
   raft::common::nvtx::range fun_scope("resize_and_swap_all_context_loop");
 
   cuopt_assert(climber_strategies_to_remove.size() != climber_strategies_.size(), "We should never remove all climbers");
   cuopt_assert(climber_strategies_to_remove.size() < climber_strategies_.size(), "climber_strategies_to_remove size must be less than or equal to climber_strategies_.size()");
 
+  thrust::universal_host_pinned_vector<swap_pair_t<i_t>> swap_pairs;
+
+  // Here we accumulate all the swap pairs that need to be done to remove the climbers
+  // Then execute all the swaps and resizes
   i_t last = climber_strategies_.size() - 1;
   for (i_t i = 0; i <= last; ++i) {
     // Not to remove, skip this id
@@ -1373,11 +1415,17 @@ void pdlp_solver_t<i_t, f_t>::resize_and_swap_all_context_loop(const std::unorde
     if (i >= last)
         break;
 
-    swap_all_context(i, last);
+    swap_pairs.push_back({i, last});
     --last;
   }
 
-  cuopt_assert(last + 1 == climber_strategies_.size() - climber_strategies_to_remove.size(), "Last + 1 must be equal to climber_strategies_.size() - climber_strategies_to_remove.size()");
+  // No swap can happen if all climbers to remove are at the end
+  if (!swap_pairs.empty()) {
+    swap_all_context(swap_pairs);
+  }
+
+  cuopt_assert(last + 1 == climber_strategies_.size() - climber_strategies_to_remove.size(),
+               "Last + 1 must be equal to climber_strategies_.size() - climber_strategies_to_remove.size()");
   resize_all_context(last + 1);
 
   #ifdef BATCH_VERBOSE_MODE

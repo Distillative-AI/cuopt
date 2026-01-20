@@ -10,6 +10,7 @@
 #include <linear_programming/termination_strategy/convergence_information.hpp>
 #include <linear_programming/termination_strategy/infeasibility_information.hpp>
 #include <linear_programming/pdlp_climber_strategy.hpp>
+#include <linear_programming/swap_and_resize_helper.cuh>
 
 #include <cuopt/linear_programming/pdlp/pdlp_warm_start_data.hpp>
 #include <cuopt/linear_programming/pdlp/solver_settings.hpp>
@@ -123,7 +124,7 @@ class pdlp_termination_strategy_t {
 
   void print_termination_criteria(i_t iteration, f_t elapsed, i_t best_id = 0) const;
 
-  void swap_context(i_t left_swap_index, i_t right_swap_index);
+  void swap_context(const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs);
   void resize_context(i_t new_size);
 
   void fill_gpu_terms_stats(i_t number_of_iterations);

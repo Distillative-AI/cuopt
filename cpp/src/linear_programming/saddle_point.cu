@@ -55,21 +55,23 @@ saddle_point_state_t<i_t, f_t>::saddle_point_state_t(raft::handle_t const* handl
 }
 
 template <typename i_t, typename f_t>
-void saddle_point_state_t<i_t, f_t>::swap_context(i_t left_swap_index, i_t right_swap_index)
+void saddle_point_state_t<i_t, f_t>::swap_context(
+  const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs)
 {
   [[maybe_unused]] const auto batch_size = static_cast<i_t>(primal_solution_.size() / primal_size_);
   cuopt_assert(batch_size > 0, "Batch size must be greater than 0");
-  cuopt_assert(left_swap_index < right_swap_index, "Left swap index must be less than right swap index");
-  cuopt_assert(left_swap_index < batch_size, "Left swap index is out of bounds");
-  cuopt_assert(right_swap_index < batch_size, "Right swap index is out of bounds");
-  
-  matrix_swap(primal_solution_, primal_size_, left_swap_index, right_swap_index);
-  matrix_swap(dual_solution_, dual_size_, left_swap_index, right_swap_index);
-  matrix_swap(delta_primal_, primal_size_, left_swap_index, right_swap_index);
-  matrix_swap(delta_dual_, dual_size_, left_swap_index, right_swap_index);
-  matrix_swap(dual_gradient_, dual_size_, left_swap_index, right_swap_index);
-  matrix_swap(current_AtY_, primal_size_, left_swap_index, right_swap_index);
-  matrix_swap(next_AtY_, primal_size_, left_swap_index, right_swap_index);
+  for (const auto& pair : swap_pairs) {
+    cuopt_assert(pair.left < pair.right, "Left swap index must be less than right swap index");
+    cuopt_assert(pair.right < batch_size, "Right swap index is out of bounds");
+  }
+
+  matrix_swap(primal_solution_, primal_size_, swap_pairs);
+  matrix_swap(dual_solution_, dual_size_, swap_pairs);
+  matrix_swap(delta_primal_, primal_size_, swap_pairs);
+  matrix_swap(delta_dual_, dual_size_, swap_pairs);
+  matrix_swap(dual_gradient_, dual_size_, swap_pairs);
+  matrix_swap(current_AtY_, primal_size_, swap_pairs);
+  matrix_swap(next_AtY_, primal_size_, swap_pairs);
 }
 
 template <typename i_t, typename f_t>
