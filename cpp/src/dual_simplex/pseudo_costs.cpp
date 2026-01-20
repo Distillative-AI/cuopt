@@ -430,11 +430,6 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
   // reliable_threshold     = total_lp_iter < max_iter ? reliable_threshold : 0;
   i_t reliable_threshold = 1;
 
-  settings.log.debug("RB LP iterations = %d, B&B LP iterations = %d reliable_threshold = %d\n",
-                     total_lp_iter.load(),
-                     bnb_lp_iter,
-                     reliable_threshold);
-
   std::vector<i_t> pending(fractional.size(), -1);
   std::vector<i_t> next(fractional.size(), -1);
   omp_atomic_t<i_t> num_pending = 0;
@@ -466,8 +461,18 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
     }
   }
 
+  if (num_pending != 0) {
+    settings.log.debug(
+      "RB LP iterations = %d, B&B LP iterations = %d reliable_threshold = %d, num strong branches "
+      "= %d\n",
+      total_lp_iter.load(),
+      bnb_lp_iter,
+      reliable_threshold,
+      num_pending.load());
+  }
+
   while (num_pending != 0) {
-#pragma omp taskloop priority(20)
+#pragma omp taskloop priority(20) grainsize(2) if (num_pending > 2)
     for (i_t i = 0; i < num_pending; ++i) {
       const i_t j    = pending[i];
       bool is_locked = pseudo_cost_mutex[j].try_lock();
