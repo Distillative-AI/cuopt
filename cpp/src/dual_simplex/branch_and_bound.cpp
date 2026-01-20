@@ -3061,8 +3061,7 @@ void branch_and_bound_t<i_t, f_t>::merge_diving_solutions()
   if (!bsp_diving_workers_) return;
 
   // Collect all integer solutions from diving workers
-  std::vector<typename bsp_diving_worker_state_t<i_t, f_t>::queued_integer_solution_t*>
-    all_solutions;
+  std::vector<queued_integer_solution_t<i_t, f_t>*> all_solutions;
 
   for (auto& worker : *bsp_diving_workers_) {
     for (auto& sol : worker.integer_solutions) {

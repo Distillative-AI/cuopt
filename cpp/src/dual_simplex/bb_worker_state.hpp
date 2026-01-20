@@ -51,6 +51,14 @@ struct pseudo_cost_update_t {
   int worker_id;  // for tie-breaking in sort
 };
 
+// Queued integer solution found during a horizon (merged at sync)
+template <typename i_t, typename f_t>
+struct queued_integer_solution_t {
+  f_t objective;
+  std::vector<f_t> solution;
+  i_t depth;
+};
+
 // Per-worker state for BSP (Bulk Synchronous Parallel) branch-and-bound
 template <typename i_t, typename f_t>
 struct bb_worker_state_t {
@@ -128,22 +136,14 @@ struct bb_worker_state_t {
   double total_work_units{0.0};
 
   // Timing statistics (in seconds)
-  double total_runtime{0.0};       // Total time spent doing actual work
-  double total_barrier_wait{0.0};  // Total time spent waiting at horizon sync barriers
-  double total_nowork_time{0.0};   // Total time spent with no nodes to work on
-  double horizon_finish_time{
-    0.0};  // Timestamp when worker finished current horizon (for barrier wait calc)
+  double total_runtime{0.0};      // Total time spent doing actual work
+  double total_nowork_time{0.0};  // Total time spent with no nodes to work on
 
   // Worker-local upper bound for BSP determinism (prevents cross-worker pruning races)
   f_t local_upper_bound{std::numeric_limits<f_t>::infinity()};
 
   // Queued integer solutions found during this horizon (merged at sync)
-  struct queued_integer_solution_t {
-    f_t objective;
-    std::vector<f_t> solution;
-    i_t depth;
-  };
-  std::vector<queued_integer_solution_t> integer_solutions;
+  std::vector<queued_integer_solution_t<i_t, f_t>> integer_solutions;
 
   // Queued pseudo-cost updates (applied to global pseudo-costs at sync)
   std::vector<pseudo_cost_update_t<i_t, f_t>> pseudo_cost_updates;
@@ -195,7 +195,6 @@ struct bb_worker_state_t {
   // Reset for new horizon
   void reset_for_horizon(double horizon_start, double horizon_end, f_t global_upper_bound)
   {
-    // Reset clock to horizon_start for consistent VT timestamps across workers
     clock = horizon_start;
     events.clear();
     events.horizon_start         = horizon_start;
@@ -233,10 +232,9 @@ struct bb_worker_state_t {
     horizon_end          = new_horizon_end;
   }
 
-  // Queue a pseudo-cost update for global sync AND apply it to local snapshot immediately
-  // This allows within-horizon learning while maintaining determinism:
-  // - Local snapshot updates are sequential within each worker (deterministic)
-  // - Global updates are merged at sync in sorted (VT, worker_id) order (deterministic)
+  // Queue a pseudo-cost update for global sync AND apply it to local snapshot immediately.
+  // Local snapshot updates are sequential within each worker (deterministic).
+  // Global updates are merged at sync in sorted (wut, worker_id) order (deterministic).
   void queue_pseudo_cost_update(i_t variable, rounding_direction_t direction, f_t delta)
   {
     // Queue for global sync at horizon end
@@ -257,80 +255,18 @@ struct bb_worker_state_t {
   i_t variable_selection_from_snapshot(const std::vector<i_t>& fractional,
                                        const std::vector<f_t>& solution) const
   {
-    const i_t num_fractional = fractional.size();
-    if (num_fractional == 0) return -1;
-
-    // Compute averages from snapshot
-    i_t num_initialized_down = 0;
-    i_t num_initialized_up   = 0;
-    f_t pseudo_cost_down_avg = 0;
-    f_t pseudo_cost_up_avg   = 0;
-
-    const i_t n = pc_sum_down_snapshot.size();
-    for (i_t j = 0; j < n; ++j) {
-      if (pc_num_down_snapshot[j] > 0) {
-        ++num_initialized_down;
-        if (std::isfinite(pc_sum_down_snapshot[j])) {
-          pseudo_cost_down_avg += pc_sum_down_snapshot[j] / pc_num_down_snapshot[j];
-        }
-      }
-      if (pc_num_up_snapshot[j] > 0) {
-        ++num_initialized_up;
-        if (std::isfinite(pc_sum_up_snapshot[j])) {
-          pseudo_cost_up_avg += pc_sum_up_snapshot[j] / pc_num_up_snapshot[j];
-        }
-      }
-    }
-    if (num_initialized_down > 0) {
-      pseudo_cost_down_avg /= num_initialized_down;
-    } else {
-      pseudo_cost_down_avg = 1.0;
-    }
-    if (num_initialized_up > 0) {
-      pseudo_cost_up_avg /= num_initialized_up;
-    } else {
-      pseudo_cost_up_avg = 1.0;
-    }
-
-    // Compute scores
-    std::vector<f_t> score(num_fractional);
-    for (i_t k = 0; k < num_fractional; ++k) {
-      const i_t j = fractional[k];
-      f_t pc_down = (pc_num_down_snapshot[j] != 0)
-                      ? pc_sum_down_snapshot[j] / pc_num_down_snapshot[j]
-                      : pseudo_cost_down_avg;
-      f_t pc_up   = (pc_num_up_snapshot[j] != 0) ? pc_sum_up_snapshot[j] / pc_num_up_snapshot[j]
-                                                 : pseudo_cost_up_avg;
-      constexpr f_t eps = 1e-6;
-      const f_t f_down  = solution[j] - std::floor(solution[j]);
-      const f_t f_up    = std::ceil(solution[j]) - solution[j];
-      score[k]          = std::max(f_down * pc_down, eps) * std::max(f_up * pc_up, eps);
-    }
-
-    // Select variable with maximum score
-    i_t branch_var = fractional[0];
-    f_t max_score  = score[0];
-    for (i_t k = 1; k < num_fractional; ++k) {
-      if (score[k] > max_score) {
-        max_score  = score[k];
-        branch_var = fractional[k];
-      }
-    }
-
-    return branch_var;
+    return variable_selection_from_pseudo_costs(pc_sum_down_snapshot.data(),
+                                                pc_sum_up_snapshot.data(),
+                                                pc_num_down_snapshot.data(),
+                                                pc_num_up_snapshot.data(),
+                                                (i_t)pc_sum_down_snapshot.size(),
+                                                fractional,
+                                                solution);
   }
 
   // ==========================================================================
   // Node enqueueing methods
   // ==========================================================================
-
-  // Add a node to the plunge stack, assigning BSP identity
-  void enqueue_node(mip_node_t<i_t, f_t>* node)
-  {
-    node->origin_worker_id = worker_id;
-    node->creation_seq     = next_creation_seq++;
-    plunge_stack.push_front(node);
-  }
 
   // Add a node that already has BSP identity (from load balancing or initial distribution)
   void enqueue_node_with_identity(mip_node_t<i_t, f_t>* node) { plunge_stack.push_front(node); }
@@ -435,44 +371,6 @@ struct bb_worker_state_t {
     return plunge_stack.size() + backlog.size() + (current_node != nullptr ? 1 : 0);
   }
 
-  // Get number of nodes in plunge stack only
-  size_t plunge_stack_size() const { return plunge_stack.size(); }
-
-  // Get number of nodes in backlog only
-  size_t backlog_size() const { return backlog.size(); }
-
-  // ==========================================================================
-  // Load balancing support
-  // ==========================================================================
-
-  // Extract all nodes from worker (for load balancing)
-  // Returns nodes in arbitrary order - caller should sort if deterministic order needed
-  std::vector<mip_node_t<i_t, f_t>*> extract_all_nodes()
-  {
-    std::vector<mip_node_t<i_t, f_t>*> nodes;
-    nodes.reserve(queue_size());
-
-    // Include paused node if any
-    if (current_node != nullptr) {
-      nodes.push_back(current_node);
-      current_node = nullptr;
-    }
-
-    // Extract from plunge stack
-    for (auto* node : plunge_stack) {
-      nodes.push_back(node);
-    }
-    plunge_stack.clear();
-
-    // Extract from backlog
-    for (auto* node : backlog) {
-      nodes.push_back(node);
-    }
-    backlog.clear();
-
-    return nodes;
-  }
-
   // Extract only backlog nodes (for redistribution at horizon sync)
   // Plunge stack nodes stay with worker for locality
   std::vector<mip_node_t<i_t, f_t>*> extract_backlog_nodes()
@@ -480,14 +378,6 @@ struct bb_worker_state_t {
     std::vector<mip_node_t<i_t, f_t>*> nodes = std::move(backlog);
     backlog.clear();
     return nodes;
-  }
-
-  // Clear all queues without returning nodes (use with caution)
-  void clear_queue()
-  {
-    current_node = nullptr;
-    plunge_stack.clear();
-    backlog.clear();
   }
 
   // Record an event
@@ -637,16 +527,8 @@ struct bsp_diving_worker_state_t {
   std::vector<f_t> dive_lower;
   std::vector<f_t> dive_upper;
 
-  // ==========================================================================
-  // Queued results (merged at sync)
-  // ==========================================================================
-
-  struct queued_integer_solution_t {
-    f_t objective;
-    std::vector<f_t> solution;
-    i_t depth;
-  };
-  std::vector<queued_integer_solution_t> integer_solutions;
+  // Queued integer solutions found during this horizon (merged at sync)
+  std::vector<queued_integer_solution_t<i_t, f_t>> integer_solutions;
 
   // ==========================================================================
   // Statistics
@@ -752,85 +634,16 @@ struct bsp_diving_worker_state_t {
   branch_variable_t<i_t> variable_selection_from_snapshot(const std::vector<i_t>& fractional,
                                                           const std::vector<f_t>& solution) const
   {
-    const i_t num_fractional = fractional.size();
-    if (num_fractional == 0) return {-1, rounding_direction_t::NONE};
-
-    i_t num_initialized_down = 0;
-    i_t num_initialized_up   = 0;
-    f_t pseudo_cost_down_avg = 0;
-    f_t pseudo_cost_up_avg   = 0;
-
-    const i_t n = pc_sum_down_snapshot.size();
-    for (i_t j = 0; j < n; ++j) {
-      if (pc_num_down_snapshot[j] > 0) {
-        ++num_initialized_down;
-        if (std::isfinite(pc_sum_down_snapshot[j])) {
-          pseudo_cost_down_avg += pc_sum_down_snapshot[j] / pc_num_down_snapshot[j];
-        }
-      }
-      if (pc_num_up_snapshot[j] > 0) {
-        ++num_initialized_up;
-        if (std::isfinite(pc_sum_up_snapshot[j])) {
-          pseudo_cost_up_avg += pc_sum_up_snapshot[j] / pc_num_up_snapshot[j];
-        }
-      }
-    }
-    pseudo_cost_down_avg =
-      (num_initialized_down > 0) ? pseudo_cost_down_avg / num_initialized_down : 1.0;
-    pseudo_cost_up_avg = (num_initialized_up > 0) ? pseudo_cost_up_avg / num_initialized_up : 1.0;
-
-    i_t branch_var                 = fractional[0];
-    f_t max_score                  = std::numeric_limits<f_t>::lowest();
-    rounding_direction_t round_dir = rounding_direction_t::DOWN;
-    constexpr f_t eps              = 1e-6;
-
-    for (i_t j : fractional) {
-      f_t f_down = solution[j] - std::floor(solution[j]);
-      f_t f_up   = std::ceil(solution[j]) - solution[j];
-
-      f_t pc_down = pc_num_down_snapshot[j] != 0 ? pc_sum_down_snapshot[j] / pc_num_down_snapshot[j]
-                                                 : pseudo_cost_down_avg;
-      f_t pc_up   = pc_num_up_snapshot[j] != 0 ? pc_sum_up_snapshot[j] / pc_num_up_snapshot[j]
-                                               : pseudo_cost_up_avg;
-
-      f_t score_down = std::sqrt(f_up) * (1 + pc_up) / (1 + pc_down);
-      f_t score_up   = std::sqrt(f_down) * (1 + pc_down) / (1 + pc_up);
-
-      f_t score                = 0;
-      rounding_direction_t dir = rounding_direction_t::DOWN;
-
-      f_t root_val = (root_solution && j < static_cast<i_t>(root_solution->size()))
-                       ? (*root_solution)[j]
-                       : solution[j];
-
-      if (solution[j] < root_val - 0.4) {
-        score = score_down;
-        dir   = rounding_direction_t::DOWN;
-      } else if (solution[j] > root_val + 0.4) {
-        score = score_up;
-        dir   = rounding_direction_t::UP;
-      } else if (f_down < 0.3) {
-        score = score_down;
-        dir   = rounding_direction_t::DOWN;
-      } else if (f_down > 0.7) {
-        score = score_up;
-        dir   = rounding_direction_t::UP;
-      } else if (pc_down < pc_up + eps) {
-        score = score_down;
-        dir   = rounding_direction_t::DOWN;
-      } else {
-        score = score_up;
-        dir   = rounding_direction_t::UP;
-      }
-
-      if (score > max_score) {
-        max_score  = score;
-        branch_var = j;
-        round_dir  = dir;
-      }
-    }
-
-    return {branch_var, round_dir};
+    // Use root_solution if available, otherwise use solution as fallback
+    const std::vector<f_t>& root_sol = (root_solution != nullptr) ? *root_solution : solution;
+    return pseudocost_diving_from_arrays(pc_sum_down_snapshot.data(),
+                                         pc_sum_up_snapshot.data(),
+                                         pc_num_down_snapshot.data(),
+                                         pc_num_up_snapshot.data(),
+                                         (i_t)pc_sum_down_snapshot.size(),
+                                         fractional,
+                                         solution,
+                                         root_sol);
   }
 
   // Guided diving variable selection using incumbent snapshot
@@ -841,63 +654,14 @@ struct bsp_diving_worker_state_t {
       return variable_selection_from_snapshot(fractional, solution);
     }
 
-    const i_t num_fractional = fractional.size();
-    if (num_fractional == 0) return {-1, rounding_direction_t::NONE};
-
-    i_t num_initialized_down = 0;
-    i_t num_initialized_up   = 0;
-    f_t pseudo_cost_down_avg = 0;
-    f_t pseudo_cost_up_avg   = 0;
-
-    const i_t n = pc_sum_down_snapshot.size();
-    for (i_t j = 0; j < n; ++j) {
-      if (pc_num_down_snapshot[j] > 0) {
-        ++num_initialized_down;
-        if (std::isfinite(pc_sum_down_snapshot[j])) {
-          pseudo_cost_down_avg += pc_sum_down_snapshot[j] / pc_num_down_snapshot[j];
-        }
-      }
-      if (pc_num_up_snapshot[j] > 0) {
-        ++num_initialized_up;
-        if (std::isfinite(pc_sum_up_snapshot[j])) {
-          pseudo_cost_up_avg += pc_sum_up_snapshot[j] / pc_num_up_snapshot[j];
-        }
-      }
-    }
-    pseudo_cost_down_avg =
-      (num_initialized_down > 0) ? pseudo_cost_down_avg / num_initialized_down : 1.0;
-    pseudo_cost_up_avg = (num_initialized_up > 0) ? pseudo_cost_up_avg / num_initialized_up : 1.0;
-
-    i_t branch_var                 = fractional[0];
-    f_t max_score                  = std::numeric_limits<f_t>::lowest();
-    rounding_direction_t round_dir = rounding_direction_t::DOWN;
-    constexpr f_t eps              = 1e-6;
-
-    for (i_t j : fractional) {
-      f_t f_down    = solution[j] - std::floor(solution[j]);
-      f_t f_up      = std::ceil(solution[j]) - solution[j];
-      f_t down_dist = std::abs(incumbent_snapshot[j] - std::floor(solution[j]));
-      f_t up_dist   = std::abs(std::ceil(solution[j]) - incumbent_snapshot[j]);
-      rounding_direction_t dir =
-        down_dist < up_dist + eps ? rounding_direction_t::DOWN : rounding_direction_t::UP;
-
-      f_t pc_down = pc_num_down_snapshot[j] != 0 ? pc_sum_down_snapshot[j] / pc_num_down_snapshot[j]
-                                                 : pseudo_cost_down_avg;
-      f_t pc_up   = pc_num_up_snapshot[j] != 0 ? pc_sum_up_snapshot[j] / pc_num_up_snapshot[j]
-                                               : pseudo_cost_up_avg;
-
-      f_t score1 = dir == rounding_direction_t::DOWN ? 5 * pc_down * f_down : 5 * pc_up * f_up;
-      f_t score2 = dir == rounding_direction_t::DOWN ? pc_up * f_up : pc_down * f_down;
-      f_t score  = (score1 + score2) / 6;
-
-      if (score > max_score) {
-        max_score  = score;
-        branch_var = j;
-        round_dir  = dir;
-      }
-    }
-
-    return {branch_var, round_dir};
+    return guided_diving_from_arrays(pc_sum_down_snapshot.data(),
+                                     pc_sum_up_snapshot.data(),
+                                     pc_num_down_snapshot.data(),
+                                     pc_num_up_snapshot.data(),
+                                     (i_t)pc_sum_down_snapshot.size(),
+                                     fractional,
+                                     solution,
+                                     incumbent_snapshot);
   }
 };
 

@@ -222,37 +222,22 @@ void pseudo_costs_t<i_t, f_t>::initialized(i_t& num_initialized_down,
                                            f_t& pseudo_cost_down_avg,
                                            f_t& pseudo_cost_up_avg) const
 {
+  // Count initialized variables while computing averages
   num_initialized_down = 0;
   num_initialized_up   = 0;
-  pseudo_cost_down_avg = 0;
-  pseudo_cost_up_avg   = 0;
   const i_t n          = pseudo_cost_sum_down.size();
   for (i_t j = 0; j < n; j++) {
-    if (pseudo_cost_num_down[j] > 0) {
-      num_initialized_down++;
-      if (std::isfinite(pseudo_cost_sum_down[j])) {
-        pseudo_cost_down_avg += pseudo_cost_sum_down[j] / pseudo_cost_num_down[j];
-      }
-    }
+    if (pseudo_cost_num_down[j] > 0) { num_initialized_down++; }
+    if (pseudo_cost_num_up[j] > 0) { num_initialized_up++; }
+  }
 
-    if (pseudo_cost_num_up[j] > 0) {
-      num_initialized_up++;
-
-      if (std::isfinite(pseudo_cost_sum_up[j])) {
-        pseudo_cost_up_avg += pseudo_cost_sum_up[j] / pseudo_cost_num_up[j];
-      }
-    }
-  }
-  if (num_initialized_down > 0) {
-    pseudo_cost_down_avg /= num_initialized_down;
-  } else {
-    pseudo_cost_down_avg = 1.0;
-  }
-  if (num_initialized_up > 0) {
-    pseudo_cost_up_avg /= num_initialized_up;
-  } else {
-    pseudo_cost_up_avg = 1.0;
-  }
+  auto avgs            = compute_pseudo_cost_averages(pseudo_cost_sum_down.data(),
+                                           pseudo_cost_sum_up.data(),
+                                           pseudo_cost_num_down.data(),
+                                           pseudo_cost_num_up.data(),
+                                           n);
+  pseudo_cost_down_avg = avgs.down_avg;
+  pseudo_cost_up_avg   = avgs.up_avg;
 }
 
 template <typename i_t, typename f_t>
@@ -262,57 +247,34 @@ i_t pseudo_costs_t<i_t, f_t>::variable_selection(const std::vector<i_t>& fractio
 {
   std::lock_guard<omp_mutex_t> lock(mutex);
 
-  const i_t num_fractional = fractional.size();
-  std::vector<f_t> pseudo_cost_up(num_fractional);
-  std::vector<f_t> pseudo_cost_down(num_fractional);
-  std::vector<f_t> score(num_fractional);
+  const i_t n = pseudo_cost_sum_down.size();
 
-  i_t num_initialized_down;
-  i_t num_initialized_up;
-  f_t pseudo_cost_down_avg;
-  f_t pseudo_cost_up_avg;
-
-  initialized(num_initialized_down, num_initialized_up, pseudo_cost_down_avg, pseudo_cost_up_avg);
-
+  // Log averages for debugging
+  auto avgs    = compute_pseudo_cost_averages(pseudo_cost_sum_down.data(),
+                                           pseudo_cost_sum_up.data(),
+                                           pseudo_cost_num_down.data(),
+                                           pseudo_cost_num_up.data(),
+                                           n);
+  i_t num_down = 0, num_up = 0;
+  for (i_t j = 0; j < n; j++) {
+    if (pseudo_cost_num_down[j] > 0) num_down++;
+    if (pseudo_cost_num_up[j] > 0) num_up++;
+  }
   log.printf("PC: num initialized down %d up %d avg down %e up %e\n",
-             num_initialized_down,
-             num_initialized_up,
-             pseudo_cost_down_avg,
-             pseudo_cost_up_avg);
+             num_down,
+             num_up,
+             avgs.down_avg,
+             avgs.up_avg);
 
-  for (i_t k = 0; k < num_fractional; k++) {
-    const i_t j = fractional[k];
-    if (pseudo_cost_num_down[j] != 0) {
-      pseudo_cost_down[k] = pseudo_cost_sum_down[j] / pseudo_cost_num_down[j];
-    } else {
-      pseudo_cost_down[k] = pseudo_cost_down_avg;
-    }
+  i_t branch_var = variable_selection_from_pseudo_costs(pseudo_cost_sum_down.data(),
+                                                        pseudo_cost_sum_up.data(),
+                                                        pseudo_cost_num_down.data(),
+                                                        pseudo_cost_num_up.data(),
+                                                        n,
+                                                        fractional,
+                                                        solution);
 
-    if (pseudo_cost_num_up[j] != 0) {
-      pseudo_cost_up[k] = pseudo_cost_sum_up[j] / pseudo_cost_num_up[j];
-    } else {
-      pseudo_cost_up[k] = pseudo_cost_up_avg;
-    }
-    constexpr f_t eps = 1e-6;
-    const f_t f_down  = solution[j] - std::floor(solution[j]);
-    const f_t f_up    = std::ceil(solution[j]) - solution[j];
-    score[k] =
-      std::max(f_down * pseudo_cost_down[k], eps) * std::max(f_up * pseudo_cost_up[k], eps);
-  }
-
-  i_t branch_var = fractional[0];
-  f_t max_score  = -1;
-  i_t select     = -1;
-  for (i_t k = 0; k < num_fractional; k++) {
-    if (score[k] > max_score) {
-      max_score  = score[k];
-      branch_var = fractional[k];
-      select     = k;
-    }
-  }
-
-  log.printf(
-    "pc branching on %d. Value %e. Score %e\n", branch_var, solution[branch_var], score[select]);
+  log.printf("pc branching on %d. Value %e.\n", branch_var, solution[branch_var]);
 
   return branch_var;
 }
@@ -325,36 +287,25 @@ f_t pseudo_costs_t<i_t, f_t>::obj_estimate(const std::vector<i_t>& fractional,
 {
   std::lock_guard<omp_mutex_t> lock(mutex);
 
+  const i_t n              = pseudo_cost_sum_down.size();
   const i_t num_fractional = fractional.size();
   f_t estimate             = lower_bound;
 
-  i_t num_initialized_down;
-  i_t num_initialized_up;
-  f_t pseudo_cost_down_avg;
-  f_t pseudo_cost_up_avg;
-
-  initialized(num_initialized_down, num_initialized_up, pseudo_cost_down_avg, pseudo_cost_up_avg);
+  auto avgs = compute_pseudo_cost_averages(pseudo_cost_sum_down.data(),
+                                           pseudo_cost_sum_up.data(),
+                                           pseudo_cost_num_down.data(),
+                                           pseudo_cost_num_up.data(),
+                                           n);
 
   for (i_t k = 0; k < num_fractional; k++) {
-    const i_t j          = fractional[k];
-    f_t pseudo_cost_down = 0;
-    f_t pseudo_cost_up   = 0;
-
-    if (pseudo_cost_num_down[j] != 0) {
-      pseudo_cost_down = pseudo_cost_sum_down[j] / pseudo_cost_num_down[j];
-    } else {
-      pseudo_cost_down = pseudo_cost_down_avg;
-    }
-
-    if (pseudo_cost_num_up[j] != 0) {
-      pseudo_cost_up = pseudo_cost_sum_up[j] / pseudo_cost_num_up[j];
-    } else {
-      pseudo_cost_up = pseudo_cost_up_avg;
-    }
-    constexpr f_t eps = 1e-6;
-    const f_t f_down  = solution[j] - std::floor(solution[j]);
-    const f_t f_up    = std::ceil(solution[j]) - solution[j];
-    estimate += std::min(pseudo_cost_down * f_down, pseudo_cost_up * f_up);
+    const i_t j = fractional[k];
+    f_t pc_down = pseudo_cost_num_down[j] != 0 ? pseudo_cost_sum_down[j] / pseudo_cost_num_down[j]
+                                               : avgs.down_avg;
+    f_t pc_up =
+      pseudo_cost_num_up[j] != 0 ? pseudo_cost_sum_up[j] / pseudo_cost_num_up[j] : avgs.up_avg;
+    const f_t f_down = solution[j] - std::floor(solution[j]);
+    const f_t f_up   = std::ceil(solution[j]) - solution[j];
+    estimate += std::min(pc_down * f_down, pc_up * f_up);
   }
 
   log.printf("pseudocost estimate = %e\n", estimate);
