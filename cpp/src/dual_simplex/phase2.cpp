@@ -19,6 +19,7 @@
 
 #include <utilities/models/dualsimplex_predictor/header.h>
 #include <utilities/scope_guard.hpp>
+#include <utilities/timing_utils.hpp>
 #include <utilities/work_limit_timer.hpp>
 #include <utilities/work_unit_predictor.hpp>
 
@@ -26,6 +27,8 @@
 
 #include <raft/common/nvtx.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -326,28 +329,45 @@ void compute_reduced_cost_update(const lp_problem_t<i_t, f_t>& lp,
   const i_t m = lp.num_rows;
   const i_t n = lp.num_cols;
 
+  const f_t* __restrict__ delta_y_ptr   = delta_y.data();
+  const f_t* __restrict__ Ax            = lp.A.x.data();
+  const i_t* __restrict__ Ai            = lp.A.i.data();
+  const i_t* __restrict__ ptr_col_start = lp.A.col_start.data();
+  f_t* __restrict__ delta_z_ptr         = delta_z.data();
+
+  size_t nnzs_processed = 0;
+
   // delta_zB = sigma*ei
   for (i_t k = 0; k < m; k++) {
-    const i_t j = basic_list[k];
-    delta_z[j]  = 0;
+    const i_t j    = basic_list[k];
+    delta_z_ptr[j] = 0;
   }
-  delta_z[leaving_index] = direction;
+  delta_z_ptr[leaving_index] = direction;
   // delta_zN = -N'*delta_y
-  for (i_t k = 0; k < n - m; k++) {
+  const i_t num_nonbasic = n - m;
+  for (i_t k = 0; k < num_nonbasic; k++) {
     const i_t j = nonbasic_list[k];
     // z_j <- -A(:, j)'*delta_y
-    const i_t col_start = lp.A.col_start[j];
-    const i_t col_end   = lp.A.col_start[j + 1];
+    const i_t col_start = ptr_col_start[j];
+    const i_t col_end   = ptr_col_start[j + 1];
     f_t dot             = 0.0;
     for (i_t p = col_start; p < col_end; ++p) {
-      dot += lp.A.x[p] * delta_y[lp.A.i[p]];
+      dot += Ax[p] * delta_y_ptr[Ai[p]];
     }
-    delta_z[j] = -dot;
+    nnzs_processed += col_end - col_start;
+
+    delta_z_ptr[j] = -dot;
     if (dot != 0.0) {
       delta_z_indices.push_back(j);  // Note delta_z_indices has n elements reserved
       delta_z_mark[j] = 1;
     }
   }
+
+  lp.A.x.byte_loads += nnzs_processed * sizeof(f_t);
+  lp.A.i.byte_loads += nnzs_processed * sizeof(i_t);
+  delta_y.byte_loads += nnzs_processed * sizeof(f_t);
+  lp.A.col_start.byte_loads += 2 * num_nonbasic * sizeof(i_t);
+  delta_z.byte_stores += (m + 1 + num_nonbasic) * sizeof(f_t);
 }
 
 template <typename i_t, typename f_t>

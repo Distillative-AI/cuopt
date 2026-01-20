@@ -116,33 +116,33 @@ struct dual_simplex_features_t {
    */
   void log_features(const simplex_solver_settings_t<i_t, f_t>& settings) const
   {
-    CUOPT_LOG_DEBUG(
-      "DS_FEATURES: iter=%d m=%d n=%d nnz=%d density=%.6e avg_nnz_col=%.2f avg_nnz_row=%.2f "
-      "bounded=%d free=%d fixed=%d phase=%d refact_freq=%d num_refacts=%d num_updates=%d "
-      "sparse_dz=%d dense_dz=%d bound_flips=%d num_infeas=%d dy_nz_pct=%.2f "
-      "byte_loads=%zu byte_stores=%zu runtime=%.6f\n",
-      iteration,
-      num_rows,
-      num_cols,
-      num_nonzeros,
-      matrix_density,
-      avg_nnz_per_col,
-      avg_nnz_per_row,
-      num_bounded_vars,
-      num_free_vars,
-      num_fixed_vars,
-      phase,
-      refactor_frequency,
-      num_refactors,
-      num_basis_updates,
-      sparse_delta_z_count,
-      dense_delta_z_count,
-      total_bound_flips,
-      num_infeasibilities,
-      delta_y_nz_percentage,
-      byte_loads,
-      byte_stores,
-      interval_runtime);
+    // printf(
+    //   "DS_FEATURES: iter=%d m=%d n=%d nnz=%d density=%.6e avg_nnz_col=%.2f avg_nnz_row=%.2f "
+    //   "bounded=%d free=%d fixed=%d phase=%d refact_freq=%d num_refacts=%d num_updates=%d "
+    //   "sparse_dz=%d dense_dz=%d bound_flips=%d num_infeas=%d dy_nz_pct=%.2f "
+    //   "byte_loads=%zu byte_stores=%zu runtime=%.6f\n",
+    //   iteration,
+    //   num_rows,
+    //   num_cols,
+    //   num_nonzeros,
+    //   matrix_density,
+    //   avg_nnz_per_col,
+    //   avg_nnz_per_row,
+    //   num_bounded_vars,
+    //   num_free_vars,
+    //   num_fixed_vars,
+    //   phase,
+    //   refactor_frequency,
+    //   num_refactors,
+    //   num_basis_updates,
+    //   sparse_delta_z_count,
+    //   dense_delta_z_count,
+    //   total_bound_flips,
+    //   num_infeasibilities,
+    //   delta_y_nz_percentage,
+    //   byte_loads,
+    //   byte_stores,
+    //   interval_runtime);
   }
 
   /**
@@ -188,16 +188,16 @@ struct bounds_strengthening_features_t {
 
   void log_single(i_t m_val, i_t n_val, i_t nnz_val) const
   {
-    CUOPT_LOG_DEBUG(
-      "BOUNDS_STRENGTH_FEATURES: m=%d n=%d nnz=%d "
-      "iterations=%d bounds_changed=%d nnz_processed=%zu runtime=%.6f\n",
-      m_val,
-      n_val,
-      nnz_val,
-      num_iterations,
-      num_bounds_changed,
-      nnz_processed,
-      runtime);
+    // printf(
+    //   "BOUNDS_STRENGTH_FEATURES: m=%d n=%d nnz=%d "
+    //   "iterations=%d bounds_changed=%d nnz_processed=%zu runtime=%.6f\n",
+    //   m_val,
+    //   n_val,
+    //   nnz_val,
+    //   num_iterations,
+    //   num_bounds_changed,
+    //   nnz_processed,
+    //   runtime);
   }
 
   void reset()
