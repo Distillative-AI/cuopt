@@ -247,10 +247,10 @@ std::vector<bnb_worker_type_t> bnb_get_worker_types(diving_heuristics_settings_t
   std::vector<bnb_worker_type_t> types;
   types.reserve(bnb_num_worker_types);
   types.push_back(BEST_FIRST);
-  if (!settings.disable_pseudocost_diving) { types.push_back(PSEUDOCOST_DIVING); }
-  if (!settings.disable_line_search_diving) { types.push_back(LINE_SEARCH_DIVING); }
-  if (!settings.disable_guided_diving) { types.push_back(GUIDED_DIVING); }
-  if (!settings.disable_coefficient_diving) { types.push_back(COEFFICIENT_DIVING); }
+  if (settings.pseudocost_diving != 0) { types.push_back(PSEUDOCOST_DIVING); }
+  if (settings.line_search_diving != 0) { types.push_back(LINE_SEARCH_DIVING); }
+  if (settings.guided_diving != 0) { types.push_back(GUIDED_DIVING); }
+  if (settings.coefficient_diving != 0) { types.push_back(COEFFICIENT_DIVING); }
   return types;
 }
 
