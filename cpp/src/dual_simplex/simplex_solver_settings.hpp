@@ -37,6 +37,25 @@ struct diving_heuristics_settings_t {
 };
 
 template <typename i_t, typename f_t>
+struct reliability_branching_settings_t {
+  // For now, setting to 1, which correspond to pseudocost with strong branching
+  // initialization. Later, it can be set dynamically depending on the number
+  // of LP iterations in the strong branching and B&B.
+  // Set to 0 for disabling reliability branching
+  i_t reliable_threshold = 1;
+
+  // Lower bound for the maximum number of LP iterations for a single trial branching
+  i_t lower_max_lp_iter = 10;
+
+  // Upper bound for the maximum number of LP iterations for a single trial branching
+  i_t upper_max_lp_iter = 500;
+
+  // Priority of the tasks created when running the trial branching in parallel.
+  // Set to 1 to have the same priority as the other tasks.
+  i_t task_priority = 5;
+};
+
+template <typename i_t, typename f_t>
 struct simplex_solver_settings_t {
  public:
   simplex_solver_settings_t()
@@ -157,6 +176,8 @@ struct simplex_solver_settings_t {
   i_t num_bfs_workers;             // number of threads dedicated to the best-first search
 
   diving_heuristics_settings_t<i_t, f_t> diving_settings;  // Settings for the diving heuristics
+  reliability_branching_settings_t<i_t, f_t>
+    reliability_branching_settings;  // Settings for reliability branching
 
   i_t inside_mip;  // 0 if outside MIP, 1 if inside MIP at root node, 2 if inside MIP at leaf node
   std::function<void(std::vector<f_t>&, f_t)> solution_callback;

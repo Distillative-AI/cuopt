@@ -156,7 +156,9 @@ f_t trial_branching(const lp_problem_t<i_t, f_t>& original_lp,
   simplex_solver_settings_t<i_t, f_t> child_settings = settings;
   child_settings.set_log(false);
   f_t lp_start_time              = tic();
-  child_settings.iteration_limit = std::clamp(bnb_lp_iter_per_node, 10, 100);
+  i_t lp_iter_upper              = settings.reliability_branching_settings.upper_max_lp_iter;
+  i_t lp_iter_lower              = settings.reliability_branching_settings.lower_max_lp_iter;
+  child_settings.iteration_limit = std::clamp(bnb_lp_iter_per_node, lp_iter_lower, lp_iter_upper);
   child_settings.cut_off         = upper_bound + settings.dual_tol;
   child_settings.inside_mip      = 2;
   child_settings.scale_columns   = false;
@@ -428,7 +430,8 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
   // const i_t min_v        = 1;
   // i_t reliable_threshold = std::clamp((1 - gamma) * min_v + gamma * max_v, min_v, max_v);
   // reliable_threshold     = total_lp_iter < max_iter ? reliable_threshold : 0;
-  i_t reliable_threshold = 1;
+  i_t reliable_threshold = settings.reliability_branching_settings.reliable_threshold;
+  int task_priority      = settings.reliability_branching_settings.task_priority;
 
   std::vector<i_t> pending(fractional.size(), -1);
   std::vector<i_t> next(fractional.size(), -1);
@@ -462,7 +465,7 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
   }
 
   if (num_pending != 0) {
-    settings.log.debug(
+    log.printf(
       "RB LP iterations = %d, B&B LP iterations = %d reliable_threshold = %d, num strong branches "
       "= %d\n",
       total_lp_iter.load(),
@@ -472,7 +475,7 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
   }
 
   while (num_pending != 0) {
-#pragma omp taskloop priority(20) grainsize(2) if (num_pending > 2)
+#pragma omp taskloop if (num_pending > 1) priority(task_priority)
     for (i_t i = 0; i < num_pending; ++i) {
       const i_t j    = pending[i];
       bool is_locked = pseudo_cost_mutex[j].try_lock();
