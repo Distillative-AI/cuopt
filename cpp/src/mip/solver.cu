@@ -179,6 +179,7 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
     i_t num_diving_threads                       = std::max(1, num_threads - num_bfs_threads);
     branch_and_bound_settings.num_bfs_threads    = num_bfs_threads;
     branch_and_bound_settings.num_diving_threads = num_diving_threads;
+    branch_and_bound_settings.mip_batch_pdlp_strong_branching = context.settings.mip_batch_pdlp_strong_branching;
 
     // Set the branch and bound -> primal heuristics callback
     branch_and_bound_settings.solution_callback =
