@@ -195,7 +195,7 @@ bool diversity_manager_t<i_t, f_t>::run_presolve(f_t time_limit)
       time_for_probing_cache = std::numeric_limits<f_t>::infinity();
     }
     timer_t probing_timer{time_for_probing_cache};
-    // This function computes probing cache, finds singletons, substitutions and changes the problem
+    // this function computes probing cache, finds singletons, substitutions and changes the problem
     bool problem_is_infeasible =
       compute_probing_cache(ls.constraint_prop.bounds_update, *problem_ptr, probing_timer);
     if (problem_is_infeasible) { return false; }
