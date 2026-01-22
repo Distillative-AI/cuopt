@@ -178,7 +178,7 @@ void local_search_t<i_t, f_t>::start_cpufj_deterministic(
   producer_sync.register_producer(&deterministic_cpu_fj.fj_cpu->work_units_elapsed);
 
   // Set up callback to send solutions to B&B with work unit timestamps
-  // deterministic_cpu_fj.fj_cpu->improvement_callback =
+  // deterministic_cpu_fj.fj_cpu->improvement_callback =1
   //   [&bb](f_t obj, const std::vector<f_t>& h_vec, double work_units) {
   //     bb.set_new_solution_deterministic(h_vec, work_units);
   //   };
