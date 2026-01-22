@@ -738,13 +738,45 @@ optimization_problem_solution_t<i_t, f_t> run_batch_pdlp(
   optimization_problem_t<i_t, f_t>& problem,
   pdlp_solver_settings_t<i_t, f_t> const& settings)
 {
+  // Hyper parameter than can be changed, I have put what I believe to be the best
+  bool primal_dual_init = true;
+  bool primal_weight_init = true;
+  bool use_optimal_batch_size = false;
+  // Shouldn't we work on the unpresolved and/or unscaled problem for PDLP?
+  // Shouldn't we put an iteration limit? If yes what should we do with the partial solutions?
+
+  rmm::cuda_stream_view stream = problem.get_handle_ptr()->get_stream();
+
+  rmm::device_uvector<double> initial_primal(0, stream);
+  rmm::device_uvector<double> initial_dual(0, stream);
+  double initial_step_size = std::numeric_limits<f_t>::signaling_NaN();
+  double initial_primal_weight = std::numeric_limits<f_t>::signaling_NaN();
+
   cuopt_assert(settings.new_bounds.size() > 0, "Batch size should be greater than 0");
   const int max_batch_size = settings.new_bounds.size();
-  int optimal_batch_size = detail::optimal_batch_size_handler(problem, max_batch_size);
+  int optimal_batch_size = use_optimal_batch_size ? detail::optimal_batch_size_handler(problem, max_batch_size) : max_batch_size;
   cuopt_assert(optimal_batch_size != 0 && optimal_batch_size <= max_batch_size, "Optimal batch size should be between 1 and max batch size");
   using f_t2 = typename type_2<f_t>::type;
 
-  rmm::cuda_stream_view stream = problem.get_handle_ptr()->get_stream();
+  // If need warm start, solve the LP alone
+  if (primal_dual_init || primal_weight_init) {
+    pdlp_solver_settings_t<i_t, f_t> warm_start_settings = settings;
+    warm_start_settings.new_bounds.clear();
+    warm_start_settings.method = cuopt::linear_programming::method_t::PDLP;
+    warm_start_settings.presolve = false;
+    warm_start_settings.pdlp_solver_mode = pdlp_solver_mode_t::Stable3;
+    warm_start_settings.detect_infeasibility = false;
+    optimization_problem_solution_t<i_t, f_t> original_solution = solve_lp(problem, warm_start_settings);
+    if (primal_dual_init) {
+      initial_primal = rmm::device_uvector<double>(original_solution.get_primal_solution(), original_solution.get_primal_solution().stream());
+      initial_dual = rmm::device_uvector<double>(original_solution.get_dual_solution(), original_solution.get_dual_solution().stream());
+      initial_step_size = original_solution.get_pdlp_warm_start_data().initial_step_size_;
+    }
+    if (primal_weight_init) {
+      initial_primal_weight = original_solution.get_pdlp_warm_start_data().initial_primal_weight_;
+    }
+  }
+
 
   rmm::device_uvector<f_t> full_primal_solution(problem.get_n_variables() * max_batch_size, stream);
   rmm::device_uvector<f_t> full_dual_solution(problem.get_n_constraints() * max_batch_size, stream);
@@ -758,6 +790,17 @@ optimization_problem_solution_t<i_t, f_t> run_batch_pdlp(
   batch_settings.method = cuopt::linear_programming::method_t::PDLP;
   batch_settings.presolve = false;
   batch_settings.pdlp_solver_mode = pdlp_solver_mode_t::Stable3;
+  batch_settings.detect_infeasibility = false;
+  if (primal_dual_init)
+  {
+    batch_settings.set_initial_primal_solution(initial_primal.data(), initial_primal.size(), initial_primal.stream());
+    batch_settings.set_initial_dual_solution(initial_dual.data(), initial_dual.size(), initial_dual.stream());
+    batch_settings.set_initial_step_size(initial_step_size);
+  }
+  if (primal_weight_init)
+  {
+    batch_settings.set_initial_primal_weight(initial_primal_weight);
+  }
 
   for (int i = 0; i < max_batch_size; i += optimal_batch_size)
   {
