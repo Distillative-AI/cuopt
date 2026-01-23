@@ -494,99 +494,81 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
     size_t start = (double)task_id * num_sb_vars / num_tasks;
     size_t end   = (double)(task_id + 1) * num_sb_vars / num_tasks;
 
-    std::vector<i_t> conflict;
-
-    while (end > start) {
-      for (i_t i = start; i < end; ++i) {
-        if (unchanged > max_lookahead) { break; }
-
-        const i_t j    = unreliable_list[i];
-        bool is_locked = pseudo_cost_mutex[j].try_lock();
-
-        if (!is_locked) {
-          conflict.push_back(j);
-          continue;
-        }
-
-        if (pseudo_cost_num_down[j] < reliable_threshold) {
-          // Do trial branching on the down branch
-          f_t obj = trial_branching(worker_data->leaf_problem,
-                                    settings,
-                                    var_types,
-                                    node_ptr->vstatus,
-                                    worker_data->leaf_edge_norms,
-                                    worker_data->basis_factors,
-                                    worker_data->basic_list,
-                                    worker_data->nonbasic_list,
-                                    j,
-                                    worker_data->leaf_problem.lower[j],
-                                    std::floor(solution[j]),
-                                    upper_bound,
-                                    bnb_lp_iter_per_node,
-                                    sb_total_lp_iter);
-          if (!std::isnan(obj)) {
-            f_t change_in_obj = obj - node_ptr->lower_bound;
-            f_t change_in_x   = solution[j] - std::floor(solution[j]);
-            pseudo_cost_sum_down[j] += change_in_obj / change_in_x;
-            pseudo_cost_num_down[j]++;
-          }
-        }
-
-        if (pseudo_cost_num_up[j] < reliable_threshold) {
-          f_t obj = trial_branching(worker_data->leaf_problem,
-                                    settings,
-                                    var_types,
-                                    node_ptr->vstatus,
-                                    worker_data->leaf_edge_norms,
-                                    worker_data->basis_factors,
-                                    worker_data->basic_list,
-                                    worker_data->nonbasic_list,
-                                    j,
-                                    std::ceil(solution[j]),
-                                    worker_data->leaf_problem.upper[j],
-                                    upper_bound,
-                                    bnb_lp_iter_per_node,
-                                    sb_total_lp_iter);
-
-          if (!std::isnan(obj)) {
-            f_t change_in_obj = obj - node_ptr->lower_bound;
-            f_t change_in_x   = std::ceil(solution[j]) - solution[j];
-            pseudo_cost_sum_up[j] += change_in_obj / change_in_x;
-            pseudo_cost_num_up[j]++;
-          }
-        }
-
-        f_t pc_up   = pseudo_cost_num_up[j] > 0 ? pseudo_cost_sum_up[j] / pseudo_cost_num_up[j]
-                                                : pseudo_cost_up_avg;
-        f_t pc_down = pseudo_cost_sum_down[j] > 0
-                        ? pseudo_cost_sum_down[j] / pseudo_cost_num_down[j]
-                        : pseudo_cost_down_avg;
-
-        pseudo_cost_mutex[j].unlock();
-
-        constexpr f_t eps = 1e-6;
-        const f_t f_down  = solution[j] - std::floor(solution[j]);
-        const f_t f_up    = std::ceil(solution[j]) - solution[j];
-        f_t score         = std::max(f_down * pc_down, eps) * std::max(f_up * pc_up, eps);
-
-        score_mutex.lock();
-        if (score > max_score) {
-          max_score  = score;
-          branch_var = j;
-          unchanged  = 0;
-        } else {
-          unchanged++;
-        }
-        score_mutex.unlock();
-      }
-
+    for (i_t i = start; i < end; ++i) {
       if (unchanged > max_lookahead) { break; }
-      if (!conflict.empty()) {
-        std::copy(conflict.begin(), conflict.end(), unreliable_list.begin() + start);
+
+      const i_t j = unreliable_list[i];
+      pseudo_cost_mutex[j].lock();
+
+      if (pseudo_cost_num_down[j] < reliable_threshold) {
+        // Do trial branching on the down branch
+        f_t obj = trial_branching(worker_data->leaf_problem,
+                                  settings,
+                                  var_types,
+                                  node_ptr->vstatus,
+                                  worker_data->leaf_edge_norms,
+                                  worker_data->basis_factors,
+                                  worker_data->basic_list,
+                                  worker_data->nonbasic_list,
+                                  j,
+                                  worker_data->leaf_problem.lower[j],
+                                  std::floor(solution[j]),
+                                  upper_bound,
+                                  bnb_lp_iter_per_node,
+                                  sb_total_lp_iter);
+        if (!std::isnan(obj)) {
+          f_t change_in_obj = obj - node_ptr->lower_bound;
+          f_t change_in_x   = solution[j] - std::floor(solution[j]);
+          pseudo_cost_sum_down[j] += change_in_obj / change_in_x;
+          pseudo_cost_num_down[j]++;
+        }
       }
 
-      end = start + conflict.size();
-      conflict.clear();
+      if (pseudo_cost_num_up[j] < reliable_threshold) {
+        f_t obj = trial_branching(worker_data->leaf_problem,
+                                  settings,
+                                  var_types,
+                                  node_ptr->vstatus,
+                                  worker_data->leaf_edge_norms,
+                                  worker_data->basis_factors,
+                                  worker_data->basic_list,
+                                  worker_data->nonbasic_list,
+                                  j,
+                                  std::ceil(solution[j]),
+                                  worker_data->leaf_problem.upper[j],
+                                  upper_bound,
+                                  bnb_lp_iter_per_node,
+                                  sb_total_lp_iter);
+
+        if (!std::isnan(obj)) {
+          f_t change_in_obj = obj - node_ptr->lower_bound;
+          f_t change_in_x   = std::ceil(solution[j]) - solution[j];
+          pseudo_cost_sum_up[j] += change_in_obj / change_in_x;
+          pseudo_cost_num_up[j]++;
+        }
+      }
+
+      f_t pc_up   = pseudo_cost_num_up[j] > 0 ? pseudo_cost_sum_up[j] / pseudo_cost_num_up[j]
+                                              : pseudo_cost_up_avg;
+      f_t pc_down = pseudo_cost_sum_down[j] > 0 ? pseudo_cost_sum_down[j] / pseudo_cost_num_down[j]
+                                                : pseudo_cost_down_avg;
+
+      pseudo_cost_mutex[j].unlock();
+
+      constexpr f_t eps = 1e-6;
+      const f_t f_down  = solution[j] - std::floor(solution[j]);
+      const f_t f_up    = std::ceil(solution[j]) - solution[j];
+      f_t score         = std::max(f_down * pc_down, eps) * std::max(f_up * pc_up, eps);
+
+      score_mutex.lock();
+      if (score > max_score) {
+        max_score  = score;
+        branch_var = j;
+        unchanged  = 0;
+      } else {
+        unchanged++;
+      }
+      score_mutex.unlock();
     }
   }
 

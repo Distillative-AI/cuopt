@@ -579,7 +579,7 @@ branch_variable_t<i_t> branch_and_bound_t<i_t, f_t>::variable_selection(
 
       if (settings_.reliability_branching_settings.enable) {
         simplex_solver_settings_t<i_t, f_t> rb_settings      = settings_;
-        rb_settings.reliability_branching_settings.num_tasks = worker_pool_.num_idle_workers();
+        rb_settings.reliability_branching_settings.num_tasks = 2 * worker_pool_.num_idle_workers();
 
         branch_var = pc_.reliable_variable_selection(node_ptr,
                                                      fractional,
