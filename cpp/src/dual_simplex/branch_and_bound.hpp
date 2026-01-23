@@ -70,9 +70,6 @@ struct bnb_stats_t {
 template <typename i_t, typename f_t>
 class branch_and_bound_t {
  public:
-  // Specify which solver was used for solving the root LP relaxation
-  enum class root_solver_type_t { NONE = 0, CROSSOVER = 1, DUAL_SIMPLEX = 2 };
-
   branch_and_bound_t(const user_problem_t<i_t, f_t>& user_problem,
                      const simplex_solver_settings_t<i_t, f_t>& solver_settings);
 
@@ -85,15 +82,9 @@ class branch_and_bound_t {
                                     const std::vector<f_t>& reduced_costs,
                                     f_t objective,
                                     f_t user_objective,
-                                    i_t iterations,
-                                    f_t solve_time)
+                                    i_t iterations)
   {
-    if (root_solver_type_ == root_solver_type_t::NONE) {
-      settings_.log.printf(
-        "\nRoot relaxation solution found in %d iterations and %.2fs by PDLP/Barrier\n",
-        iterations,
-        solve_time);
-      settings_.log.printf("Root relaxation objective = %+.8e\n", user_objective);
+    if (!is_root_solution_set) {
       root_crossover_soln_.x              = primal;
       root_crossover_soln_.y              = dual;
       root_crossover_soln_.z              = reduced_costs;
@@ -173,7 +164,7 @@ class branch_and_bound_t {
   std::atomic<bool> root_crossover_solution_set_{false};
   bool enable_concurrent_lp_root_solve_{false};
   std::atomic<int> root_concurrent_halt_{0};
-  std::atomic<root_solver_type_t> root_solver_type_{root_solver_type_t::NONE};
+  bool is_root_solution_set{false};
 
   // Pseudocosts
   pseudo_costs_t<i_t, f_t> pc_;

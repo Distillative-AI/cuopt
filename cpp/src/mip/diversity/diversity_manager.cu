@@ -438,10 +438,9 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
       auto user_obj   = lp_result.get_objective_value();
       auto solver_obj = problem_ptr->get_solver_obj_from_user_obj(user_obj);
       auto iterations = lp_result.get_additional_termination_information().number_of_steps_taken;
-      auto solve_time = lp_result.get_additional_termination_information().solve_time;
       // Set for the B&B (param4 expects solver space, param5 expects user space)
       problem_ptr->set_root_relaxation_solution_callback(
-        host_primal, host_dual, host_reduced_costs, solver_obj, user_obj, iterations, solve_time);
+        host_primal, host_dual, host_reduced_costs, solver_obj, user_obj, iterations);
     }
 
     // in case the pdlp returned var boudns that are out of bounds
