@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -451,7 +451,7 @@ void pdlp_initial_scaling_strategy_t<i_t, f_t>::scale_problem()
                                   op_problem_scaled_.variable_bounds.data(),
                                   op_problem_scaled_.variable_bounds.size(),
                                   divide_check_zero<f_t, f_t2>(),
-                                  stream_view_);
+                                  stream_view_.value());
 
   if (pdhg_solver_ptr_ && pdhg_solver_ptr_->get_new_bounds_idx().size() != 0) {
     cub::DeviceTransform::Transform(
@@ -507,7 +507,7 @@ void pdlp_initial_scaling_strategy_t<i_t, f_t>::scale_problem()
         return {constraint_lower_bound * *bound_rescaling,
                 constraint_upper_bound * *bound_rescaling};
       },
-      stream_view_);
+      stream_view_.value());
 
   cub::DeviceTransform::Transform(op_problem_scaled_.variable_bounds.data(),
                                   op_problem_scaled_.variable_bounds.data(),
@@ -542,7 +542,7 @@ void pdlp_initial_scaling_strategy_t<i_t, f_t>::scale_problem()
         -> f_t {
         return  objective_coefficient * *objective_rescaling;
       },
-      stream_view_);
+      stream_view_.value());
   }
 
 #ifdef CUPDLP_DEBUG_MODE

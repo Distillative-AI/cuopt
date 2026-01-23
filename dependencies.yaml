@@ -7,7 +7,7 @@ files:
   all:
     output: conda
     matrix:
-      cuda: ["12.9", "13.0"]
+      cuda: ["12.9", "13.1"]
       arch: [x86_64, aarch64]
     includes:
       - build_common
@@ -29,11 +29,13 @@ files:
       - test_python_common
       - test_python_cuopt
       - test_python_cuopt_server
-      - depends_on_rmm
-      - depends_on_cupy
       - depends_on_cudf
+      - depends_on_cupy
+      - depends_on_libraft_headers
+      - depends_on_librmm
       - depends_on_pylibraft
       - depends_on_rapids_logger
+      - depends_on_rmm
       - rapids_build_backend
   test_cpp:
     output: none
@@ -297,8 +299,6 @@ dependencies:
         packages:
           - libboost-devel
           - cpp-argparse
-          - librmm==26.2.*,>=0.0.0a0
-          - libraft-headers==26.2.*,>=0.0.0a0
           - tbb-devel
           - zlib
           - bzip2
@@ -311,7 +311,7 @@ dependencies:
     common:
       - output_types: [conda]
         packages:
-          - libcuopt-tests==26.2.*,>=0.0.0a0
+          - libcuopt-tests==26.4.*,>=0.0.0a0
   build_wheels:
     common:
       - output_types: [requirements, pyproject]
@@ -348,8 +348,8 @@ dependencies:
         packages:
           - numba-cuda>=0.22.1,<0.23.0
           - numba>=0.60.0
-          - rapids-dask-dependency==26.2.*,>=0.0.0a0
           - &pandas pandas>=2.0
+          - &pyyaml pyyaml>=6.0.0
       - output_types: requirements
         packages:
           # pip recognizes the index as a global option for the requirements.txt file
@@ -374,7 +374,7 @@ dependencies:
           - &jsonref jsonref==1.1.0
           - &msgpack_numpy msgpack-numpy==0.4.8
           - pexpect
-          - requests
+          - &requests requests
       - output_types: [requirements, pyproject]
         packages:
           - &msgpack msgpack==1.1.0
@@ -390,23 +390,22 @@ dependencies:
           - *jsonref
           - *msgpack_numpy
           - *pandas
+          - psutil>=6.0.0
           - uvicorn==0.34.*
       - output_types: conda
         packages:
           - *msgpack_python
           - pip
-          - psutil>=6.0.0
       - output_types: [requirements, pyproject]
         packages:
           - *msgpack
-          - psutil>=6.0.0
 
   run_cuopt_sh_client:
     common:
       - output_types: [conda, requirements, pyproject]
         packages:
           - *msgpack_numpy
-          - requests
+          - *requests
       - output_types: conda
         packages:
           - *msgpack_python
@@ -418,7 +417,7 @@ dependencies:
     common:
       - output_types: conda
         packages:
-          - &libcuopt_unsuffixed libcuopt==26.2.*,>=0.0.0a0
+          - &libcuopt_unsuffixed libcuopt==26.4.*,>=0.0.0a0
       - output_types: requirements
         packages:
           # pip recognizes the index as a global option for the requirements.txt file
@@ -431,18 +430,18 @@ dependencies:
               cuda: "12.*"
               cuda_suffixed: "true"
             packages:
-              - libcuopt-cu12==26.2.*,>=0.0.0a0
+              - libcuopt-cu12==26.4.*,>=0.0.0a0
           - matrix:
               cuda: "13.*"
               cuda_suffixed: "true"
             packages:
-              - libcuopt-cu13==26.2.*,>=0.0.0a0
+              - libcuopt-cu13==26.4.*,>=0.0.0a0
           - {matrix: null, packages: [*libcuopt_unsuffixed]}
   depends_on_cuopt:
     common:
       - output_types: conda
         packages:
-          - &cuopt_unsuffixed cuopt==26.2.*,>=0.0.0a0
+          - &cuopt_unsuffixed cuopt==26.4.*,>=0.0.0a0
       - output_types: requirements
         packages:
           # pip recognizes the index as a global option for the requirements.txt file
@@ -455,18 +454,18 @@ dependencies:
               cuda: "12.*"
               cuda_suffixed: "true"
             packages:
-              - cuopt-cu12==26.2.*,>=0.0.0a0
+              - cuopt-cu12==26.4.*,>=0.0.0a0
           - matrix:
               cuda: "13.*"
               cuda_suffixed: "true"
             packages:
-              - cuopt-cu13==26.2.*,>=0.0.0a0
+              - cuopt-cu13==26.4.*,>=0.0.0a0
           - {matrix: null, packages: [*cuopt_unsuffixed]}
   depends_on_cuopt_server:
     common:
       - output_types: conda
         packages:
-          - &cuopt_server_unsuffixed cuopt-server==26.2.*,>=0.0.0a0
+          - &cuopt_server_unsuffixed cuopt-server==26.4.*,>=0.0.0a0
       - output_types: requirements
         packages:
           # pip recognizes the index as a global option for the requirements.txt file
@@ -479,18 +478,18 @@ dependencies:
               cuda: "12.*"
               cuda_suffixed: "true"
             packages:
-              - cuopt-server-cu12==26.2.*,>=0.0.0a0
+              - cuopt-server-cu12==26.4.*,>=0.0.0a0
           - matrix:
               cuda: "13.*"
               cuda_suffixed: "true"
             packages:
-              - cuopt-server-cu13==26.2.*,>=0.0.0a0
+              - cuopt-server-cu13==26.4.*,>=0.0.0a0
           - {matrix: null, packages: [*cuopt_server_unsuffixed]}
   depends_on_cuopt_sh_client:
     common:
       - output_types: [conda, requirements, pyproject]
         packages:
-          - &cuopt_sh_client_unsuffixed cuopt-sh-client==26.2.*,>=0.0.0a0
+          - &cuopt_sh_client_unsuffixed cuopt-sh-client==26.4.*,>=0.0.0a0
       - output_types: requirements
         packages:
           # pip recognizes the index as a global option for the requirements.txt file
@@ -500,7 +499,7 @@ dependencies:
     common:
       - output_types: [requirements, pyproject, conda]
         packages:
-          - cuopt-mps-parser==26.2.*,>=0.0.0a0
+          - cuopt-mps-parser==26.4.*,>=0.0.0a0
       - output_types: requirements
         packages:
           # pip recognizes the index as a global option for the requirements.txt file
@@ -510,12 +509,12 @@ dependencies:
     common:
       - output_types: conda
         packages:
-          - libraft-headers==26.2.*,>=0.0.0a0
+          - libraft-headers==26.4.*,>=0.0.0a0
   depends_on_librmm:
     common:
       - output_types: conda
         packages:
-          - &librmm_unsuffixed librmm==26.2.*,>=0.0.0a0
+          - &librmm_unsuffixed librmm==26.4.*,>=0.0.0a0
       - output_types: requirements
         packages:
           # pip recognizes the index as a global option for the requirements.txt file
@@ -528,12 +527,12 @@ dependencies:
               cuda: "12.*"
               cuda_suffixed: "true"
             packages:
-              - librmm-cu12==26.2.*,>=0.0.0a0
+              - librmm-cu12==26.4.*,>=0.0.0a0
           - matrix:
               cuda: "13.*"
               cuda_suffixed: "true"
             packages:
-              - librmm-cu13==26.2.*,>=0.0.0a0
+              - librmm-cu13==26.4.*,>=0.0.0a0
           - {matrix: null, packages: [*librmm_unsuffixed]}
   depends_on_cupy:
     common:
@@ -568,7 +567,7 @@ dependencies:
     common:
       - output_types: conda
         packages:
-          - &rmm_unsuffixed rmm==26.2.*,>=0.0.0a0
+          - &rmm_unsuffixed rmm==26.4.*,>=0.0.0a0
       - output_types: requirements
         packages:
           # pip recognizes the index as a global option for the requirements.txt file
@@ -581,12 +580,12 @@ dependencies:
               cuda: "12.*"
               cuda_suffixed: "true"
             packages:
-              - rmm-cu12==26.2.*,>=0.0.0a0
+              - rmm-cu12==26.4.*,>=0.0.0a0
           - matrix:
               cuda: "13.*"
               cuda_suffixed: "true"
             packages:
-              - rmm-cu13==26.2.*,>=0.0.0a0
+              - rmm-cu13==26.4.*,>=0.0.0a0
           - matrix:
             packages:
               - *rmm_unsuffixed
@@ -595,7 +594,7 @@ dependencies:
     common:
       - output_types: conda
         packages:
-          - &cudf_unsuffixed cudf==26.2.*,>=0.0.0a0
+          - &cudf_unsuffixed cudf==26.4.*,>=0.0.0a0
       - output_types: requirements
         packages:
           - --extra-index-url=https://pypi.nvidia.com
@@ -607,12 +606,12 @@ dependencies:
               cuda: "12.*"
               cuda_suffixed: "true"
             packages:
-              - cudf-cu12==26.2.*,>=0.0.0a0
+              - cudf-cu12==26.4.*,>=0.0.0a0
           - matrix:
               cuda: "13.*"
               cuda_suffixed: "true"
             packages:
-              - cudf-cu13==26.2.*,>=0.0.0a0
+              - cudf-cu13==26.4.*,>=0.0.0a0
           - matrix:
             packages:
               - *cudf_unsuffixed
@@ -621,7 +620,7 @@ dependencies:
     common:
       - output_types: conda
         packages:
-          - &pylibraft_unsuffixed pylibraft==26.2.*,>=0.0.0a0
+          - &pylibraft_unsuffixed pylibraft==26.4.*,>=0.0.0a0
       - output_types: requirements
         packages:
           - --extra-index-url=https://pypi.nvidia.com
@@ -633,12 +632,12 @@ dependencies:
               cuda: "12.*"
               cuda_suffixed: "true"
             packages:
-              - pylibraft-cu12==26.2.*,>=0.0.0a0
+              - pylibraft-cu12==26.4.*,>=0.0.0a0
           - matrix:
               cuda: "13.*"
               cuda_suffixed: "true"
             packages:
-              - pylibraft-cu13==26.2.*,>=0.0.0a0
+              - pylibraft-cu13==26.4.*,>=0.0.0a0
           - matrix:
             packages:
               - *pylibraft_unsuffixed
@@ -674,6 +673,10 @@ dependencies:
               cuda: "13.0"
             packages:
               - cuda-version=13.0
+          - matrix:
+              cuda: "13.1"
+            packages:
+              - cuda-version=13.1
   cuda:
     common:
       - output_types: [conda]
@@ -732,7 +735,7 @@ dependencies:
       - output_types: [conda]
         packages:
           - *doxygen
-          - ipython
+          - &ipython ipython
           - *jsonref
           - make
           - *msgpack_python
@@ -757,7 +760,7 @@ dependencies:
     common:
       - output_types: [conda, requirements]
         packages:
-          - ipython
+          - *ipython
           - notebook
       - output_types: [conda]
         packages:
@@ -766,11 +769,11 @@ dependencies:
           - *msgpack_python
           - *numpy
           - pip:
-              - veroviz
+              - &veroviz veroviz
       - output_types: [requirements]
         packages:
           - *numpy
-          - veroviz
+          - *veroviz
   py_version:
     specific:
       - output_types: conda

@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -1605,13 +1605,13 @@ void pdlp_solver_t<i_t, f_t>::compute_fixed_error(std::vector<int>& has_restarte
                                   pdhg_solver_.get_saddle_point_state().get_delta_primal().data(),
                                   pdhg_solver_.get_primal_solution().size(),
                                   cuda::std::minus<f_t>{},
-                                  stream_view_);
+                                  stream_view_.value());
   cub::DeviceTransform::Transform(cuda::std::make_tuple(pdhg_solver_.get_reflected_dual().data(),
                                                         pdhg_solver_.get_dual_solution().data()),
                                   pdhg_solver_.get_saddle_point_state().get_delta_dual().data(),
                                   pdhg_solver_.get_dual_solution().size(),
                                   cuda::std::minus<f_t>{},
-                                  stream_view_);
+                                  stream_view_.value());
 
   auto& cusparse_view = pdhg_solver_.get_cusparse_view();
   // Sync to make sure all previous cuSparse operations are finished before setting the potential_next_dual_solution
@@ -1943,7 +1943,7 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
       pdhg_solver_.get_primal_solution().data(),
       pdhg_solver_.get_primal_solution().size(),
       clamp<f_t, f_t2>(),
-      stream_view_);
+      stream_view_.value());
 
     pdhg_solver_.refine_initial_primal_projection();
 
@@ -1955,7 +1955,7 @@ optimization_problem_solution_t<i_t, f_t> pdlp_solver_t<i_t, f_t>::run_solver(co
         unscaled_primal_avg_solution_.data(),
         primal_size_h_,
         clamp<f_t, f_t2>(),
-        stream_view_);
+        stream_view_.value());
     }
   }
 
@@ -2295,7 +2295,7 @@ void pdlp_solver_t<i_t, f_t>::halpern_update()
                             (f_t(1.0) - reflection_coefficient) * current_primal;
       return weight * reflected + (f_t(1.0) - weight) * initial_primal;
     },
-    stream_view_);
+    stream_view_.value());
 
   #ifdef CUPDLP_DEBUG_MODE
   print("pdhg_solver_.get_reflected_dual()", pdhg_solver_.get_reflected_dual());
@@ -2317,7 +2317,7 @@ void pdlp_solver_t<i_t, f_t>::halpern_update()
                             (f_t(1.0) - reflection_coefficient) * current_dual;
       return weight * reflected + (f_t(1.0) - weight) * initial_dual;
     },
-    stream_view_);
+    stream_view_.value());
 
 #ifdef CUPDLP_DEBUG_MODE
   print("halpen_update current primal",
@@ -2417,7 +2417,7 @@ void pdlp_solver_t<i_t, f_t>::compute_initial_step_size()
 
     const auto& cusparse_view_ = pdhg_solver_.get_cusparse_view();
 
-    int sing_iters = 0;
+    [[maybe_unused]] int sing_iters = 0;
     for (int i = 0; i < max_iterations; ++i) {
       ++sing_iters;
       // d_q = d_z
@@ -2433,7 +2433,7 @@ void pdlp_solver_t<i_t, f_t>::compute_initial_step_size()
         d_q.data(),
         d_q.size(),
         [norm_q = norm_q.data()] __device__(f_t d_q) { return d_q / *norm_q; },
-        stream_view_);
+        stream_view_.value());
 
       // A_t_q = A_t @ d_q
       RAFT_CUSPARSE_TRY(
@@ -2477,7 +2477,7 @@ void pdlp_solver_t<i_t, f_t>::compute_initial_step_size()
         [sigma_max_sq = sigma_max_sq.data()] __device__(f_t d_q, f_t d_z) {
           return d_q * -(*sigma_max_sq) + d_z;
         },
-        stream_view_);
+        stream_view_.value());
 
       my_l2_norm<i_t, f_t>(d_q, residual_norm, handle_ptr_);
 

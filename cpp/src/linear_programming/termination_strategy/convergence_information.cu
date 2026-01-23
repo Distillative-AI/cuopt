@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -503,7 +503,7 @@ void convergence_information_t<i_t, f_t>::compute_primal_residual(
                 raft::max(dual, f_t(0.0)) * finite_or_zero(lower) +
                   raft::min(dual, f_t(0.0)) * finite_or_zero(upper)};
       },
-      stream_view_);
+      stream_view_.value());
   }
 
 #ifdef PDLP_DEBUG_MODE
@@ -625,7 +625,7 @@ void convergence_information_t<i_t, f_t>::compute_dual_residual(
                                     dual_residual_.data(),
                                     dual_residual_.size(),
                                     cuda::std::minus<>{},
-                                    stream_view_);
+                                    stream_view_.value());
   } else {
     cuopt_expects(!batch_mode_, error_type_t::ValidationError, "Batch mode not supported for !use_reflected_primal_dual");
 
@@ -750,7 +750,7 @@ void convergence_information_t<i_t, f_t>::compute_reduced_cost_from_primal_gradi
     bound_value_.data(),
     primal_size_h_,
     bound_value_gradient<f_t, f_t2>(),
-    stream_view_);
+    stream_view_.value());
 
   if (hyper_params_.handle_some_primal_gradients_on_finite_bounds_as_residuals) {
     raft::linalg::ternaryOp(reduced_cost_.data(),
@@ -783,7 +783,7 @@ void convergence_information_t<i_t, f_t>::compute_reduced_costs_dual_objective_c
     bound_value_.data(),
     primal_size_h_,
     bound_value_reduced_cost_product<f_t, f_t2>(),
-    stream_view_);
+    stream_view_.value());
 
   // sum over bound_value*reduced_cost, but should be -inf if any element is -inf
   cub::DeviceReduce::Sum(rmm_tmp_buffer_.data(),
