@@ -208,7 +208,7 @@ class optimization_problem_solution_t : public base_solution_t {
    * @brief Returns the dual objective value of the solution as a `f_t`.
    * @return objective value of the dual problem
    */
-  f_t get_dual_objective_value(i_t) const;
+  f_t get_dual_objective_value(i_t = 0) const;
 
   /**
    * @brief Returns the solution for the values of the primal variables as a vector of `f_t`.
