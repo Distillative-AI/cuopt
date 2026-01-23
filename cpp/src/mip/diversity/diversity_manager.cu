@@ -185,15 +185,16 @@ bool diversity_manager_t<i_t, f_t>::run_presolve(f_t time_limit)
   if (termination_criterion_t::NO_UPDATE != term_crit) {
     ls.constraint_prop.bounds_update.set_updated_bounds(*problem_ptr);
   }
-  if (!fj_only_run) {
+  bool run_probing_cache = !fj_only_run;
+  // Don't run probing cache in deterministic mode yet as neither B&B nor CPUFJ needs it
+  // and it doesn't make use of work units yet
+  if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) { run_probing_cache = false; }
+  if (run_probing_cache) {
     // Run probing cache before trivial presolve to discover variable implications
     const f_t time_ratio_of_probing_cache = diversity_config.time_ratio_of_probing_cache;
     const f_t max_time_on_probing         = diversity_config.max_time_on_probing;
     f_t time_for_probing_cache =
       std::min(max_time_on_probing, time_limit * time_ratio_of_probing_cache);
-    if (context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) {
-      time_for_probing_cache = std::numeric_limits<f_t>::infinity();
-    }
     timer_t probing_timer{time_for_probing_cache};
     // this function computes probing cache, finds singletons, substitutions and changes the problem
     bool problem_is_infeasible =

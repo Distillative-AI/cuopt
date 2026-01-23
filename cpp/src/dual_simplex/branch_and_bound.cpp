@@ -519,12 +519,8 @@ mip_status_t branch_and_bound_t<i_t, f_t>::set_final_solution(mip_solution_t<i_t
     settings_.log.printf("Node limit reached. Stopping the solver...\n");
   }
 
-  // Signal heuristic thread to stop for any limit-based termination
-  if (solver_status_ == mip_status_t::TIME_LIMIT || solver_status_ == mip_status_t::WORK_LIMIT ||
-      solver_status_ == mip_status_t::NODE_LIMIT || solver_status_ == mip_status_t::NUMERICAL) {
-    if (settings_.heuristic_preemption_callback != nullptr) {
-      settings_.heuristic_preemption_callback();
-    }
+  if (settings_.heuristic_preemption_callback != nullptr) {
+    settings_.heuristic_preemption_callback();
   }
 
   f_t gap              = upper_bound_ - lower_bound;
