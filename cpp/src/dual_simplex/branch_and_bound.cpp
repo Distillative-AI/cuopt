@@ -39,7 +39,7 @@
 #include <unordered_map>
 #include <vector>
 
-// Compile-time flag to disable bounds strengthening in BSP code path (for debugging/profiling)
+// bounds strenghtening work unit predictor is not yet accurate enough
 // #define BSP_DISABLE_BOUNDS_STRENGTHENING
 
 namespace cuopt::linear_programming::dual_simplex {
