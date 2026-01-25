@@ -40,7 +40,7 @@
 #include <vector>
 
 // Compile-time flag to disable bounds strengthening in BSP code path (for debugging/profiling)
-#define BSP_DISABLE_BOUNDS_STRENGTHENING
+// #define BSP_DISABLE_BOUNDS_STRENGTHENING
 
 namespace cuopt::linear_programming::dual_simplex {
 
