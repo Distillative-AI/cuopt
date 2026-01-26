@@ -165,6 +165,7 @@ TEST_P(DeterministicBBInstanceTest, deterministic_across_runs)
   settings.determinism_mode = CUOPT_MODE_DETERMINISTIC;
   settings.num_cpu_threads  = num_threads;
   settings.work_limit       = work_limit;
+  settings.seed             = seed;
 
   cuopt::seed_generator::set_seed(seed);
   auto solution1 = solve_mip(&handle_, problem, settings);

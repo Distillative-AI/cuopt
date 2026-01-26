@@ -373,16 +373,6 @@ class branch_and_bound_t {
   double max_producer_wait_time_{0.0};
   i_t producer_wait_count_{0};
 
-  // BSP node heap - priority queue for unexplored nodes (ordered by lower bound)
-  struct node_ptr_lower_bound_comp {
-    bool operator()(const mip_node_t<i_t, f_t>* a, const mip_node_t<i_t, f_t>* b) const
-    {
-      return a->lower_bound > b->lower_bound;
-    }
-  };
-  heap_t<mip_node_t<i_t, f_t>*, node_ptr_lower_bound_comp> heap_;
-  omp_mutex_t mutex_heap_;
-
   // BSP heuristic solution queue - solutions received from GPU heuristics
   // Stored with work unit timestamp for deterministic ordering
   struct queued_heuristic_solution_t {

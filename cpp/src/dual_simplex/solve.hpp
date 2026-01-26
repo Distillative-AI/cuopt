@@ -43,6 +43,7 @@ static std::string lp_status_to_string(lp_status_t status)
     case lp_status_t::CUTOFF: return "CUTOFF";
     case lp_status_t::CONCURRENT_LIMIT: return "CONCURRENT_LIMIT";
     case lp_status_t::UNSET: return "UNSET";
+    case lp_status_t::WORK_LIMIT: return "WORK_LIMIT";
   }
   return "UNKNOWN";
 }

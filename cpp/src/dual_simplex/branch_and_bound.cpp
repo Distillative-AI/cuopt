@@ -1867,19 +1867,33 @@ void branch_and_bound_t<i_t, f_t>::run_bsp_coordinator(const csr_matrix_t<i_t, f
                            settings_.deterministic);
 
   if (num_diving_workers > 0) {
-    std::vector<bnb_worker_type_t> diving_types = {bnb_worker_type_t::PSEUDOCOST_DIVING,
-                                                   bnb_worker_type_t::LINE_SEARCH_DIVING,
-                                                   bnb_worker_type_t::GUIDED_DIVING,
-                                                   bnb_worker_type_t::COEFFICIENT_DIVING};
-    bsp_diving_workers_ = std::make_unique<bsp_diving_worker_pool_t<i_t, f_t>>();
-    bsp_diving_workers_->initialize(num_diving_workers,
-                                    diving_types,
-                                    original_lp_,
-                                    Arow,
-                                    var_types_,
-                                    settings_.refactor_frequency,
-                                    settings_.deterministic);
-    calculate_variable_locks(original_lp_, var_up_locks_, var_down_locks_);
+    std::vector<bnb_worker_type_t> diving_types;
+    diving_types.reserve(4);
+
+    if (settings_.diving_settings.pseudocost_diving != 0) {
+      diving_types.push_back(bnb_worker_type_t::PSEUDOCOST_DIVING);
+    }
+    if (settings_.diving_settings.line_search_diving != 0) {
+      diving_types.push_back(bnb_worker_type_t::LINE_SEARCH_DIVING);
+    }
+    if (settings_.diving_settings.guided_diving != 0) {
+      diving_types.push_back(bnb_worker_type_t::GUIDED_DIVING);
+    }
+    if (settings_.diving_settings.coefficient_diving != 0) {
+      diving_types.push_back(bnb_worker_type_t::COEFFICIENT_DIVING);
+      calculate_variable_locks(original_lp_, var_up_locks_, var_down_locks_);
+    }
+
+    if (!diving_types.empty()) {
+      bsp_diving_workers_ = std::make_unique<bsp_diving_worker_pool_t<i_t, f_t>>();
+      bsp_diving_workers_->initialize(num_diving_workers,
+                                      diving_types,
+                                      original_lp_,
+                                      Arow,
+                                      var_types_,
+                                      settings_.refactor_frequency,
+                                      settings_.deterministic);
+    }
   }
 
   bsp_scheduler_ = std::make_unique<work_unit_scheduler_t>(bsp_horizon_step_);
@@ -1899,11 +1913,12 @@ void branch_and_bound_t<i_t, f_t>::run_bsp_coordinator(const csr_matrix_t<i_t, f
   bsp_debug_logger_.set_num_workers(num_bfs_workers);
   bsp_debug_logger_.set_horizon_step(bsp_horizon_step_);
 
+  int actual_diving_workers = bsp_diving_workers_ ? (int)bsp_diving_workers_->size() : 0;
   settings_.log.printf(
     "BSP Mode: %d BFS workers + %d diving workers, horizon step = %.2f work "
     "units\n",
     num_bfs_workers,
-    num_diving_workers,
+    actual_diving_workers,
     bsp_horizon_step_);
 
   search_tree_.root.get_down_child()->origin_worker_id = -1;
@@ -3042,7 +3057,8 @@ f_t branch_and_bound_t<i_t, f_t>::compute_bsp_lower_bound()
 {
   // Compute lower bound from BFS worker local structures only
   const f_t inf   = std::numeric_limits<f_t>::infinity();
-  f_t lower_bound = inf;
+  f_t lower_bound = lower_bound_ceiling_.load();
+  if (!std::isfinite(lower_bound)) lower_bound = inf;
 
   // Check all BFS worker queues
   for (const auto& worker : *bsp_workers_) {

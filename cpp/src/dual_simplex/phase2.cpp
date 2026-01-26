@@ -2554,11 +2554,6 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
   manifold.add("atilde_sparse.i", atilde_sparse.i);
   manifold.add("atilde_sparse.x", atilde_sparse.x);
 
-  // Add A_transpose matrix arrays to manifold for memory tracking
-  manifold.add("A_transpose.col_start", A_transpose.col_start);
-  manifold.add("A_transpose.i", A_transpose.i);
-  manifold.add("A_transpose.x", A_transpose.x);
-
   // Add A matrix for entering column access during basis update
   manifold.add("A.col_start", lp.A.col_start);
   manifold.add("A.i", lp.A.i);

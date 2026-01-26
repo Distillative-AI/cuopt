@@ -51,16 +51,16 @@ float work_unit_predictor_t<model_t, scaler_t>::predict_scalar(
     }
   }
 
-  std::vector<float> cache_vec;
-  cache_vec.reserve(model_t::NUM_FEATURES);
-  for (int i = 0; i < model_t::NUM_FEATURES; ++i) {
-    cache_vec.push_back(data[i].missing != -1 ? data[i].fvalue
-                                              : std::numeric_limits<float>::quiet_NaN());
-  }
-  uint32_t key = cuopt::linear_programming::detail::compute_hash(cache_vec);
+  // std::vector<float> cache_vec;
+  // cache_vec.reserve(model_t::NUM_FEATURES);
+  // for (int i = 0; i < model_t::NUM_FEATURES; ++i) {
+  //   cache_vec.push_back(data[i].missing != -1 ? data[i].fvalue
+  //                                             : std::numeric_limits<float>::quiet_NaN());
+  // }
+  // uint32_t key = cuopt::linear_programming::detail::compute_hash(cache_vec);
 
-  auto cached_it = prediction_cache.find(key);
-  if (cached_it != prediction_cache.end()) { return cached_it->second; }
+  // auto cached_it = prediction_cache.find(key);
+  // if (cached_it != prediction_cache.end()) { return cached_it->second; }
 
   double result = 0.0;
   auto start    = std::chrono::high_resolution_clock::now();
@@ -69,8 +69,8 @@ float work_unit_predictor_t<model_t, scaler_t>::predict_scalar(
   std::chrono::duration<double, std::milli> elapsed = end - start;
   if (debug) CUOPT_LOG_DEBUG("Prediction time: %f ms", elapsed.count());
 
-  float scaled_result   = scaler_.scale_work_units(result);
-  prediction_cache[key] = scaled_result;
+  float scaled_result = scaler_.scale_work_units(result);
+  // prediction_cache[key] = scaled_result;
   if (debug) CUOPT_LOG_DEBUG("Result: %f (scaled: %f)", result, scaled_result);
 
   return scaled_result;

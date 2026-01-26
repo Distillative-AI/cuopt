@@ -274,7 +274,9 @@ i_t pseudo_costs_t<i_t, f_t>::variable_selection(const std::vector<i_t>& fractio
                                                         fractional,
                                                         solution);
 
-  log.printf("pc branching on %d. Value %e.\n", branch_var, solution[branch_var]);
+  if (branch_var >= 0) {
+    log.printf("pc branching on %d. Value %e.\n", branch_var, solution[branch_var]);
+  }
 
   return branch_var;
 }

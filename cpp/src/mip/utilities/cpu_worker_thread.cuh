@@ -18,9 +18,11 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#include <utilities/logger.hpp>
 
 namespace cuopt::linear_programming::detail {
 

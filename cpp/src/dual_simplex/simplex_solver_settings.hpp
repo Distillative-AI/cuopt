@@ -74,6 +74,7 @@ struct simplex_solver_settings_t {
       print_presolve_stats(true),
       barrier_presolve(false),
       cudss_deterministic(false),
+      deterministic(false),
       barrier(false),
       eliminate_dense_columns(true),
       num_gpus(1),

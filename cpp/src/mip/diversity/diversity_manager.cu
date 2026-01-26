@@ -324,6 +324,7 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
     }
 
     while (!check_b_b_preemption()) {
+      if (timer.check_time_limit()) break;
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 

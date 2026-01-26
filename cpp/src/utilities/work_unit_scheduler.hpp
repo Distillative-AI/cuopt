@@ -66,7 +66,7 @@ class work_unit_scheduler_t {
   std::vector<std::reference_wrapper<work_limit_context_t>> contexts_;
   std::unordered_map<work_limit_context_t*, double> last_sync_target_;
 
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::condition_variable cv_;
   size_t contexts_at_barrier_{0};
   double current_sync_target_{0};

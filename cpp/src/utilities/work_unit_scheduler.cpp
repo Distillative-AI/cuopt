@@ -103,6 +103,7 @@ sync_result_t work_unit_scheduler_t::wait_for_next_sync(work_limit_context_t& ct
 double work_unit_scheduler_t::current_sync_target() const
 {
   if (sync_interval_ <= 0) return std::numeric_limits<double>::infinity();
+  std::unique_lock<std::mutex> lock(mutex_);
   return (barrier_generation_ + 1) * sync_interval_;
 }
 

@@ -37,7 +37,7 @@ class fj_predictor {
   static int32_t get_num_feature(void);
   static const char* get_threshold_type(void);
   static const char* get_leaf_output_type(void);
-  static void predict(union Entry* data, int pred_margin, double* result);
+  static void predict(Entry* data, int pred_margin, double* result);
   static void postprocess(double* result);
   static int quantize(double val, unsigned fid);
 
