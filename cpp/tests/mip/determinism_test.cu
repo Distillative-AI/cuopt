@@ -65,17 +65,24 @@ TEST_F(DeterministicBBTest, reproducible_objective)
   settings.num_cpu_threads  = 8;
   settings.work_limit       = 4;
 
+  // Ensure seed is positive int32_t
+  auto seed = std::random_device{}() & 0x7fffffff;
+  std::cout << "Tested with seed " << seed << "\n";
+  settings.seed = seed;
+
   auto solution1 = solve_mip(&handle_, problem, settings);
   double obj1    = solution1.get_objective_value();
   auto status1   = solution1.get_termination_status();
 
-  auto solution2 = solve_mip(&handle_, problem, settings);
-  double obj2    = solution2.get_objective_value();
-  auto status2   = solution2.get_termination_status();
+  for (int i = 2; i <= 10; ++i) {
+    auto solution = solve_mip(&handle_, problem, settings);
+    double obj    = solution.get_objective_value();
+    auto status   = solution.get_termination_status();
 
-  EXPECT_EQ(status1, status2) << "Termination status differs between runs";
-  EXPECT_DOUBLE_EQ(obj1, obj2) << "Objective value differs between runs";
-  expect_solutions_bitwise_equal(solution1, solution2, handle_);
+    EXPECT_EQ(status1, status) << "Termination status differs on run " << i;
+    ASSERT_EQ(obj1, obj) << "Objective value differs on run " << i;
+    expect_solutions_bitwise_equal(solution1, solution, handle_);
+  }
 }
 
 // Test determinism under high thread contention
@@ -90,6 +97,11 @@ TEST_F(DeterministicBBTest, reproducible_high_contention)
   settings.determinism_mode = CUOPT_MODE_DETERMINISTIC;
   settings.num_cpu_threads  = 128;  // High thread count to stress contention
   settings.work_limit       = 1;
+
+  auto seed = std::random_device{}() & 0x7fffffff;
+  ;
+  std::cout << "Tested with seed " << seed << "\n";
+  settings.seed = seed;
 
   std::vector<mip_solution_t<int, double>> solutions;
 
@@ -144,7 +156,8 @@ TEST_P(DeterministicBBInstanceTest, deterministic_across_runs)
   handle_.sync_stream();
 
   // Get a random seed for each run
-  auto seed = std::random_device{}();
+  auto seed = std::random_device{}() & 0x7fffffff;
+  ;
   std::cout << "Tested with seed " << seed << "\n";
 
   mip_solver_settings_t<int, double> settings;
