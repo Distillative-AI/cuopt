@@ -1078,17 +1078,20 @@ lp_status_t branch_and_bound_t<i_t, f_t>::solve_root_relaxation(
     solver_name    = "Dual Simplex";
   }
 
+  settings_.log.printf("\n");
   if (root_status == lp_status_t::OPTIMAL) {
-    settings_.log.printf("\n");
     settings_.log.printf("Root relaxation solution found in %d iterations and %.2fs by %s\n",
                          iter,
                          toc(start_time),
                          solver_name.c_str());
     settings_.log.printf("Root relaxation objective %+.8e\n", user_objective);
-    settings_.log.printf("\n");
-
-    is_root_solution_set = true;
+  } else {
+    settings_.log.printf("Root relaxation returned status: %s\n",
+                         lp_status_to_string(root_status).c_str());
   }
+
+  settings_.log.printf("\n");
+  is_root_solution_set = true;
 
   return root_status;
 }
