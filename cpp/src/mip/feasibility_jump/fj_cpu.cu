@@ -868,7 +868,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move(
             best_move  = fj_move_t{var_idx, cached_move.first};
           }
           // cuopt_assert(fj_cpu.view.pb.check_variable_within_bounds(var_idx,
-          // fj_cpu.h_assignment[var_idx] + cached_move.first), "best move not within bounds");
+          // fj_cpu.h_assignment[var_idx] + cached_move.first), "best move is not within bounds");
         }
         fj_cpu.hit_count++;
         continue;
