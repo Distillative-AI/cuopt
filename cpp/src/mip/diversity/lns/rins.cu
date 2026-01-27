@@ -257,16 +257,10 @@ void rins_t<i_t, f_t>::run_rins()
   branch_and_bound_settings.relative_mip_gap_tol =
     std::min(current_mip_gap, (f_t)settings.target_mip_gap);
   branch_and_bound_settings.integer_tol = context.settings.tolerances.integrality_tolerance;
-  branch_and_bound_settings.num_threads = 2;
+  branch_and_bound_settings.num_threads = 1;
   branch_and_bound_settings.reliability_branching_settings.enable = false;
-
-  // In the future, let RINS use all the diving heuristics. For now,
-  // restricting to guided diving.
-  branch_and_bound_settings.diving_settings.line_search_diving = 0;
-  branch_and_bound_settings.diving_settings.coefficient_diving = 0;
-  branch_and_bound_settings.diving_settings.pseudocost_diving  = 0;
-  branch_and_bound_settings.log.log                            = false;
-  branch_and_bound_settings.log.log_prefix                     = "[RINS] ";
+  branch_and_bound_settings.log.log                               = false;
+  branch_and_bound_settings.log.log_prefix                        = "[RINS] ";
   branch_and_bound_settings.solution_callback = [&rins_solution_queue](std::vector<f_t>& solution,
                                                                        f_t objective) {
     rins_solution_queue.push_back(solution);
@@ -274,7 +268,8 @@ void rins_t<i_t, f_t>::run_rins()
   dual_simplex::branch_and_bound_t<i_t, f_t> branch_and_bound(branch_and_bound_problem,
                                                               branch_and_bound_settings);
   branch_and_bound.set_initial_guess(cuopt::host_copy(fixed_assignment, rins_handle.get_stream()));
-  branch_and_bound_status = branch_and_bound.solve(branch_and_bound_solution);
+  branch_and_bound_status = branch_and_bound.solve(
+    branch_and_bound_solution, dual_simplex::mip_solve_mode_t::BNB_SINGLE_THREADED);
 
   if (!std::isnan(branch_and_bound_solution.objective)) {
     CUOPT_LOG_DEBUG("RINS submip solution found. Objective %.16e. Status %d",

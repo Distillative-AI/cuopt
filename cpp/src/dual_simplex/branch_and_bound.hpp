@@ -36,6 +36,11 @@ enum class mip_status_t {
   UNSET      = 6,  // The status is not set
 };
 
+enum class mip_solve_mode_t {
+  BNB_PARALLEL        = 0,  // Parallel B&B (default)
+  BNB_SINGLE_THREADED = 1,  // Single threaded B&B for SubMIP and RINS
+};
+
 template <typename i_t, typename f_t>
 void upper_bound_callback(f_t upper_bound);
 
@@ -86,7 +91,7 @@ class branch_and_bound_t {
   lp_status_t solve_root_relaxation(simplex_solver_settings_t<i_t, f_t> const& lp_settings);
 
   // The main entry routine. Returns the solver status and populates solution with the incumbent.
-  mip_status_t solve(mip_solution_t<i_t, f_t>& solution);
+  mip_status_t solve(mip_solution_t<i_t, f_t>& solution, mip_solve_mode_t solve_mode);
 
  private:
   const user_problem_t<i_t, f_t>& original_problem_;
@@ -146,7 +151,7 @@ class branch_and_bound_t {
 
   // Count the number of workers per type that either are being executed or
   // are waiting to be executed.
-  std::array<omp_atomic_t<i_t>, bnb_num_worker_types> active_workers_per_type;
+  std::array<omp_atomic_t<i_t>, bnb_num_worker_types> active_workers_per_type_;
 
   // Worker pool
   bnb_worker_pool_t<i_t, f_t> worker_pool_;
@@ -183,11 +188,19 @@ class branch_and_bound_t {
   // We use best-first to pick the `start_node` and then perform a depth-first search
   // from this node (i.e., a plunge). It can only backtrack to a sibling node.
   // Unexplored nodes in the subtree are inserted back into the global heap.
-  void plunge_with(bnb_worker_data_t<i_t, f_t>* worker_data);
+  void plunge_with(bnb_worker_data_t<i_t, f_t>* worker_data, mip_solve_mode_t mode);
 
   // Perform a deep dive in the subtree determined by the `start_node` in order
   // to find integer feasible solutions.
   void dive_with(bnb_worker_data_t<i_t, f_t>* worker_data);
+
+  // Run the scheduler (aka the master) whose will schedule and manage
+  // all the other workers.
+  void run_scheduler();
+
+  // Run the branch-and-bound algorithm in single threaded mode.
+  // This disable all diving heuristics.
+  void single_threaded_solve();
 
   // Solve the LP relaxation of a leaf node
   dual::status_t solve_node_lp(mip_node_t<i_t, f_t>* node_ptr,
