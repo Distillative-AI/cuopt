@@ -26,6 +26,11 @@ class bounds_strengthening_t {
 
   std::vector<bool> bounds_changed;
   size_t last_nnz_processed{0};
+  i_t last_num_iterations{0};
+  i_t last_max_row_len{0};
+  int64_t last_total_col_span{0};
+  i_t last_rows_processed{0};
+  i_t last_unique_cache_lines{0};
 
  private:
   const csc_matrix_t<i_t, f_t>& A;
@@ -39,5 +44,7 @@ class bounds_strengthening_t {
   std::vector<f_t> delta_max_activity;
   std::vector<f_t> constraint_lb;
   std::vector<f_t> constraint_ub;
+
+  std::vector<bool> cache_lines_touched_;
 };
 }  // namespace cuopt::linear_programming::dual_simplex

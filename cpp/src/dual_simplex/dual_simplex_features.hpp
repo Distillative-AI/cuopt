@@ -172,6 +172,22 @@ struct bounds_strengthening_features_t {
   size_t nnz_processed{0};    // non-zeros traversed (work metric)
   f_t runtime{0.0};
 
+  // Cache locality metrics
+  i_t max_row_len{0};         // longest row encountered
+  int64_t total_col_span{0};  // sum of (max_col - min_col) per processed row
+  i_t rows_processed{0};      // number of constraint rows processed
+  i_t unique_cache_lines{0};  // unique 64-byte cache lines touched
+
+  f_t avg_col_span() const
+  {
+    return rows_processed > 0 ? static_cast<f_t>(total_col_span) / rows_processed : 0.0;
+  }
+
+  f_t cache_line_reuse_ratio() const
+  {
+    return unique_cache_lines > 0 ? static_cast<f_t>(nnz_processed) / unique_cache_lines : 0.0;
+  }
+
   // Interval aggregates (for when bounds strengthening is called multiple times)
   i_t call_count{0};
   i_t total_iterations{0};
@@ -190,16 +206,21 @@ struct bounds_strengthening_features_t {
 
   void log_single(i_t m_val, i_t n_val, i_t nnz_val) const
   {
-    // printf(
-    //   "BOUNDS_STRENGTH_FEATURES: m=%d n=%d nnz=%d "
-    //   "iterations=%d bounds_changed=%d nnz_processed=%zu runtime=%.6f\n",
-    //   m_val,
-    //   n_val,
-    //   nnz_val,
-    //   num_iterations,
-    //   num_bounds_changed,
-    //   nnz_processed,
-    //   runtime);
+    printf(
+      "BOUNDS_STRENGTH_FEATURES: m=%d n=%d nnz=%d "
+      "iterations=%d bounds_changed=%d nnz_processed=%zu "
+      "max_row_len=%d avg_col_span=%.2f unique_cache_lines=%d cache_reuse=%.2f runtime=%.6f\n",
+      m_val,
+      n_val,
+      nnz_val,
+      num_iterations,
+      num_bounds_changed,
+      nnz_processed,
+      max_row_len,
+      avg_col_span(),
+      unique_cache_lines,
+      cache_line_reuse_ratio(),
+      runtime);
   }
 
   void reset()

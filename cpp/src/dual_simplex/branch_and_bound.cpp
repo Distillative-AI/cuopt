@@ -758,11 +758,16 @@ dual::status_t branch_and_bound_t<i_t, f_t>::solve_node_lp(
       node_presolver.bounds_strengthening(leaf_problem.lower, leaf_problem.upper, lp_settings);
     f_t bs_runtime = toc(bs_start);
 
-    bs_features_.m             = leaf_problem.num_rows;
-    bs_features_.n             = leaf_problem.num_cols;
-    bs_features_.nnz           = leaf_problem.A.col_start[leaf_problem.num_cols];
-    bs_features_.nnz_processed = node_presolver.last_nnz_processed;
-    bs_features_.runtime       = bs_runtime;
+    bs_features_.m                  = leaf_problem.num_rows;
+    bs_features_.n                  = leaf_problem.num_cols;
+    bs_features_.nnz                = leaf_problem.A.col_start[leaf_problem.num_cols];
+    bs_features_.nnz_processed      = node_presolver.last_nnz_processed;
+    bs_features_.num_iterations     = node_presolver.last_num_iterations;
+    bs_features_.max_row_len        = node_presolver.last_max_row_len;
+    bs_features_.total_col_span     = node_presolver.last_total_col_span;
+    bs_features_.rows_processed     = node_presolver.last_rows_processed;
+    bs_features_.unique_cache_lines = node_presolver.last_unique_cache_lines;
+    bs_features_.runtime            = bs_runtime;
     bs_features_.log_single(bs_features_.m, bs_features_.n, bs_features_.nnz);
   }
 
@@ -2375,6 +2380,14 @@ node_solve_info_t branch_and_bound_t<i_t, f_t>::solve_node_bsp(bb_worker_state_t
     features["nnz"]            = static_cast<float>(nnz);
     features["nnz_processed"]  = static_cast<float>(worker.node_presolver->last_nnz_processed);
     features["bounds_changed"] = static_cast<float>(num_bounds_changed);
+    features["num_iterations"] = static_cast<float>(worker.node_presolver->last_num_iterations);
+    features["max_row_len"]    = static_cast<float>(worker.node_presolver->last_max_row_len);
+    features["avg_col_span"]   = worker.node_presolver->last_rows_processed > 0
+                                   ? static_cast<float>(worker.node_presolver->last_total_col_span) /
+                                     worker.node_presolver->last_rows_processed
+                                   : 0.0f;
+    features["unique_cache_lines"] =
+      static_cast<float>(worker.node_presolver->last_unique_cache_lines);
 
     // predicts milliseconds
     f_t prediction =
