@@ -144,6 +144,7 @@ class PCG {
   template <typename T>
   void shuffle(std::vector<T>& seq)
   {
+    if (seq.empty()) { return; }
     for (size_t i = 0; i < seq.size() - 1; ++i) {
       size_t j = uniform(i, seq.size());
       if (j != i) std::swap(seq[i], seq[j]);
