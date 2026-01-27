@@ -791,7 +791,9 @@ static size_t batch_pdlp_memory_estimator(const optimization_problem_t<i_t, f_t>
   total_memory += max_batch_size * problem.get_n_variables() * sizeof(f_t);
   total_memory += max_batch_size * problem.get_n_constraints() * sizeof(f_t);
 
-  total_memory *= 1.2;  // 20% overhead
+  // Add a 50% overhead to make sure we have enough memory considering other parts of the solver may
+  // allocate at the same time
+  total_memory *= 1.5;
 
   // Data from saddle point state
   return total_memory;
