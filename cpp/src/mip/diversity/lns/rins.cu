@@ -34,19 +34,6 @@ rins_t<i_t, f_t>::rins_t(mip_solver_context_t<i_t, f_t>& context_,
 }
 
 template <typename i_t, typename f_t>
-rins_thread_t<i_t, f_t>::~rins_thread_t()
-{
-  this->request_termination();
-}
-
-template <typename i_t, typename f_t>
-void rins_thread_t<i_t, f_t>::run_worker()
-{
-  raft::common::nvtx::range fun_scope("Running RINS");
-  rins_ptr->run_rins();
-}
-
-template <typename i_t, typename f_t>
 void rins_t<i_t, f_t>::new_best_incumbent_callback(const std::vector<f_t>& solution)
 {
   node_count_at_last_improvement = node_count.load();
@@ -56,19 +43,16 @@ template <typename i_t, typename f_t>
 void rins_t<i_t, f_t>::node_callback(const std::vector<f_t>& solution, f_t objective)
 {
   if (!enabled) return;
-
   node_count++;
 
   if (node_count - node_count_at_last_improvement < settings.nodes_after_later_improvement) return;
-
   if (node_count - node_count_at_last_rins > settings.node_freq) {
-    // opportunistic early test w/ atomic to avoid having to take the lock
-    if (!rins_thread->cpu_thread_done) return;
-    std::lock_guard<std::mutex> lock(rins_mutex);
-    if (rins_thread->cpu_thread_done && dm.population.current_size() > 0 &&
-        dm.population.is_feasible()) {
-      lp_optimal_solution = solution;
-      rins_thread->start_cpu_solver();
+    // If multiple threads call this function, only the first one will launch
+    // a new task for RINS. The other are ignored.
+    if (!launch_new_task.exchange(false)) return;
+    if (dm.population.current_size() > 0 && dm.population.is_feasible()) {
+#pragma omp task
+      run_rins(solution);
     }
   }
 }
@@ -76,8 +60,6 @@ void rins_t<i_t, f_t>::node_callback(const std::vector<f_t>& solution, f_t objec
 template <typename i_t, typename f_t>
 void rins_t<i_t, f_t>::enable()
 {
-  rins_thread              = std::make_unique<rins_thread_t<i_t, f_t>>();
-  rins_thread->rins_ptr    = this;
   seed                     = cuopt::seed_generator::get_seed();
   problem_copy             = std::make_unique<problem_t<i_t, f_t>>(*problem_ptr);
   problem_copy->handle_ptr = &rins_handle;
@@ -85,19 +67,16 @@ void rins_t<i_t, f_t>::enable()
 }
 
 template <typename i_t, typename f_t>
-void rins_t<i_t, f_t>::stop_rins()
+void rins_t<i_t, f_t>::run_rins(std::vector<f_t> lp_optimal_solution)
 {
-  enabled = false;
-  if (rins_thread) rins_thread->request_termination();
-  rins_thread.reset();
-}
+  raft::common::nvtx::range fun_scope("Running RINS");
 
-template <typename i_t, typename f_t>
-void rins_t<i_t, f_t>::run_rins()
-{
   if (total_calls == 0) RAFT_CUDA_TRY(cudaSetDevice(context.handle_ptr->get_device()));
 
-  if (!dm.population.is_feasible()) return;
+  if (!dm.population.is_feasible()) {
+    launch_new_task = true;
+    return;
+  }
 
   cuopt_assert(lp_optimal_solution.size() == problem_copy->n_variables, "Assignment size mismatch");
   cuopt_assert(problem_copy->handle_ptr == &rins_handle, "Handle mismatch");
@@ -127,10 +106,13 @@ void rins_t<i_t, f_t>::run_rins()
   cuopt_assert(best_sol.handle_ptr == &rins_handle, "Handle mismatch");
 
   cuopt_assert(best_sol.get_feasible(), "Best solution is not feasible");
-  if (!best_sol.get_feasible()) { return; }
+  if (!best_sol.get_feasible()) {
+    launch_new_task = true;
+    return;
+  }
 
   i_t sol_size_before_rins = best_sol.assignment.size();
-  auto lp_opt_device = cuopt::device_copy(this->lp_optimal_solution, rins_handle.get_stream());
+  auto lp_opt_device       = cuopt::device_copy(lp_optimal_solution, rins_handle.get_stream());
   cuopt_assert(lp_opt_device.size() == problem_copy->n_variables, "Assignment size mismatch");
   cuopt_assert(best_sol.assignment.size() == problem_copy->n_variables, "Assignment size mismatch");
 
@@ -151,6 +133,7 @@ void rins_t<i_t, f_t>::run_rins()
   // abort if the fractional ratio is too low
   if (fractional_ratio < settings.min_fractional_ratio) {
     CUOPT_LOG_TRACE("RINS fractional ratio too low, aborting");
+    launch_new_task = true;
     return;
   }
 
@@ -175,6 +158,7 @@ void rins_t<i_t, f_t>::run_rins()
 
   if (n_to_fix == 0) {
     CUOPT_LOG_DEBUG("RINS no variables to fix");
+    launch_new_task = true;
     return;
   }
 
@@ -265,6 +249,7 @@ void rins_t<i_t, f_t>::run_rins()
                                                                        f_t objective) {
     rins_solution_queue.push_back(solution);
   };
+
   dual_simplex::branch_and_bound_t<i_t, f_t> branch_and_bound(branch_and_bound_problem,
                                                               branch_and_bound_settings);
   branch_and_bound.set_initial_guess(cuopt::host_copy(fixed_assignment, rins_handle.get_stream()));
@@ -342,15 +327,14 @@ void rins_t<i_t, f_t>::run_rins()
 
   if (improvement_found) total_success++;
   CUOPT_LOG_DEBUG("RINS calls/successes %d/%d", total_calls, total_success);
+  launch_new_task = true;
 }
 
 #if MIP_INSTANTIATE_FLOAT
-template class rins_thread_t<int, float>;
 template class rins_t<int, float>;
 #endif
 
 #if MIP_INSTANTIATE_DOUBLE
-template class rins_thread_t<int, double>;
 template class rins_t<int, double>;
 #endif
 

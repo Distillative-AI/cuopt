@@ -56,7 +56,7 @@ struct reliability_branching_settings_t {
 
   // Priority of the tasks created when running the trial branching in parallel.
   // Set to 1 to have the same priority as the other tasks.
-  i_t task_priority = 5;
+  i_t task_priority = 10;
 
   // The number of tasks spawned for performing strong branching.
   i_t num_tasks = -1;

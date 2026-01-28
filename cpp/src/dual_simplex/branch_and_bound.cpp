@@ -1107,7 +1107,7 @@ void branch_and_bound_t<i_t, f_t>::run_scheduler()
         active_workers_per_type_[type]++;
         launched_any_task = true;
 
-#pragma omp task affinity(worker)
+#pragma omp task affinity(worker) priority(5)
         plunge_with(worker, mip_solve_mode_t::BNB_PARALLEL);
 
       } else {
@@ -1127,7 +1127,7 @@ void branch_and_bound_t<i_t, f_t>::run_scheduler()
         active_workers_per_type_[type]++;
         launched_any_task = true;
 
-#pragma omp task affinity(worker)
+#pragma omp task affinity(worker) priority(5)
         dive_with(worker);
       }
     }
