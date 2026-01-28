@@ -176,6 +176,11 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
       branch_and_bound_settings.num_threads = std::max(1, context.settings.num_cpu_threads);
     }
 
+    dual_simplex::mip_solve_mode_t solve_mode =
+      branch_and_bound_settings.num_threads > 1
+        ? dual_simplex::mip_solve_mode_t::BNB_PARALLEL
+        : dual_simplex::mip_solve_mode_t::BNB_SINGLE_THREADED;
+
     // Set the branch and bound -> primal heuristics callback
     branch_and_bound_settings.solution_callback =
       std::bind(&branch_and_bound_solution_helper_t<i_t, f_t>::solution_callback,
@@ -227,7 +232,7 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
                                                 &dual_simplex::branch_and_bound_t<i_t, f_t>::solve,
                                                 branch_and_bound.get(),
                                                 std::ref(branch_and_bound_solution),
-                                                dual_simplex::mip_solve_mode_t::BNB_PARALLEL);
+                                                solve_mode);
   }
 
   // Start the primal heuristics
