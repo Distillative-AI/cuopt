@@ -145,8 +145,6 @@ cusparse_dn_mat_descr_wrapper_t<f_t>::operator cusparseDnMatDescr_t() const
   return descr_;
 }
 
-#define CUDA_VER_12_4_UP (CUDART_VERSION >= 12040)
-
 #if CUDA_VER_12_4_UP
 struct dynamic_load_runtime {
   static void* get_cusparse_runtime_handle()
@@ -239,7 +237,7 @@ void my_cusparsespmv_preprocess(cusparseHandle_t handle,
 #if CUDA_VER_12_4_UP
 template <typename T,
           typename std::enable_if_t<std::is_same_v<T, float> || std::is_same_v<T, double>>*>
-cusparseStatus_t my_cusparsespmm_preprocess(cusparseHandle_t handle,
+void my_cusparsespmm_preprocess(cusparseHandle_t handle,
                                             cusparseOperation_t opA,
                                             cusparseOperation_t opB,
                                             const T* alpha,
@@ -259,8 +257,8 @@ cusparseStatus_t my_cusparsespmm_preprocess(cusparseHandle_t handle,
     }
   }();
   CUSPARSE_CHECK(cusparseSetStream(handle, stream));
-  return cusparseSpMM_preprocess(
-    handle, opA, opB, alpha, matA, matB, beta, matC, float_type, alg, externalBuffer);
+  RAFT_CUSPARSE_TRY(cusparseSpMM_preprocess(
+    handle, opA, opB, alpha, matA, matB, beta, matC, float_type, alg, externalBuffer));
 }
 #endif
 
@@ -961,7 +959,7 @@ template class cusparse_view_t<int, double>;
 
 #if CUDA_VER_12_4_UP
 #if MIP_INSTANTIATE_FLOAT
-template cusparseStatus_t my_cusparsespmm_preprocess<float>(cusparseHandle_t,
+template void my_cusparsespmm_preprocess<float>(cusparseHandle_t,
                                                             cusparseOperation_t,
                                                             cusparseOperation_t,
                                                             const float*,
@@ -974,7 +972,7 @@ template cusparseStatus_t my_cusparsespmm_preprocess<float>(cusparseHandle_t,
                                                             cudaStream_t);
 #endif
 #if MIP_INSTANTIATE_DOUBLE
-template cusparseStatus_t my_cusparsespmm_preprocess<double>(cusparseHandle_t,
+template void my_cusparsespmm_preprocess<double>(cusparseHandle_t,
                                                              cusparseOperation_t,
                                                              cusparseOperation_t,
                                                              const double*,

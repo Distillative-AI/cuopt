@@ -8,7 +8,10 @@
 #include <linear_programming/cusparse_view.hpp>
 #include <linear_programming/optimal_batch_size_handler/optimal_batch_size_handler.hpp>
 #include <linear_programming/pdlp_constants.hpp>
+
 #include <utilities/event_handler.cuh>
+
+#include <raft/sparse/detail/cusparse_macros.h>
 
 #include <mip/mip_constants.hpp>
 
@@ -77,7 +80,7 @@ struct SpMM_benchmarks_context_t {
     buffer_transpose_batch     = rmm::device_buffer(buffer_size_transpose_batch, stream_view);
     buffer_non_transpose_batch = rmm::device_buffer(buffer_size_non_transpose_batch, stream_view);
 
-#if CUDART_VERSION >= 12040
+#if CUDA_VER_12_4_UP
     // Preprocess buffers for SpMMs
     my_cusparsespmm_preprocess<f_t>(
       handle_ptr->get_cusparse_handle(),
@@ -163,6 +166,8 @@ static double evaluate_node(cusparse_sp_mat_descr_wrapper_t<i_t, f_t>& A,
                             int benchmark_runs,
                             raft::handle_t const* handle_ptr)
 {
+  cuopt_assert(current_batch_size > 0, "Current batch size must be greater than 0");
+
   rmm::cuda_stream_view stream_view = handle_ptr->get_stream();
   SpMM_benchmarks_context_t<i_t, f_t> spmm_benchmarks_context(
     A, A_T, primal_size, dual_size, current_batch_size, handle_ptr);
@@ -241,7 +246,7 @@ int optimal_batch_size_handler(const optimization_problem_t<i_t, f_t>& op_proble
 
   // Evaluate current, left and right nodes to pick a direction
 
-  const int left_node  = current_batch_size / 2;
+  const int left_node  = std::max(1, current_batch_size / 2);
   const int right_node = std::min(current_batch_size * 2, max_batch_size);
   double current_ratio = evaluate_node<i_t, f_t>(A,
                                                  A_T,
@@ -279,7 +284,7 @@ int optimal_batch_size_handler(const optimization_problem_t<i_t, f_t>& op_proble
     best_ratio         = left_ratio;
     optimal_batch_size = current_batch_size;
     do {
-      current_batch_size = current_batch_size / 2;
+      current_batch_size = std::max(1, current_batch_size / 2);
 #ifdef BATCH_VERBOSE_MODE
       std::cout << "Evaluating left node: " << current_batch_size << std::endl;
 #endif
@@ -313,7 +318,7 @@ int optimal_batch_size_handler(const optimization_problem_t<i_t, f_t>& op_proble
       }
     } while (current_step < max_steps);
     // Testing one last time between the two
-    const int middle_node = ((current_batch_size * 2) + current_batch_size) / 2;
+    const int middle_node = std::max(1, ((current_batch_size * 2) + current_batch_size) / 2);
     cuopt_assert(middle_node > 0, "Middle node should be greater than 0");
 #ifdef BATCH_VERBOSE_MODE
     std::cout << "Testing one last time between the two at node: " << middle_node << std::endl;
@@ -392,7 +397,7 @@ int optimal_batch_size_handler(const optimization_problem_t<i_t, f_t>& op_proble
       }
     } while (current_step < max_steps);
     // Testing one last time between the two
-    int middle_node = std::min(((current_batch_size / 2) + current_batch_size) / 2, max_batch_size);
+    int middle_node = std::min(std::max(1, ((current_batch_size / 2) + current_batch_size) / 2), max_batch_size);
 #ifdef BATCH_VERBOSE_MODE
     std::cout << "Testing one last time between the two at node: " << middle_node << std::endl;
 #endif

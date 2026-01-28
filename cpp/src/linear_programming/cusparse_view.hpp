@@ -196,11 +196,11 @@ class cusparse_view_t {
   const std::vector<pdlp_climber_strategy_t>& climber_strategies_;
 };
 
-#if CUDART_VERSION >= 12040
+#if CUDA_VER_12_4_UP
 template <
   typename T,
   typename std::enable_if_t<std::is_same_v<T, float> || std::is_same_v<T, double>>* = nullptr>
-cusparseStatus_t my_cusparsespmm_preprocess(cusparseHandle_t handle,
+void my_cusparsespmm_preprocess(cusparseHandle_t handle,
                                             cusparseOperation_t opA,
                                             cusparseOperation_t opB,
                                             const T* alpha,
