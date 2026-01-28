@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -13,13 +13,9 @@
 #include <mip/local_search/line_segment_search/line_segment_search.cuh>
 #include <mip/solution/solution.cuh>
 #include <mip/solver.cuh>
-#include <utilities/timer.hpp>
 
-#include <atomic>
-#include <chrono>
-#include <condition_variable>
-#include <mutex>
-#include <thread>
+#include <utilities/omp_helpers.hpp>
+#include <utilities/timer.hpp>
 
 namespace cuopt::linear_programming::detail {
 
@@ -117,9 +113,13 @@ class local_search_t {
   feasibility_pump_t<i_t, f_t> fp;
   std::mt19937 rng;
 
-  std::array<cpu_fj_thread_t<i_t, f_t>, 8> ls_cpu_fj;
-  std::array<cpu_fj_thread_t<i_t, f_t>, 1> scratch_cpu_fj;
-  cpu_fj_thread_t<i_t, f_t> scratch_cpu_fj_on_lp_opt;
+  const i_t num_threads_for_cpu_fj         = 8;
+  const i_t num_threads_for_scratch_cpu_fj = 1;
+
+  fj_t<i_t, f_t>* fj_ptr;
+  std::vector<std::unique_ptr<fj_cpu_climber_t<i_t, f_t>>> ls_cpu_fj;
+  std::vector<std::unique_ptr<fj_cpu_climber_t<i_t, f_t>>> scratch_cpu_fj;
+  std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> scratch_cpu_fj_on_lp_opt;
   problem_t<i_t, f_t> problem_with_objective_cut;
   bool cutting_plane_added_for_active_run{false};
 };

@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -8,16 +8,12 @@
 #pragma once
 
 #include <atomic>
-#include <condition_variable>
 #include <functional>
-#include <limits>
-#include <mutex>
-#include <thread>
 #include <unordered_set>
 #include <vector>
 
 #include <mip/feasibility_jump/feasibility_jump.cuh>
-#include <mip/utilities/cpu_worker_thread.cuh>
+#include <utilities/omp_helpers.hpp>
 
 namespace cuopt::linear_programming::detail {
 
@@ -90,7 +86,7 @@ struct fj_cpu_climber_t {
 
   // vector<bool> is actually likely beneficial here since we're memory bound
   std::vector<bool> flip_move_computed;
-  ;
+
   // CSR nnz offset -> (delta, score)
   std::vector<std::pair<f_t, fj_staged_score_t>> cached_mtm_moves;
 
@@ -117,23 +113,6 @@ struct fj_cpu_climber_t {
   std::atomic<bool> halted{false};
   // TODO atomic ref? c++20
   std::atomic<bool>& preemption_flag;
-};
-
-template <typename i_t, typename f_t>
-struct cpu_fj_thread_t : public cpu_worker_thread_base_t<cpu_fj_thread_t<i_t, f_t>> {
-  ~cpu_fj_thread_t();
-
-  void run_worker();
-  void on_terminate();
-  void on_start();
-  bool get_result() { return cpu_fj_solution_found; }
-
-  void stop_cpu_solver();
-
-  std::atomic<bool> cpu_fj_solution_found{false};
-  f_t time_limit{+std::numeric_limits<f_t>::infinity()};
-  std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> fj_cpu;
-  fj_t<i_t, f_t>* fj_ptr{nullptr};
 };
 
 }  // namespace cuopt::linear_programming::detail

@@ -20,7 +20,6 @@
 #include <mip/diversity/population.cuh>
 #include <mip/solution/solution.cuh>
 #include <mip/solver.cuh>
-#include <mip/utilities/cpu_worker_thread.cuh>
 
 #include <utilities/omp_helpers.hpp>
 #include <utilities/timer.hpp>

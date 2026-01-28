@@ -20,8 +20,6 @@
 
 #include <cuda_profiler_api.h>
 
-#include <future>
-
 namespace cuopt::linear_programming::detail {
 
 template <typename i_t, typename f_t>
@@ -44,13 +42,9 @@ local_search_t<i_t, f_t>::local_search_t(mip_solver_context_t<i_t, f_t>& context
     rng(cuopt::seed_generator::get_seed()),
     problem_with_objective_cut(*context.problem_ptr, context.problem_ptr->handle_ptr)
 {
-  for (auto& cpu_fj : ls_cpu_fj) {
-    cpu_fj.fj_ptr = &fj;
-  }
-  for (auto& cpu_fj : scratch_cpu_fj) {
-    cpu_fj.fj_ptr = &fj;
-  }
-  scratch_cpu_fj_on_lp_opt.fj_ptr = &fj;
+  fj_ptr = &fj;
+  ls_cpu_fj.resize(num_threads_for_cpu_fj);
+  scratch_cpu_fj.resize(num_threads_for_scratch_cpu_fj);
 }
 
 static double local_search_best_obj       = std::numeric_limits<double>::max();
@@ -72,16 +66,16 @@ void local_search_t<i_t, f_t>::start_cpufj_scratch_threads(population_t<i_t, f_t
   i_t counter = 0;
   for (auto& cpu_fj : scratch_cpu_fj) {
     if (counter > 0) solution.assign_random_within_bounds(0.4);
-    cpu_fj.fj_cpu = cpu_fj.fj_ptr->create_cpu_climber(solution,
-                                                      default_weights,
-                                                      default_weights,
-                                                      0.,
-                                                      context.preempt_heuristic_solver_,
-                                                      fj_settings_t{},
-                                                      /*randomize=*/counter > 0);
+    cpu_fj = fj_ptr->create_cpu_climber(solution,
+                                        default_weights,
+                                        default_weights,
+                                        0.,
+                                        context.preempt_heuristic_solver_,
+                                        fj_settings_t{},
+                                        /*randomize=*/counter > 0);
 
-    cpu_fj.fj_cpu->log_prefix           = "******* scratch " + std::to_string(counter) + ": ";
-    cpu_fj.fj_cpu->improvement_callback = [&population](f_t obj, const std::vector<f_t>& h_vec) {
+    cpu_fj->log_prefix           = "******* scratch " + std::to_string(counter) + ": ";
+    cpu_fj->improvement_callback = [&population](f_t obj, const std::vector<f_t>& h_vec) {
       population.add_external_solution(h_vec, obj, solution_origin_t::CPUFJ);
       if (obj < local_search_best_obj) {
         CUOPT_LOG_TRACE("******* New local search best obj %g, best overall %g",
@@ -95,8 +89,9 @@ void local_search_t<i_t, f_t>::start_cpufj_scratch_threads(population_t<i_t, f_t
     counter++;
   };
 
-  for (auto& cpu_fj : scratch_cpu_fj) {
-    cpu_fj.start_cpu_solver();
+  for (size_t i = 0; i < scratch_cpu_fj.size(); ++i) {
+#pragma omp task
+    fj_ptr->cpu_solve(*scratch_cpu_fj[i]);
   }
 }
 
@@ -112,34 +107,37 @@ void local_search_t<i_t, f_t>::start_cpufj_lptopt_scratch_threads(
   solution_lp.copy_new_assignment(
     host_copy(lp_optimal_solution, context.problem_ptr->handle_ptr->get_stream()));
   solution_lp.round_random_nearest(500);
-  scratch_cpu_fj_on_lp_opt.fj_cpu = fj.create_cpu_climber(
+  scratch_cpu_fj_on_lp_opt = fj.create_cpu_climber(
     solution_lp, default_weights, default_weights, 0., context.preempt_heuristic_solver_);
-  scratch_cpu_fj_on_lp_opt.fj_cpu->log_prefix = "******* scratch on LP optimal: ";
-  scratch_cpu_fj_on_lp_opt.fj_cpu->improvement_callback =
-    [this, &population](f_t obj, const std::vector<f_t>& h_vec) {
-      population.add_external_solution(h_vec, obj, solution_origin_t::CPUFJ);
-      if (obj < local_search_best_obj) {
-        CUOPT_LOG_DEBUG("******* New local search best obj %g, best overall %g",
-                        context.problem_ptr->get_user_obj_from_solver_obj(obj),
-                        context.problem_ptr->get_user_obj_from_solver_obj(
-                          population.is_feasible() ? population.best_feasible().get_objective()
-                                                   : std::numeric_limits<f_t>::max()));
-        local_search_best_obj = obj;
-      }
-    };
+  scratch_cpu_fj_on_lp_opt->log_prefix           = "******* scratch on LP optimal: ";
+  scratch_cpu_fj_on_lp_opt->improvement_callback = [this, &population](
+                                                     f_t obj, const std::vector<f_t>& h_vec) {
+    population.add_external_solution(h_vec, obj, solution_origin_t::CPUFJ);
+    if (obj < local_search_best_obj) {
+      CUOPT_LOG_DEBUG("******* New local search best obj %g, best overall %g",
+                      context.problem_ptr->get_user_obj_from_solver_obj(obj),
+                      context.problem_ptr->get_user_obj_from_solver_obj(
+                        population.is_feasible() ? population.best_feasible().get_objective()
+                                                 : std::numeric_limits<f_t>::max()));
+      local_search_best_obj = obj;
+    }
+  };
 
   // default weights
   cudaDeviceSynchronize();
-  scratch_cpu_fj_on_lp_opt.start_cpu_solver();
+
+#pragma omp task
+  fj_ptr->cpu_solve(*scratch_cpu_fj_on_lp_opt);
 }
 
 template <typename i_t, typename f_t>
 void local_search_t<i_t, f_t>::stop_cpufj_scratch_threads()
 {
   for (auto& cpu_fj : scratch_cpu_fj) {
-    cpu_fj.request_termination();
+    cpu_fj->halted = true;
   }
-  scratch_cpu_fj_on_lp_opt.request_termination();
+
+  scratch_cpu_fj_on_lp_opt->halted = true;
 }
 
 template <typename i_t, typename f_t>
@@ -155,20 +153,22 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
   auto h_weights          = cuopt::host_copy(in_fj.cstr_weights, solution.handle_ptr->get_stream());
   auto h_objective_weight = in_fj.objective_weight.value(solution.handle_ptr->get_stream());
   for (auto& cpu_fj : ls_cpu_fj) {
-    cpu_fj.fj_cpu = cpu_fj.fj_ptr->create_cpu_climber(solution,
-                                                      h_weights,
-                                                      h_weights,
-                                                      h_objective_weight,
-                                                      context.preempt_heuristic_solver_,
-                                                      fj_settings_t{},
-                                                      true);
+    cpu_fj = fj_ptr->create_cpu_climber(solution,
+                                        h_weights,
+                                        h_weights,
+                                        h_objective_weight,
+                                        context.preempt_heuristic_solver_,
+                                        fj_settings_t{},
+                                        true);
   }
 
   auto solution_copy = solution;
 
   // Start CPU solver in background thread
-  for (auto& cpu_fj : ls_cpu_fj) {
-    cpu_fj.start_cpu_solver();
+  for (size_t i = 0; i < ls_cpu_fj.size(); ++i) {
+    auto ptr = &ls_cpu_fj[i];
+#pragma omp task depend(inout : ptr)
+    fj_ptr->cpu_solve(*ls_cpu_fj[i]);
   }
 
   // Run GPU solver and measure execution time
@@ -176,9 +176,8 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
   in_fj.settings.time_limit = timer.remaining_time();
   in_fj.solve(solution);
 
-  // Stop CPU solver
-  for (auto& cpu_fj : ls_cpu_fj) {
-    cpu_fj.stop_cpu_solver();
+  for (size_t i = 0; i < ls_cpu_fj.size(); ++i) {
+    ls_cpu_fj[i]->halted = true;
   }
 
   auto gpu_fj_end        = std::chrono::high_resolution_clock::now();
@@ -188,13 +187,15 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
 
   f_t best_cpu_obj = std::numeric_limits<f_t>::max();
   // // Wait for CPU solver to finish
-  for (auto& cpu_fj : ls_cpu_fj) {
-    bool cpu_sol_found = cpu_fj.wait_for_cpu_solver();
-    if (cpu_sol_found) {
-      f_t cpu_obj = cpu_fj.fj_cpu->h_best_objective;
+  for (size_t i = 0; i < ls_cpu_fj.size(); ++i) {
+    auto ptr = &ls_cpu_fj[i];
+#pragma omp taskwait depend(inout : ptr)
+
+    if (ls_cpu_fj[i]->feasible_found) {
+      f_t cpu_obj = ls_cpu_fj[i]->h_best_objective;
       if (cpu_obj < best_cpu_obj) {
         best_cpu_obj = cpu_obj;
-        solution_cpu.copy_new_assignment(cpu_fj.fj_cpu->h_best_assignment);
+        solution_cpu.copy_new_assignment(ls_cpu_fj[i]->h_best_assignment);
         solution_cpu.compute_feasibility();
       }
     }

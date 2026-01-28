@@ -173,7 +173,7 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
 
         // Fill in the settings for branch and bound
         branch_and_bound_settings.time_limit           = timer_.remaining_time();
-        branch_and_bound_settings.num_threads          = num_threads - 1;
+        branch_and_bound_settings.num_threads          = std::max(num_threads - 1, 1);
         branch_and_bound_settings.print_presolve_stats = false;
         branch_and_bound_settings.absolute_mip_gap_tol =
           context.settings.tolerances.absolute_mip_gap;

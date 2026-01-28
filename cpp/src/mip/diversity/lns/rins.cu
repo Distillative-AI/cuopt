@@ -204,21 +204,24 @@ void rins_t<i_t, f_t>::run_rins(std::vector<f_t> lp_optimal_solution)
   mip_solver_context_t<i_t, f_t> fj_context(
     &rins_handle, &fixed_problem, context.settings, context.scaling);
   fj_t<i_t, f_t> fj(fj_context);
+  fj_t<i_t, f_t>* fj_ptr = &fj;
   solution_t<i_t, f_t> fj_solution(fixed_problem);
   fj_solution.copy_new_assignment(cuopt::host_copy(fixed_assignment, rins_handle.get_stream()));
   std::vector<f_t> default_weights(fixed_problem.n_constraints, 1.);
-  cpu_fj_thread_t<i_t, f_t> cpu_fj_thread;
-  cpu_fj_thread.fj_cpu             = fj.create_cpu_climber(fj_solution,
-                                               default_weights,
-                                               default_weights,
-                                               0.,
-                                               context.preempt_heuristic_solver_,
-                                               fj_settings_t{},
-                                               true);
-  cpu_fj_thread.fj_ptr             = &fj;
-  cpu_fj_thread.fj_cpu->log_prefix = "[RINS] ";
-  cpu_fj_thread.time_limit         = time_limit;
-  cpu_fj_thread.start_cpu_solver();
+
+  std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> fj_cpu =
+    fj.create_cpu_climber(fj_solution,
+                          default_weights,
+                          default_weights,
+                          0.,
+                          context.preempt_heuristic_solver_,
+                          fj_settings_t{},
+                          true);
+
+  fj_cpu->log_prefix = "[RINS] ";
+
+#pragma omp task
+  fj_ptr->cpu_solve(*fj_cpu, time_limit);
 
   f_t lower_bound = context.branch_and_bound_ptr ? context.branch_and_bound_ptr->get_lower_bound()
                                                  : -std::numeric_limits<f_t>::infinity();
@@ -284,15 +287,13 @@ void rins_t<i_t, f_t>::run_rins(std::vector<f_t> lp_optimal_solution)
     time_limit = std::min(time_limit + 2, settings.max_time_limit);
   }
 
-  cpu_fj_thread.stop_cpu_solver();
-  bool fj_solution_found = cpu_fj_thread.wait_for_cpu_solver();
-  CUOPT_LOG_DEBUG("RINS FJ ran for %d iterations", cpu_fj_thread.fj_cpu->iterations);
-  if (fj_solution_found) {
-    CUOPT_LOG_DEBUG("RINS FJ solution found. Objective %.16e",
-                    cpu_fj_thread.fj_cpu->h_best_objective);
-    rins_solution_queue.push_back(cpu_fj_thread.fj_cpu->h_best_assignment);
+#pragma omp taskwait
+
+  CUOPT_LOG_DEBUG("RINS FJ ran for %d iterations", fj_cpu->iterations);
+  if (fj_cpu->feasible_found) {
+    CUOPT_LOG_DEBUG("RINS FJ solution found. Objective %.16e", fj_cpu->h_best_objective);
+    rins_solution_queue.push_back(fj_cpu->h_best_assignment);
   }
-  // Thread will be automatically terminated and joined by destructor
 
   bool improvement_found = false;
   for (auto& fixed_sol : rins_solution_queue) {
