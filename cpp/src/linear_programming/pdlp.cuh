@@ -58,10 +58,9 @@ class pdlp_solver_t {
    * @param[in] op_problem An problem_t<i_t, f_t> object with a
    * representation of a linear program
    */
-  pdlp_solver_t(
-    problem_t<i_t, f_t>& op_problem,
-    pdlp_solver_settings_t<i_t, f_t> const& settings = pdlp_solver_settings_t<i_t, f_t>{},
-    bool is_batch_mode                               = false);
+  pdlp_solver_t(problem_t<i_t, f_t>& op_problem,
+                pdlp_solver_settings_t<i_t, f_t> const& settings,
+                bool is_batch_mode = false);
 
   optimization_problem_solution_t<i_t, f_t> run_solver(const timer_t& timer);
 
@@ -138,6 +137,8 @@ class pdlp_solver_t {
 
   raft::handle_t const* handle_ptr_;
   rmm::cuda_stream_view stream_view_;
+  // Intentionnaly take a copy to avoid an unintentional modification in the calling context
+  const pdlp_solver_settings_t<i_t, f_t> settings_;
 
   problem_t<i_t, f_t>* problem_ptr;
   // Combined bounds in op_problem_scaled_ will only be scaled if
@@ -178,9 +179,6 @@ class pdlp_solver_t {
   void halpern_update();
 
  private:
-  // Intentionnaly take a copy to avoid an unintentional modification in the calling context
-  const pdlp_solver_settings_t<i_t, f_t> settings_;
-
   void compute_fixed_error(std::vector<int>& has_restarted);
 
   pdlp_warm_start_data_t<i_t, f_t> get_filled_warmed_start_data();

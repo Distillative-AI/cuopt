@@ -27,9 +27,6 @@ template <typename i_t, typename f_t>
 struct segmented_sum_handler_t {
   segmented_sum_handler_t(rmm::cuda_stream_view stream_view) : stream_view_(stream_view) {}
 
-  // Empty constructor for when used in non batch mode
-  segmented_sum_handler_t() {}
-
   template <typename InputIteratorT, typename OutputIteratorT>
   void segmented_sum_helper(InputIteratorT input,
                             OutputIteratorT output,

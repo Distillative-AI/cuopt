@@ -85,6 +85,7 @@ infeasibility_information_t<i_t, f_t>::infeasibility_information_t(
     reusable_device_scalar_value_0_{0.0, stream_view_},
     reusable_device_scalar_value_neg_1_{-1.0, stream_view_},
     scaling_strategy_(scaling_strategy),
+    segmented_sum_handler_(stream_view_),
     climber_strategies_(climber_strategies),
     hyper_params_(hyper_params)
 {

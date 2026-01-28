@@ -60,6 +60,7 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(problem_t<i_t, f_t>& op_problem,
     batch_mode_(climber_strategies_.size() > 1),
     handle_ptr_(op_problem.handle_ptr),
     stream_view_(handle_ptr_->get_stream()),
+    settings_(settings),
     problem_ptr(&op_problem),
     op_problem_scaled_(
       op_problem, false),  // False to call the PDLP custom version of the problem copy constructor
@@ -79,14 +80,13 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(problem_t<i_t, f_t>& op_problem,
                         op_problem.n_variables,
                         op_problem.n_constraints,
                         climber_strategies_,
-                        settings.hyper_params},
+                        settings_.hyper_params},
     pdhg_solver_{handle_ptr_,
                  op_problem_scaled_,
                  is_legacy_batch_mode,
                  climber_strategies_,
-                 settings.hyper_params,
-                 settings.new_bounds},
-    settings_(settings),
+                 settings_.hyper_params,
+                 settings_.new_bounds},
     initial_scaling_strategy_{handle_ptr_,
                               op_problem_scaled_,
                               settings_.hyper_params.default_l_inf_ruiz_iterations,
@@ -95,7 +95,7 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(problem_t<i_t, f_t>& op_problem,
                               op_problem_scaled_.reverse_offsets,
                               op_problem_scaled_.reverse_constraints,
                               &pdhg_solver_,
-                              settings.hyper_params},
+                              settings_.hyper_params},
     average_op_problem_evaluation_cusparse_view_{handle_ptr_,
                                                  op_problem,
                                                  unscaled_primal_avg_solution_,
@@ -108,7 +108,7 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(problem_t<i_t, f_t>& op_problem,
                                                  op_problem.reverse_offsets,
                                                  op_problem.reverse_constraints,
                                                  climber_strategies_,
-                                                 settings.hyper_params},
+                                                 settings_.hyper_params},
     current_op_problem_evaluation_cusparse_view_{handle_ptr_,
                                                  op_problem,
                                                  pdhg_solver_.get_primal_solution(),
@@ -121,7 +121,7 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(problem_t<i_t, f_t>& op_problem,
                                                  op_problem.reverse_offsets,
                                                  op_problem.reverse_constraints,
                                                  climber_strategies_,
-                                                 settings.hyper_params},
+                                                 settings_.hyper_params},
     restart_strategy_{handle_ptr_,
                       op_problem,
                       average_op_problem_evaluation_cusparse_view_,
@@ -129,7 +129,7 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(problem_t<i_t, f_t>& op_problem,
                       dual_size_h_,
                       is_legacy_batch_mode,
                       climber_strategies_,
-                      settings.hyper_params},
+                      settings_.hyper_params},
     average_termination_strategy_{handle_ptr_,
                                   op_problem,
                                   op_problem_scaled_,
@@ -164,70 +164,71 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(problem_t<i_t, f_t>& op_problem,
                step_size_.end(),
                (f_t)settings_.hyper_params.initial_step_size_scaling);
 
-  if (settings.has_initial_primal_solution()) {
-    auto& primal_sol = settings.get_initial_primal_solution();
+  if (settings_.has_initial_primal_solution()) {
+    auto& primal_sol = settings_.get_initial_primal_solution();
     set_initial_primal_solution(primal_sol);
   }
-  if (settings.has_initial_dual_solution()) {
-    const auto& dual_sol = settings.get_initial_dual_solution();
+  if (settings_.has_initial_dual_solution()) {
+    const auto& dual_sol = settings_.get_initial_dual_solution();
     set_initial_dual_solution(dual_sol);
   }
 
-  if (settings.get_pdlp_warm_start_data().last_restart_duality_gap_dual_solution_.size() != 0) {
+  if (settings_.get_pdlp_warm_start_data().last_restart_duality_gap_dual_solution_.size() != 0) {
     cuopt_expects(
       !batch_mode_, error_type_t::ValidationError, "Batch mode not supported for warm start");
-    cuopt_expects(settings.pdlp_solver_mode == pdlp_solver_mode_t::Stable2,
+    cuopt_expects(settings_.pdlp_solver_mode == pdlp_solver_mode_t::Stable2,
                   error_type_t::ValidationError,
                   "Only Stable2 mode supported for warm start");
-    set_initial_primal_solution(settings.get_pdlp_warm_start_data().current_primal_solution_);
-    set_initial_dual_solution(settings.get_pdlp_warm_start_data().current_dual_solution_);
-    initial_step_size_     = settings.get_pdlp_warm_start_data().initial_step_size_;
-    initial_primal_weight_ = settings.get_pdlp_warm_start_data().initial_primal_weight_;
-    total_pdlp_iterations_ = settings.get_pdlp_warm_start_data().total_pdlp_iterations_;
+    set_initial_primal_solution(settings_.get_pdlp_warm_start_data().current_primal_solution_);
+    set_initial_dual_solution(settings_.get_pdlp_warm_start_data().current_dual_solution_);
+    initial_step_size_     = settings_.get_pdlp_warm_start_data().initial_step_size_;
+    initial_primal_weight_ = settings_.get_pdlp_warm_start_data().initial_primal_weight_;
+    total_pdlp_iterations_ = settings_.get_pdlp_warm_start_data().total_pdlp_iterations_;
     pdhg_solver_.total_pdhg_iterations_ =
-      settings.get_pdlp_warm_start_data().total_pdhg_iterations_;
+      settings_.get_pdlp_warm_start_data().total_pdhg_iterations_;
     pdhg_solver_.get_d_total_pdhg_iterations().set_value_async(
-      settings.get_pdlp_warm_start_data().total_pdhg_iterations_, stream_view_);
+      settings_.get_pdlp_warm_start_data().total_pdhg_iterations_, stream_view_);
     restart_strategy_.last_candidate_kkt_score =
-      settings.get_pdlp_warm_start_data().last_candidate_kkt_score_;
+      settings_.get_pdlp_warm_start_data().last_candidate_kkt_score_;
     restart_strategy_.last_restart_kkt_score =
-      settings.get_pdlp_warm_start_data().last_restart_kkt_score_;
+      settings_.get_pdlp_warm_start_data().last_restart_kkt_score_;
     raft::copy(restart_strategy_.weighted_average_solution_.sum_primal_solutions_.data(),
-               settings.get_pdlp_warm_start_data().sum_primal_solutions_.data(),
-               settings.get_pdlp_warm_start_data().sum_primal_solutions_.size(),
+               settings_.get_pdlp_warm_start_data().sum_primal_solutions_.data(),
+               settings_.get_pdlp_warm_start_data().sum_primal_solutions_.size(),
                stream_view_);
     raft::copy(restart_strategy_.weighted_average_solution_.sum_dual_solutions_.data(),
-               settings.get_pdlp_warm_start_data().sum_dual_solutions_.data(),
-               settings.get_pdlp_warm_start_data().sum_dual_solutions_.size(),
+               settings_.get_pdlp_warm_start_data().sum_dual_solutions_.data(),
+               settings_.get_pdlp_warm_start_data().sum_dual_solutions_.size(),
                stream_view_);
     raft::copy(unscaled_primal_avg_solution_.data(),
-               settings.get_pdlp_warm_start_data().initial_primal_average_.data(),
-               settings.get_pdlp_warm_start_data().initial_primal_average_.size(),
+               settings_.get_pdlp_warm_start_data().initial_primal_average_.data(),
+               settings_.get_pdlp_warm_start_data().initial_primal_average_.size(),
                stream_view_);
     raft::copy(unscaled_dual_avg_solution_.data(),
-               settings.get_pdlp_warm_start_data().initial_dual_average_.data(),
-               settings.get_pdlp_warm_start_data().initial_dual_average_.size(),
+               settings_.get_pdlp_warm_start_data().initial_dual_average_.data(),
+               settings_.get_pdlp_warm_start_data().initial_dual_average_.size(),
                stream_view_);
     raft::copy(pdhg_solver_.get_saddle_point_state().get_current_AtY().data(),
-               settings.get_pdlp_warm_start_data().current_ATY_.data(),
-               settings.get_pdlp_warm_start_data().current_ATY_.size(),
+               settings_.get_pdlp_warm_start_data().current_ATY_.data(),
+               settings_.get_pdlp_warm_start_data().current_ATY_.size(),
                stream_view_);
-    raft::copy(restart_strategy_.last_restart_duality_gap_.primal_solution_.data(),
-               settings.get_pdlp_warm_start_data().last_restart_duality_gap_primal_solution_.data(),
-               settings.get_pdlp_warm_start_data().last_restart_duality_gap_primal_solution_.size(),
-               stream_view_);
+    raft::copy(
+      restart_strategy_.last_restart_duality_gap_.primal_solution_.data(),
+      settings_.get_pdlp_warm_start_data().last_restart_duality_gap_primal_solution_.data(),
+      settings_.get_pdlp_warm_start_data().last_restart_duality_gap_primal_solution_.size(),
+      stream_view_);
     raft::copy(restart_strategy_.last_restart_duality_gap_.dual_solution_.data(),
-               settings.get_pdlp_warm_start_data().last_restart_duality_gap_dual_solution_.data(),
-               settings.get_pdlp_warm_start_data().last_restart_duality_gap_dual_solution_.size(),
+               settings_.get_pdlp_warm_start_data().last_restart_duality_gap_dual_solution_.data(),
+               settings_.get_pdlp_warm_start_data().last_restart_duality_gap_dual_solution_.size(),
                stream_view_);
 
-    const auto value = settings.get_pdlp_warm_start_data().sum_solution_weight_;
+    const auto value = settings_.get_pdlp_warm_start_data().sum_solution_weight_;
     restart_strategy_.weighted_average_solution_.sum_primal_solution_weights_.set_value_async(
       value, stream_view_);
     restart_strategy_.weighted_average_solution_.sum_dual_solution_weights_.set_value_async(
       value, stream_view_);
     restart_strategy_.weighted_average_solution_.iterations_since_last_restart_ =
-      settings.get_pdlp_warm_start_data().iterations_since_last_restart_;
+      settings_.get_pdlp_warm_start_data().iterations_since_last_restart_;
   }
   // Checks performed below are assert only
   best_primal_quality_so_far_.primal_objective = (op_problem_scaled_.maximize)
@@ -236,22 +237,22 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(problem_t<i_t, f_t>& op_problem,
   op_problem.check_problem_representation(true, false);
   op_problem_scaled_.check_problem_representation(true, false);
 
-  if (settings.new_bounds.size() > 0) {
+  if (settings_.new_bounds.size() > 0) {
     batch_solution_to_return_.get_additional_termination_informations().resize(
-      settings.new_bounds.size());
-    batch_solution_to_return_.get_terminations_status().resize(settings.new_bounds.size());
+      settings_.new_bounds.size());
+    batch_solution_to_return_.get_terminations_status().resize(settings_.new_bounds.size());
     batch_solution_to_return_.get_primal_solution().resize(
-      op_problem.n_variables * settings.new_bounds.size(), stream_view_);
+      op_problem.n_variables * settings_.new_bounds.size(), stream_view_);
     batch_solution_to_return_.get_dual_solution().resize(
-      op_problem.n_constraints * settings.new_bounds.size(), stream_view_);
+      op_problem.n_constraints * settings_.new_bounds.size(), stream_view_);
     batch_solution_to_return_.get_reduced_cost().resize(
-      op_problem.n_variables * settings.new_bounds.size(), stream_view_);
+      op_problem.n_variables * settings_.new_bounds.size(), stream_view_);
   }
   for (size_t i = 0; i < climber_strategies_.size(); ++i) {
     climber_strategies_[i].original_index = static_cast<int>(i);
   }
   if (batch_mode_) {
-    cuopt_assert(!settings.detect_infeasibility,
+    cuopt_assert(!settings_.detect_infeasibility,
                  "Detect infeasibility must be false in batch mode");
   }
 }

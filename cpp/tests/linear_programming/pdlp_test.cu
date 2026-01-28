@@ -621,7 +621,8 @@ TEST(pdlp_class, initial_rhs_and_c)
     &handle_, mps_data_model);
   cuopt::linear_programming::detail::problem_t<int, double> problem(op_problem);
 
-  cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem);
+  auto solver_settings = pdlp_solver_settings_t<int, double>{};
+  cuopt::linear_programming::detail::pdlp_solver_t<int, double> solver(problem, solver_settings);
   constexpr double test_initial_primal_factor = 1.0;
   constexpr double test_initial_dual_factor   = 2.0;
   solver.set_relative_dual_tolerance_factor(test_initial_dual_factor);

@@ -25,8 +25,8 @@ struct SpMM_benchmarks_context_t {
                             int dual_size,
                             size_t current_batch_size,
                             raft::handle_t const* handle_ptr)
-    : x(primal_size * current_batch_size, handle_ptr->get_stream()),
-      y(dual_size * current_batch_size, handle_ptr->get_stream()),
+    : x(static_cast<size_t>(primal_size) * current_batch_size, handle_ptr->get_stream()),
+      y(static_cast<size_t>(dual_size) * current_batch_size, handle_ptr->get_stream()),
       buffer_non_transpose_batch(0, handle_ptr->get_stream()),
       buffer_transpose_batch(0, handle_ptr->get_stream()),
       alpha(1, handle_ptr->get_stream()),
