@@ -168,7 +168,7 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
     branch_and_bound_settings.relative_mip_gap_tol = context.settings.tolerances.relative_mip_gap;
     branch_and_bound_settings.integer_tol = context.settings.tolerances.integrality_tolerance;
     branch_and_bound_settings.reliability_branching_settings.enable =
-      solver_settings_.enable_reliability_branching;
+      solver_settings_.reliability_branching;
 
     if (context.settings.num_cpu_threads < 0) {
       branch_and_bound_settings.num_threads = std::max(1, omp_get_max_threads() - 1);
