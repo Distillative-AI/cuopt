@@ -2397,7 +2397,8 @@ node_solve_info_t branch_and_bound_t<i_t, f_t>::solve_node_bsp(bb_worker_state_t
       num_bounds_changed);
 #endif
 
-    worker.work_context.record_work(prediction);
+    // worker.work_context.record_work(prediction);
+    worker.work_context.record_work(worker.node_presolver->last_nnz_processed);
   }
 #endif
 

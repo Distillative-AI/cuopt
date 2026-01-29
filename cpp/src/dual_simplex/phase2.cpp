@@ -2656,7 +2656,8 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
         features.delta_y_nz_percentage * 100.0);
 #endif
 
-      work_unit_context->record_work(prediction);
+      // work_unit_context->record_work(prediction);
+      work_unit_context->record_work(total_loads + total_stores);
     }
   });
 
@@ -3301,7 +3302,9 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
         //        features.interval_runtime,
         //        prediction - features.interval_runtime);
         // printf("Current iter %d\n", iter);
-        work_unit_context->record_work(prediction);
+
+        // work_unit_context->record_work(prediction);
+        work_unit_context->record_work(total_loads + total_stores);
       }
 
       last_feature_log_iter = iter;
