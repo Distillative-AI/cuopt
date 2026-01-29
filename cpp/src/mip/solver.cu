@@ -183,6 +183,11 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
         branch_and_bound_settings.reliability_branching_settings.enable =
           solver_settings_.reliability_branching;
 
+        dual_simplex::mip_solve_mode_t solve_mode =
+          branch_and_bound_settings.num_threads == 1
+            ? dual_simplex::mip_solve_mode_t::BNB_SINGLE_THREADED
+            : dual_simplex::mip_solve_mode_t::BNB_PARALLEL;
+
         // Set the branch and bound -> primal heuristics callback
         branch_and_bound_settings.solution_callback =
           std::bind(&branch_and_bound_solution_helper_t<i_t, f_t>::solution_callback,
@@ -229,8 +234,7 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
 
 #pragma omp task
         {
-          bb_status = branch_and_bound->solve(branch_and_bound_solution,
-                                              dual_simplex::mip_solve_mode_t::BNB_PARALLEL);
+          bb_status = branch_and_bound->solve(branch_and_bound_solution, solve_mode);
         }
       }
 
