@@ -51,6 +51,16 @@ enum class mip_exploration_status_t {
   WORK_LIMIT = 6,  // The solver reached a deterministic work limit
 };
 
+enum class node_solve_info_t {
+  NO_CHILDREN      = 0,  // The node does not produced children
+  UP_CHILD_FIRST   = 1,  // The up child should be explored first
+  DOWN_CHILD_FIRST = 2,  // The down child should be explored first
+  TIME_LIMIT       = 3,  // The solver reached a time limit
+  ITERATION_LIMIT  = 4,  // The solver reached a iteration limit
+  NUMERICAL        = 5,  // The solver encounter a numerical error when solving the node
+  WORK_LIMIT       = 6,  // The solver reached a deterministic work limit
+};
+
 template <typename i_t, typename f_t>
 class bounds_strengthening_t;
 
@@ -230,7 +240,13 @@ class branch_and_bound_t {
   // We use best-first to pick the `start_node` and then perform a depth-first search
   // from this node (i.e., a plunge). It can only backtrack to a sibling node.
   // Unexplored nodes in the subtree are inserted back into the global heap.
-  void plunge_from(bb_worker_state_t<i_t, f_t>& worker, mip_node_t<i_t, f_t>* start_node);
+  void plunge_from(i_t task_id,
+                   mip_node_t<i_t, f_t>* start_node,
+                   lp_problem_t<i_t, f_t>& leaf_problem,
+                   bounds_strengthening_t<i_t, f_t>& node_presolver,
+                   basis_update_mpf_t<i_t, f_t>& basis_update,
+                   std::vector<i_t>& basic_list,
+                   std::vector<i_t>& nonbasic_list);
 
   // Each "main" thread pops a node from the global heap and then performs a plunge
   // (i.e., a shallow dive) into the subtree determined by the node.
@@ -238,24 +254,34 @@ class branch_and_bound_t {
 
   // Perform a deep dive in the subtree determined by the `start_node` in order
   // to find integer feasible solutions.
-  void dive_from(bb_worker_state_t<i_t, f_t>& worker,
-                 mip_node_t<i_t, f_t>& start_node,
+  void dive_from(mip_node_t<i_t, f_t>& start_node,
                  const std::vector<f_t>& start_lower,
                  const std::vector<f_t>& start_upper,
+                 lp_problem_t<i_t, f_t>& leaf_problem,
+                 bounds_strengthening_t<i_t, f_t>& node_presolver,
+                 basis_update_mpf_t<i_t, f_t>& basis_update,
+                 std::vector<i_t>& basic_list,
+                 std::vector<i_t>& nonbasic_list,
                  bnb_worker_type_t diving_type);
 
   // Each diving thread pops the first node from the dive queue and then performs
   // a deep dive into the subtree determined by the node.
   void diving_thread(bnb_worker_type_t diving_type);
 
-  // Solve the LP relaxation of a leaf node (unified for BSP and non-BSP)
-  dual::status_t solve_node_lp(bb_worker_state_t<i_t, f_t>& worker,
-                               mip_node_t<i_t, f_t>* node_ptr,
+  // Solve the LP relaxation of a leaf node
+  dual::status_t solve_node_lp(mip_node_t<i_t, f_t>* node_ptr,
+                               lp_problem_t<i_t, f_t>& leaf_problem,
                                lp_solution_t<i_t, f_t>& leaf_solution,
+                               basis_update_mpf_t<i_t, f_t>& basis_factors,
+                               std::vector<i_t>& basic_list,
+                               std::vector<i_t>& nonbasic_list,
+                               bounds_strengthening_t<i_t, f_t>& node_presolver,
                                bnb_worker_type_t thread_type,
+                               bool recompute_bounds_and_basis,
                                const std::vector<f_t>& root_lower,
                                const std::vector<f_t>& root_upper,
-                               bnb_stats_t<i_t, f_t>& stats);
+                               bnb_stats_t<i_t, f_t>& stats,
+                               logger_t& log);
 
   // Update the tree based on the LP relaxation. Returns the status
   // of the node and, if appropriated, the preferred rounding direction
@@ -289,6 +315,12 @@ class branch_and_bound_t {
 
   // Balance worker loads - redistribute nodes only if significant imbalance detected
   void balance_worker_loads();
+
+  // BSP-specific node solving that records events
+  node_solve_info_t solve_node_bsp(bb_worker_state_t<i_t, f_t>& worker,
+                                   mip_node_t<i_t, f_t>* node_ptr,
+                                   search_tree_t<i_t, f_t>& search_tree,
+                                   double current_horizon);
 
   // Compute accurate lower bound from all BSP sources (called during sync phase)
   f_t compute_bsp_lower_bound();
