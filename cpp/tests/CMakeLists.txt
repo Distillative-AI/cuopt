@@ -1,5 +1,5 @@
 # cmake-format: off
-# SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 # cmake-format: on
 
@@ -25,9 +25,9 @@ if(BUILD_TESTS)
       GTest::gmock
       GTest::gtest
   )
-  # if(NOT DEFINED INSTALL_TARGET OR "${INSTALL_TARGET}" STREQUAL "")
-  #   target_link_options(cuopttestutils PRIVATE -Wl,--enable-new-dtags)
-  # endif()
+  if(NOT DEFINED INSTALL_TARGET OR "${INSTALL_TARGET}" STREQUAL "")
+    target_link_options(cuopttestutils PRIVATE -Wl,--enable-new-dtags)
+  endif()
 endif()
 
 
@@ -55,9 +55,9 @@ function(ConfigureTest CMAKE_TEST_NAME)
         GTest::gtest_main
         ${CUOPT_PRIVATE_CUDA_LIBS}
     )
-    # if(NOT DEFINED INSTALL_TARGET OR "${INSTALL_TARGET}" STREQUAL "")
-    #   target_link_options(${CMAKE_TEST_NAME} PRIVATE -Wl,--enable-new-dtags)
-    # endif()
+    if(NOT DEFINED INSTALL_TARGET OR "${INSTALL_TARGET}" STREQUAL "")
+      target_link_options(${CMAKE_TEST_NAME} PRIVATE -Wl,--enable-new-dtags)
+    endif()
 
     add_test(NAME ${CMAKE_TEST_NAME} COMMAND ${CMAKE_TEST_NAME})
 
