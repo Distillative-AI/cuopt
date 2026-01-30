@@ -10,7 +10,6 @@
 #include <dual_simplex/bb_event.hpp>
 #include <dual_simplex/bb_worker_state.hpp>
 #include <dual_simplex/diving_heuristics.hpp>
-#include <dual_simplex/dual_simplex_features.hpp>
 #include <dual_simplex/initial_basis.hpp>
 #include <dual_simplex/mip_node.hpp>
 #include <dual_simplex/node_queue.hpp>
@@ -21,14 +20,12 @@
 #include <dual_simplex/solve.hpp>
 #include <dual_simplex/types.hpp>
 #include <utilities/macros.cuh>
-
 #include <utilities/omp_helpers.hpp>
 #include <utilities/producer_sync.hpp>
 #include <utilities/work_limit_timer.hpp>
 #include <utilities/work_unit_scheduler.hpp>
 
 #include <omp.h>
-#include <atomic>
 #include <vector>
 
 namespace cuopt::linear_programming::dual_simplex {
@@ -117,7 +114,7 @@ class branch_and_bound_t {
 
   // BSP-aware solution injection for deterministic mode
   // This queues the solution to be processed at the correct work unit timestamp
-  void set_new_solution_deterministic(const std::vector<f_t>& solution, double work_unit_ts);
+  void queue_external_solution_deterministic(const std::vector<f_t>& solution, double work_unit_ts);
 
   void set_concurrent_lp_root_solve(bool enable) { enable_concurrent_lp_root_solve_ = enable; }
 
@@ -177,9 +174,6 @@ class branch_and_bound_t {
   // Structure with the general info of the solver.
   bnb_stats_t<i_t, f_t> exploration_stats_;
 
-  // Bounds strengthening feature tracking (non-deterministic path)
-  bounds_strengthening_features_t<i_t, f_t> bs_features_;
-
   // Mutex for repair
   omp_mutex_t mutex_repair_;
   std::vector<std::vector<f_t>> repair_queue_;
@@ -222,7 +216,7 @@ class branch_and_bound_t {
   void report(char symbol, f_t obj, f_t lower_bound, i_t node_depth);
 
   // Set the final solution.
-  mip_status_t set_final_solution(mip_solution_t<i_t, f_t>& solution, f_t lower_bound);
+  void set_final_solution(mip_solution_t<i_t, f_t>& solution, f_t lower_bound);
 
   // Update the incumbent solution with the new feasible solution
   // found during branch and bound.
@@ -308,8 +302,8 @@ class branch_and_bound_t {
   // Main BSP coordinator loop - runs in deterministic mode
   void run_bsp_coordinator(const csr_matrix_t<i_t, f_t>& Arow);
 
-  // Process history and synchronize - the "brain" of BSP
-  void process_history_and_sync(const bb_event_batch_t<i_t, f_t>& events);
+  // Gather all events generated, sort by WU timestamp, apply
+  void sort_replay_events(const bb_event_batch_t<i_t, f_t>& events);
 
   // Prune nodes held by workers based on new incumbent
   void prune_worker_nodes_vs_incumbent();
@@ -344,16 +338,17 @@ class branch_and_bound_t {
                      mip_node_t<i_t, f_t> starting_node);
 
   // Populate diving heap from BFS worker backlogs at sync
-  void populate_diving_heap_at_sync();
+  void populate_diving_heap();
 
   // Assign starting nodes to diving workers from diving heap
   void assign_diving_nodes();
 
   // Collect and merge diving solutions at sync
-  void merge_diving_solutions();
+  void collect_diving_solutions();
 
  private:
   // BSP state
+  // unique_ptr as we only want to initialize these if we're in the determinism codepath
   std::unique_ptr<bb_worker_pool_t<i_t, f_t>> bsp_workers_;
   std::unique_ptr<cuopt::work_unit_scheduler_t> bsp_scheduler_;
   std::atomic<bool> bsp_terminated_{false};
@@ -386,6 +381,7 @@ class branch_and_bound_t {
   // ============================================================================
 
   // Diving worker pool
+  // unique_ptr as we only want to initialize these if we're in the determinism codepath
   std::unique_ptr<bsp_diving_worker_pool_t<i_t, f_t>> bsp_diving_workers_;
 
   // Diving heap - nodes available for diving, sorted by objective estimate

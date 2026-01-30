@@ -9,17 +9,12 @@
 #include <dual_simplex/basis_updates.hpp>
 #include <dual_simplex/initial_basis.hpp>
 #include <dual_simplex/triangle_solve.hpp>
-#include <utilities/memory_instrumentation.hpp>
-
 #include <raft/common/nvtx.hpp>
 
 #include <cmath>
 #include <limits>
 
 namespace cuopt::linear_programming::dual_simplex {
-
-// Import instrumented vector type
-using cuopt::ins_vector;
 
 template <typename i_t, typename f_t>
 i_t basis_update_t<i_t, f_t>::b_solve(const std::vector<f_t>& rhs, std::vector<f_t>& solution) const

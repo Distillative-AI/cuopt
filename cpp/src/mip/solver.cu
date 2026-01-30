@@ -240,7 +240,7 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
       // TODO once deterministic GPU heuristics are integrated
       // context.problem_ptr->branch_and_bound_callback =
       //   [bb = branch_and_bound.get()](const std::vector<f_t>& solution) {
-      //     bb->set_new_solution_deterministic(solution, 0.0);
+      //     bb->queue_external_solution_deterministic(solution, 0.0);
       //   };
     }
 

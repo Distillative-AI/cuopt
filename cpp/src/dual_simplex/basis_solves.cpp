@@ -12,14 +12,10 @@
 #include <dual_simplex/singletons.hpp>
 #include <dual_simplex/tic_toc.hpp>
 #include <dual_simplex/triangle_solve.hpp>
-#include <utilities/memory_instrumentation.hpp>
 
 #include <raft/common/nvtx.hpp>
 
 namespace cuopt::linear_programming::dual_simplex {
-
-// Import instrumented vector type
-using cuopt::ins_vector;
 
 template <typename i_t>
 i_t reorder_basic_list(const std::vector<i_t>& q, std::vector<i_t>& basic_list)

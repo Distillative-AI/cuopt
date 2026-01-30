@@ -117,9 +117,9 @@ struct bb_worker_state_t {
   bb_event_batch_t<i_t, f_t> events;
   int event_sequence{0};
 
-  std::unique_ptr<lp_problem_t<i_t, f_t>> leaf_problem;
-  std::unique_ptr<basis_update_mpf_t<i_t, f_t>> basis_factors;
-  std::unique_ptr<bounds_strengthening_t<i_t, f_t>> node_presolver;
+  lp_problem_t<i_t, f_t> leaf_problem;
+  basis_update_mpf_t<i_t, f_t> basis_factors;
+  bounds_strengthening_t<i_t, f_t> node_presolver;
   std::vector<i_t> basic_list;
   std::vector<i_t> nonbasic_list;
   work_limit_context_t work_context;
@@ -148,23 +148,19 @@ struct bb_worker_state_t {
   std::vector<i_t> pc_num_up_snapshot;
   std::vector<i_t> pc_num_down_snapshot;
 
-  explicit bb_worker_state_t(int id)
-    : worker_id(id), work_context("BB_Worker_" + std::to_string(id))
+  explicit bb_worker_state_t(int id,
+                             const lp_problem_t<i_t, f_t>& original_lp,
+                             const csr_matrix_t<i_t, f_t>& Arow,
+                             const std::vector<variable_type_t>& var_types,
+                             i_t refactor_frequency,
+                             bool deterministic)
+    : worker_id(id),
+      work_context("BB_Worker_" + std::to_string(id)),
+      leaf_problem(original_lp),
+      basis_factors(original_lp.num_rows, refactor_frequency),
+      node_presolver(original_lp, Arow, std::vector<char>{}, var_types)
   {
-  }
-
-  void initialize(const lp_problem_t<i_t, f_t>& original_lp,
-                  const csr_matrix_t<i_t, f_t>& Arow,
-                  const std::vector<variable_type_t>& var_types,
-                  i_t refactor_frequency,
-                  bool deterministic)
-  {
-    leaf_problem  = std::make_unique<lp_problem_t<i_t, f_t>>(original_lp);
-    const i_t m   = leaf_problem->num_rows;
-    basis_factors = std::make_unique<basis_update_mpf_t<i_t, f_t>>(m, refactor_frequency);
-    std::vector<char> row_sense;
-    node_presolver =
-      std::make_unique<bounds_strengthening_t<i_t, f_t>>(*leaf_problem, Arow, row_sense, var_types);
+    const i_t m = leaf_problem.num_rows;
     basic_list.resize(m);
     nonbasic_list.clear();
     work_context.deterministic = deterministic;
@@ -350,9 +346,9 @@ struct bsp_diving_worker_state_t {
   double horizon_end{0.0};
   work_limit_context_t work_context;
 
-  std::unique_ptr<lp_problem_t<i_t, f_t>> leaf_problem;
-  std::unique_ptr<basis_update_mpf_t<i_t, f_t>> basis_factors;
-  std::unique_ptr<bounds_strengthening_t<i_t, f_t>> node_presolver;
+  lp_problem_t<i_t, f_t> leaf_problem;
+  basis_update_mpf_t<i_t, f_t> basis_factors;
+  bounds_strengthening_t<i_t, f_t> node_presolver;
   std::vector<i_t> basic_list;
   std::vector<i_t> nonbasic_list;
   bool recompute_bounds_and_basis{true};
@@ -382,29 +378,32 @@ struct bsp_diving_worker_state_t {
   double total_runtime{0.0};
   double total_nowork_time{0.0};
 
-  explicit bsp_diving_worker_state_t(int id, bnb_worker_type_t type)
-    : worker_id(id), diving_type(type), work_context("Diving_Worker_" + std::to_string(id))
+  explicit bsp_diving_worker_state_t(int id,
+                                     bnb_worker_type_t type,
+                                     const lp_problem_t<i_t, f_t>& original_lp,
+                                     const csr_matrix_t<i_t, f_t>& Arow,
+                                     const std::vector<variable_type_t>& var_types,
+                                     i_t refactor_frequency,
+                                     bool deterministic)
+    : worker_id(id),
+      diving_type(type),
+      work_context("Diving_Worker_" + std::to_string(id)),
+      leaf_problem(original_lp),
+      basis_factors(original_lp.num_rows, refactor_frequency),
+      node_presolver(original_lp, Arow, std::vector<char>{}, var_types)
   {
-  }
-
-  void initialize(const lp_problem_t<i_t, f_t>& original_lp,
-                  const csr_matrix_t<i_t, f_t>& Arow,
-                  const std::vector<variable_type_t>& var_types,
-                  i_t refactor_frequency,
-                  bool deterministic)
-  {
-    leaf_problem  = std::make_unique<lp_problem_t<i_t, f_t>>(original_lp);
-    const i_t m   = leaf_problem->num_rows;
-    basis_factors = std::make_unique<basis_update_mpf_t<i_t, f_t>>(m, refactor_frequency);
-    std::vector<char> row_sense;
-    node_presolver =
-      std::make_unique<bounds_strengthening_t<i_t, f_t>>(*leaf_problem, Arow, row_sense, var_types);
+    const i_t m = leaf_problem.num_rows;
     basic_list.resize(m);
     nonbasic_list.clear();
     dive_lower                 = original_lp.lower;
     dive_upper                 = original_lp.upper;
     work_context.deterministic = deterministic;
   }
+
+  bsp_diving_worker_state_t(const bsp_diving_worker_state_t<i_t, f_t>&)            = delete;
+  bsp_diving_worker_state_t& operator=(const bsp_diving_worker_state_t<i_t, f_t>&) = delete;
+  bsp_diving_worker_state_t(bsp_diving_worker_state_t<i_t, f_t>&&)                 = default;
+  bsp_diving_worker_state_t& operator=(bsp_diving_worker_state_t<i_t, f_t>&&)      = default;
 
   void reset_for_horizon(double start, double end, f_t upper_bound)
   {
@@ -508,22 +507,19 @@ struct bsp_diving_worker_state_t {
 template <typename i_t, typename f_t>
 class bsp_diving_worker_pool_t {
  public:
-  bsp_diving_worker_pool_t() = default;
-
-  void initialize(int num_workers,
-                  const std::vector<bnb_worker_type_t>& diving_types,
-                  const lp_problem_t<i_t, f_t>& original_lp,
-                  const csr_matrix_t<i_t, f_t>& Arow,
-                  const std::vector<variable_type_t>& var_types,
-                  i_t refactor_frequency,
-                  bool deterministic)
+  bsp_diving_worker_pool_t(int num_workers,
+                           const std::vector<bnb_worker_type_t>& diving_types,
+                           const lp_problem_t<i_t, f_t>& original_lp,
+                           const csr_matrix_t<i_t, f_t>& Arow,
+                           const std::vector<variable_type_t>& var_types,
+                           i_t refactor_frequency,
+                           bool deterministic)
   {
-    workers_.clear();
     workers_.reserve(num_workers);
     for (int i = 0; i < num_workers; ++i) {
       bnb_worker_type_t type = diving_types[i % diving_types.size()];
-      workers_.emplace_back(i, type);
-      workers_.back().initialize(original_lp, Arow, var_types, refactor_frequency, deterministic);
+      workers_.emplace_back(
+        i, type, original_lp, Arow, var_types, refactor_frequency, deterministic);
     }
   }
 
@@ -562,20 +558,16 @@ class bsp_diving_worker_pool_t {
 template <typename i_t, typename f_t>
 class bb_worker_pool_t {
  public:
-  bb_worker_pool_t() = default;
-
-  void initialize(int num_workers,
-                  const lp_problem_t<i_t, f_t>& original_lp,
-                  const csr_matrix_t<i_t, f_t>& Arow,
-                  const std::vector<variable_type_t>& var_types,
-                  i_t refactor_frequency,
-                  bool deterministic)
+  bb_worker_pool_t(int num_workers,
+                   const lp_problem_t<i_t, f_t>& original_lp,
+                   const csr_matrix_t<i_t, f_t>& Arow,
+                   const std::vector<variable_type_t>& var_types,
+                   i_t refactor_frequency,
+                   bool deterministic)
   {
-    workers_.clear();
     workers_.reserve(num_workers);
     for (int i = 0; i < num_workers; ++i) {
-      workers_.emplace_back(i);
-      workers_.back().initialize(original_lp, Arow, var_types, refactor_frequency, deterministic);
+      workers_.emplace_back(i, original_lp, Arow, var_types, refactor_frequency, deterministic);
     }
   }
 
