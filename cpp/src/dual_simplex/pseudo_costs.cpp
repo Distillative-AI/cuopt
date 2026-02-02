@@ -267,7 +267,6 @@ template <typename i_t, typename f_t>
 void pseudo_costs_t<i_t, f_t>::update_pseudo_costs(mip_node_t<i_t, f_t>* node_ptr,
                                                    f_t leaf_objective)
 {
-  std::lock_guard<omp_mutex_t> lock(pseudo_cost_mutex[node_ptr->branch_var]);
   const f_t change_in_obj = leaf_objective - node_ptr->lower_bound;
   const f_t frac          = node_ptr->branch_dir == rounding_direction_t::DOWN
                               ? node_ptr->fractional_val - std::floor(node_ptr->fractional_val)
@@ -293,8 +292,6 @@ void pseudo_costs_t<i_t, f_t>::initialized(i_t& num_initialized_down,
   pseudo_cost_up_avg   = 0;
   const i_t n          = pseudo_cost_sum_down.size();
   for (i_t j = 0; j < n; j++) {
-    std::lock_guard<omp_mutex_t> lock(pseudo_cost_mutex[j]);
-
     if (pseudo_cost_num_down[j] > 0) {
       num_initialized_down++;
       if (std::isfinite(pseudo_cost_sum_down[j])) {
@@ -348,7 +345,6 @@ i_t pseudo_costs_t<i_t, f_t>::variable_selection(const std::vector<i_t>& fractio
   for (i_t k = 0; k < num_fractional; k++) {
     const i_t j = fractional[k];
 
-    pseudo_cost_mutex[j].lock();
     if (pseudo_cost_num_down[j] != 0) {
       pseudo_cost_down[k] = pseudo_cost_sum_down[j] / pseudo_cost_num_down[j];
     } else {
@@ -360,7 +356,6 @@ i_t pseudo_costs_t<i_t, f_t>::variable_selection(const std::vector<i_t>& fractio
     } else {
       pseudo_cost_up[k] = pseudo_cost_up_avg;
     }
-    pseudo_cost_mutex[j].unlock();
 
     constexpr f_t eps = 1e-6;
     const f_t f_down  = solution[j] - std::floor(solution[j]);
@@ -441,8 +436,6 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
   omp_mutex_t score_mutex;
 
   for (auto j : fractional) {
-    std::lock_guard<omp_mutex_t> lock(pseudo_cost_mutex[j]);
-
     if (pseudo_cost_num_down[j] < reliable_threshold ||
         pseudo_cost_num_up[j] < reliable_threshold) {
       unreliable_list.push_back(j);
@@ -596,7 +589,6 @@ f_t pseudo_costs_t<i_t, f_t>::obj_estimate(const std::vector<i_t>& fractional,
     f_t pseudo_cost_down = 0;
     f_t pseudo_cost_up   = 0;
 
-    pseudo_cost_mutex[j].lock();
     if (pseudo_cost_num_down[j] != 0) {
       pseudo_cost_down = pseudo_cost_sum_down[j] / pseudo_cost_num_down[j];
     } else {
@@ -608,7 +600,6 @@ f_t pseudo_costs_t<i_t, f_t>::obj_estimate(const std::vector<i_t>& fractional,
     } else {
       pseudo_cost_up = pseudo_cost_up_avg;
     }
-    pseudo_cost_mutex[j].unlock();
 
     constexpr f_t eps = 1e-6;
     const f_t f_down  = solution[j] - std::floor(solution[j]);

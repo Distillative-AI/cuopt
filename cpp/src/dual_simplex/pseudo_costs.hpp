@@ -69,10 +69,10 @@ class pseudo_costs_t {
 
   void update_pseudo_costs_from_strong_branching(const std::vector<i_t>& fractional,
                                                  const std::vector<f_t>& root_soln);
-  std::vector<f_t> pseudo_cost_sum_up;
-  std::vector<f_t> pseudo_cost_sum_down;
-  std::vector<i_t> pseudo_cost_num_up;
-  std::vector<i_t> pseudo_cost_num_down;
+  std::vector<omp_atomic_t<f_t>> pseudo_cost_sum_up;
+  std::vector<omp_atomic_t<f_t>> pseudo_cost_sum_down;
+  std::vector<omp_atomic_t<i_t>> pseudo_cost_num_up;
+  std::vector<omp_atomic_t<i_t>> pseudo_cost_num_down;
   std::vector<f_t> strong_branch_down;
   std::vector<f_t> strong_branch_up;
   std::vector<omp_mutex_t> pseudo_cost_mutex;
