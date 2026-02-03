@@ -309,13 +309,19 @@ class branch_and_bound_t {
   // Collect and merge diving solutions at sync
   void collect_diving_solutions();
 
+  template <typename PoolT, typename WorkerTypeGetter>
+  void process_worker_solutions(PoolT& pool, WorkerTypeGetter get_worker_type);
+
+  template <typename PoolT>
+  void merge_pseudo_cost_updates(PoolT& pool);
+
   friend struct opportunistic_tree_update_policy_t<i_t, f_t>;
   friend struct bsp_tree_update_policy_t<i_t, f_t>;
 
  private:
   // BSP state
   // unique_ptr as we only want to initialize these if we're in the determinism codepath
-  std::unique_ptr<bb_worker_pool_t<i_t, f_t>> bsp_workers_;
+  std::unique_ptr<bsp_bfs_worker_pool_t<i_t, f_t>> bsp_workers_;
   std::unique_ptr<cuopt::work_unit_scheduler_t> bsp_scheduler_;
   mip_status_t bsp_global_termination_status_{mip_status_t::UNSET};
   double bsp_horizon_step_{5.0};     // Work unit step per horizon (tunable)

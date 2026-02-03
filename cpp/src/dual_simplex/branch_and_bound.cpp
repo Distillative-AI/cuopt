@@ -1826,7 +1826,7 @@ void branch_and_bound_t<i_t, f_t>::run_bsp_coordinator(const csr_matrix_t<i_t, f
   bsp_horizon_number_            = 0;
   bsp_global_termination_status_ = mip_status_t::UNSET;
 
-  bsp_workers_ = std::make_unique<bb_worker_pool_t<i_t, f_t>>(
+  bsp_workers_ = std::make_unique<bsp_bfs_worker_pool_t<i_t, f_t>>(
     num_bfs_workers, original_lp_, Arow, var_types_, settings_);
 
   if (num_diving_workers > 0) {
@@ -2060,6 +2060,17 @@ void branch_and_bound_t<i_t, f_t>::bsp_sync_callback(int worker_id)
   prune_worker_nodes_vs_incumbent();
 
   collect_diving_solutions();
+
+  for (auto& worker : *bsp_workers_) {
+    worker.integer_solutions.clear();
+    worker.pseudo_cost_updates.clear();
+  }
+  if (bsp_diving_workers_) {
+    for (auto& worker : *bsp_diving_workers_) {
+      worker.integer_solutions.clear();
+      worker.pseudo_cost_updates.clear();
+    }
+  }
 
   populate_diving_heap();
 
@@ -2306,6 +2317,97 @@ node_solve_info_t branch_and_bound_t<i_t, f_t>::solve_node_bsp(bsp_bfs_worker_t<
 }
 
 template <typename i_t, typename f_t>
+template <typename PoolT, typename WorkerTypeGetter>
+void branch_and_bound_t<i_t, f_t>::process_worker_solutions(PoolT& pool,
+                                                            WorkerTypeGetter get_worker_type)
+{
+  std::vector<queued_integer_solution_t<i_t, f_t>*> all_solutions;
+  for (auto& worker : pool) {
+    for (auto& sol : worker.integer_solutions) {
+      all_solutions.push_back(&sol);
+    }
+  }
+
+  std::sort(all_solutions.begin(),
+            all_solutions.end(),
+            [](const queued_integer_solution_t<i_t, f_t>* a,
+               const queued_integer_solution_t<i_t, f_t>* b) { return *a < *b; });
+
+  f_t bsp_lower     = compute_bsp_lower_bound();
+  f_t current_upper = upper_bound_.load();
+
+  for (const auto* sol : all_solutions) {
+    if (sol->objective < current_upper) {
+      f_t user_obj         = compute_user_objective(original_lp_, sol->objective);
+      f_t user_lower       = compute_user_objective(original_lp_, bsp_lower);
+      i_t nodes_explored   = exploration_stats_.nodes_explored.load();
+      i_t nodes_unexplored = exploration_stats_.nodes_unexplored.load();
+
+      bnb_worker_type_t worker_type = get_worker_type(pool, sol->worker_id);
+
+      settings_.log.printf("%c %10d   %10lu    %+13.6e    %+10.6e   %6d   %7.1e     %s %9.2f\n",
+                           feasible_solution_symbol(worker_type),
+                           nodes_explored,
+                           nodes_unexplored,
+                           user_obj,
+                           user_lower,
+                           sol->depth,
+                           nodes_explored > 0
+                             ? (double)exploration_stats_.total_lp_iters.load() / nodes_explored
+                             : 0.0,
+                           user_mip_gap<f_t>(user_obj, user_lower).c_str(),
+                           toc(exploration_stats_.start_time));
+
+      bool improved = false;
+      if (sol->objective < upper_bound_) {
+        upper_bound_ = sol->objective;
+        incumbent_.set_incumbent_solution(sol->objective, sol->solution);
+        current_upper = sol->objective;
+        improved      = true;
+      }
+
+      if (improved && settings_.solution_callback != nullptr) {
+        std::vector<f_t> original_x;
+        uncrush_primal_solution(original_problem_, original_lp_, sol->solution, original_x);
+        settings_.solution_callback(original_x, sol->objective);
+      }
+    }
+  }
+
+  for (auto& worker : pool) {
+    worker.integer_solutions.clear();
+  }
+}
+
+template <typename i_t, typename f_t>
+template <typename PoolT>
+void branch_and_bound_t<i_t, f_t>::merge_pseudo_cost_updates(PoolT& pool)
+{
+  std::vector<pseudo_cost_update_t<i_t, f_t>> all_pc_updates;
+  for (auto& worker : pool) {
+    for (auto& upd : worker.pseudo_cost_updates) {
+      all_pc_updates.push_back(upd);
+    }
+  }
+
+  std::sort(all_pc_updates.begin(), all_pc_updates.end());
+
+  for (const auto& upd : all_pc_updates) {
+    if (upd.direction == rounding_direction_t::DOWN) {
+      pc_.pseudo_cost_sum_down[upd.variable] += upd.delta;
+      pc_.pseudo_cost_num_down[upd.variable]++;
+    } else {
+      pc_.pseudo_cost_sum_up[upd.variable] += upd.delta;
+      pc_.pseudo_cost_num_up[upd.variable]++;
+    }
+  }
+
+  for (auto& worker : pool) {
+    worker.pseudo_cost_updates.clear();
+  }
+}
+
+template <typename i_t, typename f_t>
 void branch_and_bound_t<i_t, f_t>::sort_replay_events(const bb_event_batch_t<i_t, f_t>& events)
 {
   // Infeasible solutions from GPU heuristics are queued for repair; process them now
@@ -2439,79 +2541,13 @@ void branch_and_bound_t<i_t, f_t>::sort_replay_events(const bb_event_batch_t<i_t
     }
   }
 
-  // Merge integer solutions from all workers and update global incumbent
-  std::vector<queued_integer_solution_t<i_t, f_t>*> all_integer_solutions;
-  for (auto& worker : *bsp_workers_) {
-    for (auto& sol : worker.integer_solutions) {
-      all_integer_solutions.push_back(&sol);
-    }
-  }
+  // Merge integer solutions from BFS workers and update global incumbent
+  process_worker_solutions(*bsp_workers_, [](const bsp_bfs_worker_pool_t<i_t, f_t>&, int) {
+    return bnb_worker_type_t::BEST_FIRST;
+  });
 
-  // Sort solutions for deterministic processing order (uses built-in operator<)
-  std::sort(all_integer_solutions.begin(),
-            all_integer_solutions.end(),
-            [](const queued_integer_solution_t<i_t, f_t>* a,
-               const queued_integer_solution_t<i_t, f_t>* b) { return *a < *b; });
-
-  f_t bsp_lower     = compute_bsp_lower_bound();
-  f_t current_upper = upper_bound_.load();
-
-  for (const auto* sol : all_integer_solutions) {
-    // improving solution found, log it
-    if (sol->objective < current_upper) {
-      f_t user_obj         = compute_user_objective(original_lp_, sol->objective);
-      f_t user_lower       = compute_user_objective(original_lp_, bsp_lower);
-      i_t nodes_explored   = exploration_stats_.nodes_explored.load();
-      i_t nodes_unexplored = exploration_stats_.nodes_unexplored.load();
-      settings_.log.printf(
-        "%c %10d   %10lu    %+13.6e    %+10.6e   %6d   %7.1e     %s %9.2f\n",
-        feasible_solution_symbol(bnb_worker_type_t::BEST_FIRST),
-        nodes_explored,
-        nodes_unexplored,
-        user_obj,
-        user_lower,
-        sol->depth,
-        nodes_explored > 0 ? exploration_stats_.total_lp_iters.load() / nodes_explored : 0.0,
-        user_mip_gap<f_t>(user_obj, user_lower).c_str(),
-        toc(exploration_stats_.start_time));
-
-      // Update incumbent
-      bool improved = false;
-      if (sol->objective < upper_bound_) {
-        upper_bound_ = sol->objective;
-        incumbent_.set_incumbent_solution(sol->objective, sol->solution);
-        current_upper = sol->objective;
-        improved      = true;
-      }
-
-      // Notify diversity manager of new incumbent
-      if (improved && settings_.solution_callback != nullptr) {
-        std::vector<f_t> original_x;
-        uncrush_primal_solution(original_problem_, original_lp_, sol->solution, original_x);
-        settings_.solution_callback(original_x, sol->objective);
-      }
-    }
-  }
-
-  // Merge and apply pseudo-cost updates from all workers in deterministic order
-  std::vector<pseudo_cost_update_t<i_t, f_t>> all_pc_updates;
-  for (auto& worker : *bsp_workers_) {
-    for (auto& upd : worker.pseudo_cost_updates) {
-      all_pc_updates.push_back(upd);
-    }
-  }
-
-  std::sort(all_pc_updates.begin(), all_pc_updates.end());
-
-  for (const auto& upd : all_pc_updates) {
-    if (upd.direction == rounding_direction_t::DOWN) {
-      pc_.pseudo_cost_sum_down[upd.variable] += upd.delta;
-      pc_.pseudo_cost_num_down[upd.variable]++;
-    } else {
-      pc_.pseudo_cost_sum_up[upd.variable] += upd.delta;
-      pc_.pseudo_cost_num_up[upd.variable]++;
-    }
-  }
+  // Merge and apply pseudo-cost updates from BFS workers
+  merge_pseudo_cost_updates(*bsp_workers_);
 
   for (const auto& worker : *bsp_workers_) {
     fetch_min(lower_bound_ceiling_, worker.local_lower_bound_ceiling);
@@ -2748,90 +2784,14 @@ void branch_and_bound_t<i_t, f_t>::collect_diving_solutions()
 {
   if (!bsp_diving_workers_) return;
 
-  // Collect all integer solutions from diving workers
-  std::vector<queued_integer_solution_t<i_t, f_t>*> all_solutions;
-  for (auto& worker : *bsp_diving_workers_) {
-    for (auto& sol : worker.integer_solutions) {
-      all_solutions.push_back(&sol);
-    }
-  }
+  // Collect integer solutions from diving workers and update global incumbent
+  process_worker_solutions(*bsp_diving_workers_,
+                           [](const bsp_diving_worker_pool_t<i_t, f_t>& pool, int worker_id) {
+                             return pool[worker_id].diving_type;
+                           });
 
-  // Sort solutions for deterministic processing order (uses built-in operator<)
-  std::sort(all_solutions.begin(),
-            all_solutions.end(),
-            [](const queued_integer_solution_t<i_t, f_t>* a,
-               const queued_integer_solution_t<i_t, f_t>* b) { return *a < *b; });
-
-  // Apply improving solutions to incumbent
-  f_t current_upper = upper_bound_.load();
-  for (const auto* sol : all_solutions) {
-    if (sol->objective < current_upper) {
-      f_t user_obj         = compute_user_objective(original_lp_, sol->objective);
-      f_t bsp_lower        = compute_bsp_lower_bound();
-      f_t user_lower       = compute_user_objective(original_lp_, bsp_lower);
-      i_t nodes_explored   = exploration_stats_.nodes_explored.load();
-      i_t nodes_unexplored = exploration_stats_.nodes_unexplored.load();
-
-      // Get diving type from worker for proper symbol
-      bnb_worker_type_t diving_type = (*bsp_diving_workers_)[sol->worker_id].diving_type;
-
-      settings_.log.printf("%c %10d   %10d    %+13.6e    %+10.6e   %6d   %7.1e     %s %9.2f\n",
-                           feasible_solution_symbol(diving_type),
-                           nodes_explored,
-                           nodes_unexplored,
-                           user_obj,
-                           user_lower,
-                           sol->depth,
-                           nodes_explored > 0
-                             ? (double)exploration_stats_.total_lp_iters.load() / nodes_explored
-                             : 0.0,
-                           user_mip_gap<f_t>(user_obj, user_lower).c_str(),
-                           toc(exploration_stats_.start_time));
-
-      bool improved = false;
-      mutex_upper_.lock();
-      if (sol->objective < upper_bound_) {
-        upper_bound_ = sol->objective;
-        incumbent_.set_incumbent_solution(sol->objective, sol->solution);
-        current_upper = sol->objective;
-        improved      = true;
-      }
-      mutex_upper_.unlock();
-
-      // Notify diversity manager of new incumbent
-      if (improved && settings_.solution_callback != nullptr) {
-        std::vector<f_t> original_x;
-        uncrush_primal_solution(original_problem_, original_lp_, sol->solution, original_x);
-        settings_.solution_callback(original_x, sol->objective);
-      }
-    }
-  }
-
-  // Merge pseudo-cost updates from diving workers in deterministic order
-  std::vector<pseudo_cost_update_t<i_t, f_t>> all_diving_pc_updates;
-  for (auto& worker : *bsp_diving_workers_) {
-    for (auto& upd : worker.pseudo_cost_updates) {
-      all_diving_pc_updates.push_back(upd);
-    }
-  }
-
-  std::sort(all_diving_pc_updates.begin(), all_diving_pc_updates.end());
-
-  for (const auto& upd : all_diving_pc_updates) {
-    if (upd.direction == rounding_direction_t::DOWN) {
-      pc_.pseudo_cost_sum_down[upd.variable] += upd.delta;
-      pc_.pseudo_cost_num_down[upd.variable]++;
-    } else {
-      pc_.pseudo_cost_sum_up[upd.variable] += upd.delta;
-      pc_.pseudo_cost_num_up[upd.variable]++;
-    }
-  }
-
-  // Clear solution and pseudo-cost update queues
-  for (auto& worker : *bsp_diving_workers_) {
-    worker.integer_solutions.clear();
-    worker.pseudo_cost_updates.clear();
-  }
+  // Merge pseudo-cost updates from diving workers
+  merge_pseudo_cost_updates(*bsp_diving_workers_);
 }
 
 template <typename i_t, typename f_t>

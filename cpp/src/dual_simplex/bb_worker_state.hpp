@@ -111,21 +111,20 @@ class bsp_worker_base_t : public bnb_worker_data_t<i_t, f_t> {
   }
 
   void set_snapshots(f_t global_upper_bound,
-                     const f_t* pc_sum_up,
-                     const f_t* pc_sum_down,
-                     const i_t* pc_num_up,
-                     const i_t* pc_num_down,
+                     const std::vector<f_t>& pc_sum_up,
+                     const std::vector<f_t>& pc_sum_down,
+                     const std::vector<i_t>& pc_num_up,
+                     const std::vector<i_t>& pc_num_down,
                      const std::vector<f_t>& incumbent,
                      i_t total_lp_iters,
                      double new_horizon_start,
                      double new_horizon_end)
   {
-    const i_t n       = this->leaf_problem.num_cols;
-    local_upper_bound = global_upper_bound;
-    pc_sum_up_snapshot.assign(pc_sum_up, pc_sum_up + n);
-    pc_sum_down_snapshot.assign(pc_sum_down, pc_sum_down + n);
-    pc_num_up_snapshot.assign(pc_num_up, pc_num_up + n);
-    pc_num_down_snapshot.assign(pc_num_down, pc_num_down + n);
+    local_upper_bound       = global_upper_bound;
+    pc_sum_up_snapshot      = pc_sum_up;
+    pc_sum_down_snapshot    = pc_sum_down;
+    pc_num_up_snapshot      = pc_num_up;
+    pc_num_down_snapshot    = pc_num_down;
     incumbent_snapshot      = incumbent;
     total_lp_iters_snapshot = total_lp_iters;
     horizon_start           = new_horizon_start;

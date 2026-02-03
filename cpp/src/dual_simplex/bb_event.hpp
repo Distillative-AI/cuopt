@@ -142,15 +142,8 @@ struct bb_event_t {
 template <typename i_t, typename f_t>
 struct bb_event_batch_t {
   std::vector<bb_event_t<i_t, f_t>> events;
-  double horizon_start;
-  double horizon_end;
 
-  void clear()
-  {
-    events.clear();
-    horizon_start = 0.0;
-    horizon_end   = 0.0;
-  }
+  void clear() { events.clear(); }
 
   void add(bb_event_t<i_t, f_t> event) { events.push_back(std::move(event)); }
 
