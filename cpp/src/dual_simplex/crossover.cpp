@@ -534,7 +534,7 @@ i_t dual_push(const lp_problem_t<i_t, f_t>& lp,
       return -1;
     }
     if (settings.concurrent_halt != nullptr && *settings.concurrent_halt == 1) {
-      settings.log.printf("Concurrent halt\n");
+      if (!settings.inside_mip) { settings.log.printf("Concurrent halt\n"); }
       return -2;
     }
   }
@@ -832,7 +832,7 @@ i_t primal_push(const lp_problem_t<i_t, f_t>& lp,
       return -1;
     }
     if (settings.concurrent_halt != nullptr && *settings.concurrent_halt == 1) {
-      settings.log.printf("Concurrent halt\n");
+      if (!settings.inside_mip) { settings.log.printf("Concurrent halt\n"); }
       return -2;
     }
   }
@@ -1163,7 +1163,7 @@ crossover_status_t crossover(const lp_problem_t<i_t, f_t>& lp,
     return crossover_status_t::TIME_LIMIT;
   }
   if (settings.concurrent_halt != nullptr && *settings.concurrent_halt == 1) {
-    settings.log.printf("Concurrent halt\n");
+    if (!settings.inside_mip) { settings.log.printf("Concurrent halt\n"); }
     return crossover_status_t::CONCURRENT_LIMIT;
   }
 
@@ -1250,7 +1250,7 @@ crossover_status_t crossover(const lp_problem_t<i_t, f_t>& lp,
       return crossover_status_t::TIME_LIMIT;
     }
     if (settings.concurrent_halt != nullptr && *settings.concurrent_halt == 1) {
-      settings.log.printf("Concurrent halt\n");
+      if (!settings.inside_mip) { settings.log.printf("Concurrent halt\n"); }
       return crossover_status_t::CONCURRENT_LIMIT;
     }
     primal_infeas = primal_infeasibility(lp, settings, vstatus, solution.x);
@@ -1386,7 +1386,7 @@ crossover_status_t crossover(const lp_problem_t<i_t, f_t>& lp,
         return crossover_status_t::TIME_LIMIT;
       }
       if (settings.concurrent_halt != nullptr && *settings.concurrent_halt == 1) {
-        settings.log.printf("Concurrent halt\n");
+        if (!settings.inside_mip) { settings.log.printf("Concurrent halt\n"); }
         return crossover_status_t::CONCURRENT_LIMIT;
       }
       solution.iterations += iter;

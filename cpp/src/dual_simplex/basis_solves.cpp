@@ -362,7 +362,7 @@ i_t factorize_basis(const csc_matrix_t<i_t, f_t>& A,
                                  SU,
                                  S_perm_inv);
         if (settings.concurrent_halt != nullptr && *settings.concurrent_halt == 1) {
-          settings.log.printf("Concurrent halt\n");
+          if (!settings.inside_mip) { settings.log.printf("Concurrent halt\n"); }
           return -1;
         }
         if (Srank != Sdim) {
@@ -581,7 +581,7 @@ i_t factorize_basis(const csc_matrix_t<i_t, f_t>& A,
     }
   }
   if (settings.concurrent_halt != nullptr && *settings.concurrent_halt == 1) {
-    settings.log.printf("Concurrent halt\n");
+    if (!settings.inside_mip) { settings.log.printf("Concurrent halt\n"); }
     return -1;
   }
   if (verbose) {
