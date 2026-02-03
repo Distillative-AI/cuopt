@@ -25,16 +25,19 @@ namespace cuopt::linear_programming {
 
 // Possible reasons for terminating
 enum class pdlp_termination_status_t : int8_t {
-  NoTermination    = CUOPT_TERIMINATION_STATUS_NO_TERMINATION,
-  NumericalError   = CUOPT_TERIMINATION_STATUS_NUMERICAL_ERROR,
-  Optimal          = CUOPT_TERIMINATION_STATUS_OPTIMAL,
-  PrimalInfeasible = CUOPT_TERIMINATION_STATUS_INFEASIBLE,
-  DualInfeasible   = CUOPT_TERIMINATION_STATUS_UNBOUNDED,
-  IterationLimit   = CUOPT_TERIMINATION_STATUS_ITERATION_LIMIT,
-  TimeLimit        = CUOPT_TERIMINATION_STATUS_TIME_LIMIT,
-  PrimalFeasible   = CUOPT_TERIMINATION_STATUS_PRIMAL_FEASIBLE,
-  ConcurrentLimit  = CUOPT_TERIMINATION_STATUS_CONCURRENT_LIMIT
+  NoTermination    = CUOPT_TERMINATION_STATUS_NO_TERMINATION,
+  NumericalError   = CUOPT_TERMINATION_STATUS_NUMERICAL_ERROR,
+  Optimal          = CUOPT_TERMINATION_STATUS_OPTIMAL,
+  PrimalInfeasible = CUOPT_TERMINATION_STATUS_INFEASIBLE,
+  DualInfeasible   = CUOPT_TERMINATION_STATUS_UNBOUNDED,
+  IterationLimit   = CUOPT_TERMINATION_STATUS_ITERATION_LIMIT,
+  TimeLimit        = CUOPT_TERMINATION_STATUS_TIME_LIMIT,
+  PrimalFeasible   = CUOPT_TERMINATION_STATUS_PRIMAL_FEASIBLE,
+  ConcurrentLimit  = CUOPT_TERMINATION_STATUS_CONCURRENT_LIMIT
 };
+
+// Indicate which solver was used for solving the LP
+enum class lp_solver_type_t : int8_t { Unset = 0, DualSimplex = 1, PDLP = 2, Barrier = 3 };
 
 /**
  * @brief A container of PDLP solver output
@@ -89,7 +92,7 @@ class optimization_problem_solution_t : public base_solution_t {
     double solve_time{std::numeric_limits<double>::signaling_NaN()};
 
     /** Whether the problem was solved by PDLP or Dual Simplex */
-    bool solved_by_pdlp{false};
+    lp_solver_type_t solved_by = lp_solver_type_t::Unset;
   };
 
   /**

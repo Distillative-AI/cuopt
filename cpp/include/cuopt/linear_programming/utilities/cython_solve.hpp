@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2023-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -60,7 +60,7 @@ struct linear_programming_ret_t {
   double gap_;
   int nb_iterations_;
   double solve_time_;
-  bool solved_by_pdlp_;
+  int solved_by_;
 };
 
 struct mip_ret_t {

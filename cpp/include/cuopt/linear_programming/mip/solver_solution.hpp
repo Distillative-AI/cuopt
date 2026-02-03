@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -24,12 +24,12 @@
 namespace cuopt::linear_programming {
 
 enum class mip_termination_status_t : int8_t {
-  NoTermination = CUOPT_TERIMINATION_STATUS_NO_TERMINATION,
-  Optimal       = CUOPT_TERIMINATION_STATUS_OPTIMAL,
-  FeasibleFound = CUOPT_TERIMINATION_STATUS_FEASIBLE_FOUND,
-  Infeasible    = CUOPT_TERIMINATION_STATUS_INFEASIBLE,
-  Unbounded     = CUOPT_TERIMINATION_STATUS_UNBOUNDED,
-  TimeLimit     = CUOPT_TERIMINATION_STATUS_TIME_LIMIT,
+  NoTermination = CUOPT_TERMINATION_STATUS_NO_TERMINATION,
+  Optimal       = CUOPT_TERMINATION_STATUS_OPTIMAL,
+  FeasibleFound = CUOPT_TERMINATION_STATUS_FEASIBLE_FOUND,
+  Infeasible    = CUOPT_TERMINATION_STATUS_INFEASIBLE,
+  Unbounded     = CUOPT_TERMINATION_STATUS_UNBOUNDED,
+  TimeLimit     = CUOPT_TERMINATION_STATUS_TIME_LIMIT,
 };
 
 template <typename i_t, typename f_t>

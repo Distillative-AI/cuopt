@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2023-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved. # noqa
+# SPDX-FileCopyrightText: Copyright (c) 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved. # noqa
 # SPDX-License-Identifier: Apache-2.0
 
 
@@ -152,7 +152,7 @@ cdef extern from "cuopt/linear_programming/utilities/cython_solve.hpp" namespace
         double gap_
         int nb_iterations_
         double solve_time_
-        bool solved_by_pdlp_
+        int solved_by_
 
     cdef cppclass mip_ret_t:
         unique_ptr[device_buffer] solution_

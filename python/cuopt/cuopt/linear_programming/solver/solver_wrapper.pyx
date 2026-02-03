@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2023-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved. # noqa
+# SPDX-FileCopyrightText: Copyright (c) 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved. # noqa
 # SPDX-License-Identifier: Apache-2.0
 
 
@@ -359,7 +359,7 @@ cdef create_solution(unique_ptr[solver_ret_t] sol_ret_ptr,
         gap = sol_ret.lp_ret.gap_
         nb_iterations = sol_ret.lp_ret.nb_iterations_
         solve_time = sol_ret.lp_ret.solve_time_
-        solved_by_pdlp = sol_ret.lp_ret.solved_by_pdlp_
+        solved_by = sol_ret.lp_ret.solved_by_
 
         # In BatchSolve, we don't get the warm start data
         if not is_batch:
@@ -462,7 +462,7 @@ cdef create_solution(unique_ptr[solver_ret_t] sol_ret_ptr,
                 dual_objective,
                 gap,
                 nb_iterations,
-                solved_by_pdlp,
+                solved_by,
             )
         return Solution(
             problem_category=ProblemCategory(sol_ret.problem_type),
@@ -480,7 +480,7 @@ cdef create_solution(unique_ptr[solver_ret_t] sol_ret_ptr,
             dual_objective=dual_objective,
             gap=gap,
             nb_iterations=nb_iterations,
-            solved_by_pdlp=solved_by_pdlp,
+            solved_by=solved_by,
         )
 
 

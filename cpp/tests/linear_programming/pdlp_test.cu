@@ -68,7 +68,7 @@ TEST(pdlp_class, run_double)
 
   optimization_problem_solution_t<int, double> solution =
     solve_lp(&handle_, op_problem, solver_settings);
-  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERIMINATION_STATUS_OPTIMAL);
+  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERMINATION_STATUS_OPTIMAL);
   EXPECT_FALSE(is_incorrect_objective(
     afiro_primal_objective, solution.get_additional_termination_information().primal_objective));
 }
@@ -94,7 +94,7 @@ TEST(pdlp_class, run_double_very_low_accuracy)
   settings.method                               = cuopt::linear_programming::method_t::PDLP;
 
   optimization_problem_solution_t<int, double> solution = solve_lp(&handle_, op_problem, settings);
-  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERIMINATION_STATUS_OPTIMAL);
+  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERMINATION_STATUS_OPTIMAL);
   EXPECT_FALSE(is_incorrect_objective(
     afiro_primal_objective, solution.get_additional_termination_information().primal_objective));
 }
@@ -116,7 +116,7 @@ TEST(pdlp_class, run_double_initial_solution)
 
   optimization_problem_solution_t<int, double> solution =
     solve_lp(&handle_, op_problem, solver_settings);
-  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERIMINATION_STATUS_OPTIMAL);
+  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERMINATION_STATUS_OPTIMAL);
   EXPECT_FALSE(is_incorrect_objective(
     afiro_primal_objective, solution.get_additional_termination_information().primal_objective));
 }
@@ -138,7 +138,7 @@ TEST(pdlp_class, run_iteration_limit)
   settings.method = cuopt::linear_programming::method_t::PDLP;
 
   optimization_problem_solution_t<int, double> solution = solve_lp(&handle_, op_problem, settings);
-  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERIMINATION_STATUS_ITERATION_LIMIT);
+  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERMINATION_STATUS_ITERATION_LIMIT);
   // By default we would return all 0, we now return what we currently have so not all 0
   EXPECT_FALSE(thrust::all_of(handle_.get_thrust_policy(),
                               solution.get_primal_solution().begin(),
@@ -164,7 +164,7 @@ TEST(pdlp_class, run_time_limit)
 
   optimization_problem_solution_t<int, double> solution = solve_lp(&handle_, op_problem, settings);
 
-  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERIMINATION_STATUS_TIME_LIMIT);
+  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERMINATION_STATUS_TIME_LIMIT);
   // By default we would return all 0, we now return what we currently have so not all 0
   EXPECT_FALSE(thrust::all_of(handle_.get_thrust_policy(),
                               solution.get_primal_solution().begin(),
@@ -219,7 +219,7 @@ TEST(pdlp_class, run_sub_mittleman)
           solve_lp(&handle_, op_problem, settings);
         printf(
           "running %s mode %d presolve? %d\n", name.c_str(), (int)solver_mode, settings.presolve);
-        EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERIMINATION_STATUS_OPTIMAL);
+        EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERMINATION_STATUS_OPTIMAL);
         EXPECT_FALSE(is_incorrect_objective(
           expected_objective_value,
           solution.get_additional_termination_information().primal_objective));
@@ -911,7 +911,7 @@ TEST(pdlp_class, dual_postsolve_size)
     solver_settings.dual_postsolve = true;
     optimization_problem_solution_t<int, double> solution =
       solve_lp(&handle_, op_problem, solver_settings);
-    EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERIMINATION_STATUS_OPTIMAL);
+    EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERMINATION_STATUS_OPTIMAL);
     EXPECT_EQ(solution.get_dual_solution().size(), op_problem.get_n_constraints());
   }
 
@@ -919,7 +919,7 @@ TEST(pdlp_class, dual_postsolve_size)
     solver_settings.dual_postsolve = false;
     optimization_problem_solution_t<int, double> solution =
       solve_lp(&handle_, op_problem, solver_settings);
-    EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERIMINATION_STATUS_OPTIMAL);
+    EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERMINATION_STATUS_OPTIMAL);
     EXPECT_EQ(solution.get_dual_solution().size(), 0);
   }
 }
@@ -956,7 +956,7 @@ TEST(pdlp_class, run_empty_matrix_pdlp)
 
   optimization_problem_solution_t<int, double> solution =
     solve_lp(&handle_, op_problem, solver_settings);
-  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERIMINATION_STATUS_NUMERICAL_ERROR);
+  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERMINATION_STATUS_NUMERICAL_ERROR);
 }
 
 // Should run thanks to Dual Simplex
@@ -973,8 +973,8 @@ TEST(pdlp_class, run_empty_matrix_dual_simplex)
 
   optimization_problem_solution_t<int, double> solution =
     solve_lp(&handle_, op_problem, solver_settings);
-  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERIMINATION_STATUS_OPTIMAL);
-  EXPECT_FALSE(solution.get_additional_termination_information().solved_by_pdlp);
+  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERMINATION_STATUS_OPTIMAL);
+  EXPECT_FALSE(solution.get_additional_termination_information().solved_by);
 }
 
 TEST(pdlp_class, test_max)
@@ -991,7 +991,7 @@ TEST(pdlp_class, test_max)
 
   optimization_problem_solution_t<int, double> solution =
     solve_lp(&handle_, op_problem, solver_settings);
-  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERIMINATION_STATUS_OPTIMAL);
+  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERMINATION_STATUS_OPTIMAL);
   EXPECT_NEAR(
     solution.get_additional_termination_information().primal_objective, 17.0, factor_tolerance);
 }
@@ -1009,7 +1009,7 @@ TEST(pdlp_class, test_max_with_offset)
 
   optimization_problem_solution_t<int, double> solution =
     solve_lp(&handle_, op_problem, solver_settings);
-  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERIMINATION_STATUS_OPTIMAL);
+  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERMINATION_STATUS_OPTIMAL);
   EXPECT_NEAR(
     solution.get_additional_termination_information().primal_objective, 0.0, factor_tolerance);
 }
@@ -1026,7 +1026,7 @@ TEST(pdlp_class, test_lp_no_constraints)
 
   optimization_problem_solution_t<int, double> solution =
     solve_lp(&handle_, op_problem, solver_settings);
-  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERIMINATION_STATUS_OPTIMAL);
+  EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERMINATION_STATUS_OPTIMAL);
   EXPECT_NEAR(
     solution.get_additional_termination_information().primal_objective, 1.0, factor_tolerance);
 }
