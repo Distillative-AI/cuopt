@@ -293,7 +293,7 @@ void branch_and_bound_t<i_t, f_t>::report(char symbol, f_t obj, f_t lower_bound,
   i_t nodes_unexplored = exploration_stats_.nodes_unexplored;
   f_t user_obj         = compute_user_objective(original_lp_, obj);
   f_t user_lower       = compute_user_objective(original_lp_, lower_bound);
-  f_t iter_node        = (f_t)exploration_stats_.total_lp_iters / nodes_explored;
+  f_t iter_node = nodes_explored > 0 ? (f_t)exploration_stats_.total_lp_iters / nodes_explored : 0;
   std::string user_gap = user_mip_gap<f_t>(user_obj, user_lower);
   settings_.log.printf("%c %10d   %10lu    %+13.6e    %+10.6e  %6d    %7.1e     %s %9.2f\n",
                        symbol,

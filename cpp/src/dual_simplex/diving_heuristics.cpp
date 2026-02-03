@@ -88,14 +88,12 @@ branch_variable_t<i_t> pseudocost_diving(pseudo_costs_t<i_t, f_t>& pc,
     f_t f_down               = solution[j] - std::floor(solution[j]);
     f_t f_up                 = std::ceil(solution[j]) - solution[j];
 
-    pc.pseudo_cost_mutex[j].lock();
     f_t pc_down = pc.pseudo_cost_num_down[j] != 0
                     ? pc.pseudo_cost_sum_down[j] / pc.pseudo_cost_num_down[j]
                     : pseudo_cost_down_avg;
 
     f_t pc_up = pc.pseudo_cost_num_up[j] != 0 ? pc.pseudo_cost_sum_up[j] / pc.pseudo_cost_num_up[j]
                                               : pseudo_cost_up_avg;
-    pc.pseudo_cost_mutex[j].unlock();
 
     f_t score_down = std::sqrt(f_up) * (1 + pc_up) / (1 + pc_down);
     f_t score_up   = std::sqrt(f_down) * (1 + pc_down) / (1 + pc_up);
@@ -167,14 +165,12 @@ branch_variable_t<i_t> guided_diving(pseudo_costs_t<i_t, f_t>& pc,
     rounding_direction_t dir =
       down_dist < up_dist + eps ? rounding_direction_t::DOWN : rounding_direction_t::UP;
 
-    pc.pseudo_cost_mutex[j].lock();
     f_t pc_down = pc.pseudo_cost_num_down[j] != 0
                     ? pc.pseudo_cost_sum_down[j] / pc.pseudo_cost_num_down[j]
                     : pseudo_cost_down_avg;
 
     f_t pc_up = pc.pseudo_cost_num_up[j] != 0 ? pc.pseudo_cost_sum_up[j] / pc.pseudo_cost_num_up[j]
                                               : pseudo_cost_up_avg;
-    pc.pseudo_cost_mutex[j].unlock();
 
     f_t score1 = dir == rounding_direction_t::DOWN ? 5 * pc_down * f_down : 5 * pc_up * f_up;
     f_t score2 = dir == rounding_direction_t::DOWN ? pc_up * f_up : pc_down * f_down;
