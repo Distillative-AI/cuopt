@@ -8,6 +8,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <utility>
 #include <vector>
 
 // Copied from raft/PCGenerator (rng_device.cuh). We cannot use raft implementation

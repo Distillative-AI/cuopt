@@ -29,7 +29,10 @@ class omp_mutex_t {
 
   omp_mutex_t& operator=(omp_mutex_t&& other)
   {
-    if (&other != this) { mutex = std::move(other.mutex); }
+    if (&other != this) {
+      if (mutex) { omp_destroy_lock(mutex.get()); }
+      mutex = std::move(other.mutex);
+    }
     return *this;
   }
 
