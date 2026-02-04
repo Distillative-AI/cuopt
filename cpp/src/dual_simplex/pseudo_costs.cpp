@@ -148,6 +148,8 @@ f_t trial_branching(const lp_problem_t<i_t, f_t>& original_lp,
                     f_t upper_bound,
                     i_t bnb_lp_iter_per_node,
                     f_t start_time,
+                    i_t upper_max_lp_iter,
+                    i_t lower_max_lp_iter,
                     omp_atomic_t<int64_t>& total_lp_iter)
 {
   lp_problem_t child_problem      = original_lp;
@@ -157,8 +159,8 @@ f_t trial_branching(const lp_problem_t<i_t, f_t>& original_lp,
   const bool initialize_basis                        = false;
   simplex_solver_settings_t<i_t, f_t> child_settings = settings;
   child_settings.set_log(false);
-  i_t lp_iter_upper              = settings.reliability_branching_settings.upper_max_lp_iter;
-  i_t lp_iter_lower              = settings.reliability_branching_settings.lower_max_lp_iter;
+  i_t lp_iter_upper              = upper_max_lp_iter;
+  i_t lp_iter_lower              = lower_max_lp_iter;
   child_settings.iteration_limit = std::clamp(bnb_lp_iter_per_node, lp_iter_lower, lp_iter_upper);
   child_settings.cut_off         = upper_bound + settings.dual_tol;
   child_settings.inside_mip      = 2;
@@ -495,6 +497,8 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
                                 upper_bound,
                                 branch_and_bound_lp_iter_per_node,
                                 start_time,
+                                reliability_branching_settings.upper_max_lp_iter,
+                                reliability_branching_settings.lower_max_lp_iter,
                                 strong_branching_lp_iter);
 
       if (!std::isnan(obj)) {
@@ -521,6 +525,8 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
                                 upper_bound,
                                 branch_and_bound_lp_iter_per_node,
                                 start_time,
+                                reliability_branching_settings.upper_max_lp_iter,
+                                reliability_branching_settings.lower_max_lp_iter,
                                 strong_branching_lp_iter);
 
       if (!std::isnan(obj)) {

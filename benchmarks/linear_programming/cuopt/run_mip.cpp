@@ -197,9 +197,6 @@ int run_single_file(std::string file_path,
       }
     }
   }
-
-  CUOPT_LOG_INFO("Reliability branching: %d\n", reliability_branching);
-
   settings.time_limit                    = time_limit;
   settings.heuristics_only               = heuristics_only;
   settings.num_cpu_threads               = num_cpu_threads;
@@ -362,7 +359,8 @@ int main(int argc, char* argv[])
 
   program.add_argument("--reliability-branching")
     .help("reliability branching: -1 (automatic), 0 (disable) or k > 0 (use k)")
-    .default_value(std::string("-1"));
+    .scan<'i', int>()
+    .default_value(-1);
 
   // Parse arguments
   try {
@@ -392,7 +390,7 @@ int main(int argc, char* argv[])
   bool log_to_console       = program.get<std::string>("--log-to-console")[0] == 't';
   double memory_limit       = program.get<double>("--memory-limit");
   bool track_allocations    = program.get<std::string>("--track-allocations")[0] == 't';
-  int reliability_branching = program.get<std::string>("--reliability-branching");
+  int reliability_branching = program.get<int>("--reliability-branching");
 
   if (num_cpu_threads < 0) { num_cpu_threads = omp_get_max_threads() / n_gpus; }
 

@@ -282,8 +282,9 @@ void branch_and_bound_t<i_t, f_t>::report(char symbol, f_t obj, f_t lower_bound,
   i_t nodes_unexplored = exploration_stats_.nodes_unexplored;
   f_t user_obj         = compute_user_objective(original_lp_, obj);
   f_t user_lower       = compute_user_objective(original_lp_, lower_bound);
-  f_t iter_node = nodes_explored > 0 ? (f_t)exploration_stats_.total_lp_iters / nodes_explored
-                                     : exploration_stats_.total_lp_iters;
+  f_t iter_node        = nodes_explored > 0
+                           ? static_cast<f_t>(exploration_stats_.total_lp_iters) / nodes_explored
+                           : static_cast<f_t>(exploration_stats_.total_lp_iters.load());
   std::string user_gap = user_mip_gap<f_t>(user_obj, user_lower);
   settings_.log.printf("%c %10d   %10lu    %+13.6e    %+10.6e  %6d    %7.1e     %s %9.2f\n",
                        symbol,
@@ -1005,6 +1006,9 @@ void branch_and_bound_t<i_t, f_t>::run_scheduler()
   std::array<i_t, bnb_num_worker_types> max_num_workers_per_type =
     bnb_get_max_workers(num_workers, worker_types);
 
+  worker_pool_.init(num_workers, original_lp_, Arow_, var_types_, settings_);
+  active_workers_per_type_.fill(0);
+
 #ifdef CUOPT_LOG_DEBUG
   for (auto type : worker_types) {
     settings_.log.debug("%c%d: max num of workers = %d",
@@ -1131,7 +1135,7 @@ void branch_and_bound_t<i_t, f_t>::run_scheduler()
 template <typename i_t, typename f_t>
 void branch_and_bound_t<i_t, f_t>::single_threaded_solve()
 {
-  bnb_worker_data_t<i_t, f_t>* worker = worker_pool_.get_idle_worker();
+  bnb_worker_data_t<i_t, f_t> worker(0, original_lp_, Arow_, var_types_, settings_);
 
   f_t lower_bound     = get_lower_bound();
   f_t abs_gap         = upper_bound_ - lower_bound;
@@ -1181,7 +1185,7 @@ void branch_and_bound_t<i_t, f_t>::single_threaded_solve()
     }
 
     worker.init_best_first(start_node.value(), original_lp_);
-    plunge_with(worker);
+    plunge_with(&worker);
   }
 }
 
@@ -1289,8 +1293,7 @@ lp_status_t branch_and_bound_t<i_t, f_t>::solve_root_relaxation(
 }
 
 template <typename i_t, typename f_t>
-mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solution,
-                                                 mip_solve_mode_t solve_mode)
+mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solution)
 {
   logger_t log;
   log.log                             = false;
@@ -1460,9 +1463,6 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
   if (settings_.diving_settings.coefficient_diving != 0) {
     calculate_variable_locks(original_lp_, var_up_locks_, var_down_locks_);
   }
-
-  worker_pool_.init(num_workers, original_lp_, Arow_, var_types_, settings_);
-  active_workers_per_type_.fill(0);
 
   is_running_ = true;
 
