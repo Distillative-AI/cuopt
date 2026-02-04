@@ -146,7 +146,7 @@ class branch_and_bound_t {
 
   // Count the number of workers per type that either are being executed or
   // are waiting to be executed.
-  std::array<omp_atomic_t<i_t>, bnb_num_worker_types> active_workers_per_type_;
+  std::array<omp_atomic_t<i_t>, bnb_num_search_strategies> active_workers_per_strategy_;
 
   // Worker pool
   bnb_worker_pool_t<i_t, f_t> worker_pool_;

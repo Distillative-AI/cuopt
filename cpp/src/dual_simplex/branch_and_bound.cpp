@@ -913,7 +913,7 @@ void branch_and_bound_t<i_t, f_t>::plunge_with(bnb_worker_data_t<i_t, f_t>* work
 
   if (settings_.num_threads > 1) {
     worker_pool_.return_worker_to_pool(worker_data);
-    active_workers_per_type_[BEST_FIRST]--;
+    active_workers_per_strategy_[BEST_FIRST]--;
   }
 }
 
@@ -992,7 +992,7 @@ void branch_and_bound_t<i_t, f_t>::dive_with(bnb_worker_data_t<i_t, f_t>* worker
   }
 
   worker_pool_.return_worker_to_pool(worker_data);
-  active_workers_per_type_[search_strategy]--;
+  active_workers_per_strategy_[search_strategy]--;
 }
 
 template <typename i_t, typename f_t>
@@ -1007,7 +1007,7 @@ void branch_and_bound_t<i_t, f_t>::run_scheduler()
     bnb_get_max_workers(num_workers, strategies);
 
   worker_pool_.init(num_workers, original_lp_, Arow_, var_types_, settings_);
-  active_workers_per_type_.fill(0);
+  active_workers_per_strategy_.fill(0);
 
 #ifdef CUOPT_LOG_DEBUG
   for (auto strategy : strategies) {
@@ -1025,7 +1025,7 @@ void branch_and_bound_t<i_t, f_t>::run_scheduler()
 
   while (solver_status_ == mip_status_t::UNSET && abs_gap > settings_.absolute_mip_gap_tol &&
          rel_gap > settings_.relative_mip_gap_tol &&
-         (active_workers_per_type_[0] > 0 || node_queue_.best_first_queue_size() > 0)) {
+         (active_workers_per_strategy_[0] > 0 || node_queue_.best_first_queue_size() > 0)) {
     bool launched_any_task = false;
     lower_bound            = get_lower_bound();
     abs_gap                = upper_bound_ - lower_bound;
@@ -1073,7 +1073,9 @@ void branch_and_bound_t<i_t, f_t>::run_scheduler()
     }
 
     for (auto strategy : strategies) {
-      if (active_workers_per_type_[strategy] >= max_num_workers_per_type[strategy]) { continue; }
+      if (active_workers_per_strategy_[strategy] >= max_num_workers_per_type[strategy]) {
+        continue;
+      }
 
       // Get an idle worker.
       bnb_worker_data_t<i_t, f_t>* worker = worker_pool_.get_idle_worker();
@@ -1097,7 +1099,7 @@ void branch_and_bound_t<i_t, f_t>::run_scheduler()
         worker_pool_.pop_idle_worker();
         worker->init_best_first(start_node.value(), original_lp_);
         last_node_depth = start_node.value()->depth;
-        active_workers_per_type_[strategy]++;
+        active_workers_per_strategy_[strategy]++;
         launched_any_task = true;
 
 #pragma omp task affinity(worker)
@@ -1118,7 +1120,7 @@ void branch_and_bound_t<i_t, f_t>::run_scheduler()
 
         // Remove the worker from the idle list.
         worker_pool_.pop_idle_worker();
-        active_workers_per_type_[strategy]++;
+        active_workers_per_strategy_[strategy]++;
         launched_any_task = true;
 
 #pragma omp task affinity(worker)
