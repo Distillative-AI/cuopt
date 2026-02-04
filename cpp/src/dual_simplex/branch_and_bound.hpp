@@ -36,11 +36,6 @@ enum class mip_status_t {
   UNSET      = 6,  // The status is not set
 };
 
-enum class mip_solve_mode_t {
-  BNB_PARALLEL        = 0,  // Parallel B&B (default)
-  BNB_SINGLE_THREADED = 1,  // Single threaded B&B for SubMIP and RINS
-};
-
 template <typename i_t, typename f_t>
 void upper_bound_callback(f_t upper_bound);
 
@@ -91,7 +86,7 @@ class branch_and_bound_t {
   lp_status_t solve_root_relaxation(simplex_solver_settings_t<i_t, f_t> const& lp_settings);
 
   // The main entry routine. Returns the solver status and populates solution with the incumbent.
-  mip_status_t solve(mip_solution_t<i_t, f_t>& solution, mip_solve_mode_t solve_mode);
+  mip_status_t solve(mip_solution_t<i_t, f_t>& solution);
 
  private:
   const user_problem_t<i_t, f_t>& original_problem_;
@@ -188,13 +183,13 @@ class branch_and_bound_t {
   // We use best-first to pick the `start_node` and then perform a depth-first search
   // from this node (i.e., a plunge). It can only backtrack to a sibling node.
   // Unexplored nodes in the subtree are inserted back into the global heap.
-  void plunge_with(bnb_worker_data_t<i_t, f_t>* worker_data, mip_solve_mode_t mode);
+  void plunge_with(bnb_worker_data_t<i_t, f_t>* worker_data);
 
   // Perform a deep dive in the subtree determined by the `start_node` in order
   // to find integer feasible solutions.
   void dive_with(bnb_worker_data_t<i_t, f_t>* worker_data);
 
-  // Run the scheduler (aka the master) whose will schedule and manage
+  // Run the scheduler whose will schedule and manage
   // all the other workers.
   void run_scheduler();
 

@@ -130,8 +130,8 @@ class bnb_worker_data_t {
   }
 
   // Set the variables bounds for the LP relaxation of the current node.
-  bool set_lp_variable_bounds_for(mip_node_t<i_t, f_t>* node_ptr,
-                                  const simplex_solver_settings_t<i_t, f_t>& settings)
+  bool set_lp_variable_bounds(mip_node_t<i_t, f_t>* node_ptr,
+                              const simplex_solver_settings_t<i_t, f_t>& settings)
   {
     // Reset the bound_changed markers
     std::fill(bounds_changed.begin(), bounds_changed.end(), false);
@@ -153,7 +153,7 @@ class bnb_worker_data_t {
 
  private:
   // For diving, we need to store the full node instead of
-  // of just a pointer, since it is not store in the tree anymore.
+  // of just a pointer, since it is not stored in the tree anymore.
   // To keep the same interface across all worker types,
   // this will be used as a temporary storage and
   // will be pointed by `start_node`.
@@ -177,9 +177,11 @@ class bnb_worker_pool_t {
         std::make_unique<bnb_worker_data_t<i_t, f_t>>(i, original_lp, Arow, var_type, settings);
       idle_workers_.push_front(i);
     }
+
+    is_initialized = true;
   }
 
-  // Here, we are assuming that the master is the only
+  // Here, we are assuming that the scheduler is the only
   // thread that can retrieve/pop an idle worker.
   bnb_worker_data_t<i_t, f_t>* get_idle_worker()
   {
@@ -192,7 +194,7 @@ class bnb_worker_pool_t {
     }
   }
 
-  // Here, we are assuming that the master is the only
+  // Here, we are assuming that the scheduler is the only
   // thread that can retrieve/pop an idle worker.
   void pop_idle_worker()
   {
@@ -211,13 +213,15 @@ class bnb_worker_pool_t {
     num_idle_workers_++;
   }
 
-  f_t get_lower_bounds()
+  f_t get_lower_bound()
   {
     f_t lower_bound = std::numeric_limits<f_t>::infinity();
 
-    for (i_t i = 0; i < workers_.size(); ++i) {
-      if (workers_[i]->worker_type == BEST_FIRST && workers_[i]->is_active) {
-        lower_bound = std::min(workers_[i]->lower_bound.load(), lower_bound);
+    if (is_initialized) {
+      for (i_t i = 0; i < workers_.size(); ++i) {
+        if (workers_[i]->worker_type == BEST_FIRST && workers_[i]->is_active) {
+          lower_bound = std::min(workers_[i]->lower_bound.load(), lower_bound);
+        }
       }
     }
 
@@ -229,6 +233,7 @@ class bnb_worker_pool_t {
  private:
   // Worker pool
   std::vector<std::unique_ptr<bnb_worker_data_t<i_t, f_t>>> workers_;
+  bool is_initialized = false;
 
   omp_mutex_t mutex_;
   std::deque<i_t> idle_workers_;

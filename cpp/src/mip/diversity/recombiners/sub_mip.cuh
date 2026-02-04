@@ -103,8 +103,8 @@ class sub_mip_recombiner_t : public recombiner_t<i_t, f_t> {
       branch_and_bound_settings.relative_mip_gap_tol = context.settings.tolerances.relative_mip_gap;
       branch_and_bound_settings.integer_tol = context.settings.tolerances.integrality_tolerance;
       branch_and_bound_settings.num_threads = 1;
-      branch_and_bound_settings.reliability_branching_settings.enable = false;
-      branch_and_bound_settings.solution_callback = [this](std::vector<f_t>& solution,
+      branch_and_bound_settings.reliability_branching = 0;
+      branch_and_bound_settings.solution_callback     = [this](std::vector<f_t>& solution,
                                                            f_t objective) {
         this->solution_callback(solution, objective);
       };
@@ -113,8 +113,7 @@ class sub_mip_recombiner_t : public recombiner_t<i_t, f_t> {
       branch_and_bound_settings.log.log = false;
       dual_simplex::branch_and_bound_t<i_t, f_t> branch_and_bound(branch_and_bound_problem,
                                                                   branch_and_bound_settings);
-      branch_and_bound_status = branch_and_bound.solve(
-        branch_and_bound_solution, dual_simplex::mip_solve_mode_t::BNB_SINGLE_THREADED);
+      branch_and_bound_status = branch_and_bound.solve(branch_and_bound_solution);
       if (solution_vector.size() > 0) {
         cuopt_assert(fixed_assignment.size() == branch_and_bound_solution.x.size(),
                      "Assignment size mismatch");

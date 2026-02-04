@@ -250,7 +250,7 @@ f_t branch_and_bound_t<i_t, f_t>::get_lower_bound()
   f_t lower_bound      = lower_bound_ceiling_.load();
   f_t heap_lower_bound = node_queue_.get_lower_bound();
   lower_bound          = std::min(heap_lower_bound, lower_bound);
-  lower_bound          = std::min(worker_pool_.get_lower_bounds(), lower_bound);
+  lower_bound          = std::min(worker_pool_.get_lower_bound(), lower_bound);
   return std::isfinite(lower_bound) ? lower_bound : -inf;
 }
 
@@ -282,7 +282,8 @@ void branch_and_bound_t<i_t, f_t>::report(char symbol, f_t obj, f_t lower_bound,
   i_t nodes_unexplored = exploration_stats_.nodes_unexplored;
   f_t user_obj         = compute_user_objective(original_lp_, obj);
   f_t user_lower       = compute_user_objective(original_lp_, lower_bound);
-  f_t iter_node = nodes_explored > 0 ? (f_t)exploration_stats_.total_lp_iters / nodes_explored : 0;
+  f_t iter_node = nodes_explored > 0 ? (f_t)exploration_stats_.total_lp_iters / nodes_explored
+                                     : exploration_stats_.total_lp_iters;
   std::string user_gap = user_mip_gap<f_t>(user_obj, user_lower);
   settings_.log.printf("%c %10d   %10lu    %+13.6e    %+10.6e  %6d    %7.1e     %s %9.2f\n",
                        symbol,
@@ -577,18 +578,16 @@ branch_variable_t<i_t> branch_and_bound_t<i_t, f_t>::variable_selection(
   switch (worker_data->worker_type) {
     case bnb_worker_type_t::BEST_FIRST:
 
-      if (settings_.reliability_branching_settings.enable) {
-        simplex_solver_settings_t<i_t, f_t> rb_settings      = settings_;
-        rb_settings.reliability_branching_settings.num_tasks = worker_pool_.num_idle_workers();
-
+      if (settings_.reliability_branching != 0) {
         branch_var = pc_.reliable_variable_selection(node_ptr,
                                                      fractional,
                                                      solution,
-                                                     rb_settings,
+                                                     settings_,
                                                      var_types_,
                                                      worker_data,
                                                      exploration_stats_,
                                                      upper_bound_,
+                                                     worker_pool_.num_idle_workers(),
                                                      log);
       } else {
         branch_var = pc_.variable_selection(fractional, solution, log);
@@ -666,9 +665,9 @@ dual::status_t branch_and_bound_t<i_t, f_t>::solve_node_lp(mip_node_t<i_t, f_t>*
     node_ptr->vstatus[node_ptr->branch_var]);
 #endif
 
-  bool feasible                = worker_data->set_lp_variable_bounds_for(node_ptr, settings_);
+  bool feasible                = worker_data->set_lp_variable_bounds(node_ptr, settings_);
   dual::status_t lp_status     = dual::status_t::DUAL_UNBOUNDED;
-  worker_data->leaf_edge_norms = edge_norms_;  // = node.steepest_edge_norms;
+  worker_data->leaf_edge_norms = edge_norms_;
 
   if (feasible) {
     i_t node_iter     = 0;
@@ -816,8 +815,7 @@ std::pair<node_status_t, rounding_direction_t> branch_and_bound_t<i_t, f_t>::upd
 }
 
 template <typename i_t, typename f_t>
-void branch_and_bound_t<i_t, f_t>::plunge_with(bnb_worker_data_t<i_t, f_t>* worker_data,
-                                               mip_solve_mode_t mode)
+void branch_and_bound_t<i_t, f_t>::plunge_with(bnb_worker_data_t<i_t, f_t>* worker_data)
 {
   std::deque<mip_node_t<i_t, f_t>*> stack;
   stack.push_front(worker_data->start_node);
@@ -912,7 +910,7 @@ void branch_and_bound_t<i_t, f_t>::plunge_with(bnb_worker_data_t<i_t, f_t>* work
     }
   }
 
-  if (mode == mip_solve_mode_t::BNB_PARALLEL) {
+  if (settings_.num_threads > 1) {
     worker_pool_.return_worker_to_pool(worker_data);
     active_workers_per_type_[BEST_FIRST]--;
   }
@@ -1016,19 +1014,10 @@ void branch_and_bound_t<i_t, f_t>::run_scheduler()
   }
 #endif
 
-  worker_pool_.init(num_workers, original_lp_, Arow_, var_types_, settings_);
-  active_workers_per_type_.fill(0);
-
   f_t lower_bound     = get_lower_bound();
   f_t abs_gap         = upper_bound_ - lower_bound;
   f_t rel_gap         = user_relative_gap(original_lp_, upper_bound_.load(), lower_bound);
   i_t last_node_depth = 0;
-
-  is_running_ = true;
-
-  settings_.log.printf(
-    "  | Explored | Unexplored |    Objective    |     Bound     | Depth | Iter/Node |   Gap    "
-    "|  Time  |\n");
 
   while (solver_status_ == mip_status_t::UNSET && abs_gap > settings_.absolute_mip_gap_tol &&
          rel_gap > settings_.relative_mip_gap_tol &&
@@ -1108,7 +1097,7 @@ void branch_and_bound_t<i_t, f_t>::run_scheduler()
         launched_any_task = true;
 
 #pragma omp task affinity(worker)
-        plunge_with(worker, mip_solve_mode_t::BNB_PARALLEL);
+        plunge_with(worker);
 
       } else {
         std::optional<mip_node_t<i_t, f_t>*> start_node = node_queue_.pop_diving();
@@ -1133,29 +1122,21 @@ void branch_and_bound_t<i_t, f_t>::run_scheduler()
     }
 
     // If no new task was launched in this iteration, suspend temporarily the
-    // execution of the master. As of 8/Jan/2026, GCC does not
+    // execution of the scheduler. As of 8/Jan/2026, GCC does not
     // implement taskyield, but LLVM does.
     if (!launched_any_task) { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
   }
-
-  is_running_ = false;
 }
 
 template <typename i_t, typename f_t>
 void branch_and_bound_t<i_t, f_t>::single_threaded_solve()
 {
-  bnb_worker_data_t<i_t, f_t> worker(0, original_lp_, Arow_, var_types_, settings_);
+  bnb_worker_data_t<i_t, f_t>* worker = worker_pool_.get_idle_worker();
 
   f_t lower_bound     = get_lower_bound();
   f_t abs_gap         = upper_bound_ - lower_bound;
   f_t rel_gap         = user_relative_gap(original_lp_, upper_bound_.load(), lower_bound);
   i_t last_node_depth = 0;
-
-  is_running_ = true;
-
-  settings_.log.printf(
-    "  | Explored | Unexplored |    Objective    |     Bound     | Depth | Iter/Node |   Gap    "
-    "|  Time  |\n");
 
   while (solver_status_ == mip_status_t::UNSET && abs_gap > settings_.absolute_mip_gap_tol &&
          rel_gap > settings_.relative_mip_gap_tol && node_queue_.best_first_queue_size() > 0) {
@@ -1200,10 +1181,8 @@ void branch_and_bound_t<i_t, f_t>::single_threaded_solve()
     }
 
     worker.init_best_first(start_node.value(), original_lp_);
-    plunge_with(&worker, mip_solve_mode_t::BNB_SINGLE_THREADED);
+    plunge_with(worker);
   }
-
-  is_running_ = false;
 }
 
 template <typename i_t, typename f_t>
@@ -1482,7 +1461,16 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
     calculate_variable_locks(original_lp_, var_up_locks_, var_down_locks_);
   }
 
-  if (solve_mode == mip_solve_mode_t::BNB_PARALLEL) {
+  worker_pool_.init(num_workers, original_lp_, Arow_, var_types_, settings_);
+  active_workers_per_type_.fill(0);
+
+  is_running_ = true;
+
+  settings_.log.printf(
+    "  | Explored | Unexplored |    Objective    |     Bound     | Depth | Iter/Node |   Gap    "
+    "|  Time  |\n");
+
+  if (settings_.num_threads > 1) {
 #pragma omp parallel num_threads(settings_.num_threads)
     {
 #pragma omp master
@@ -1492,6 +1480,8 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
   } else {
     single_threaded_solve();
   }
+
+  is_running_ = false;
 
   f_t lower_bound = node_queue_.best_first_queue_size() > 0 ? node_queue_.get_lower_bound()
                                                             : search_tree_.root.lower_bound;

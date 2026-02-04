@@ -167,19 +167,13 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
     branch_and_bound_settings.absolute_mip_gap_tol = context.settings.tolerances.absolute_mip_gap;
     branch_and_bound_settings.relative_mip_gap_tol = context.settings.tolerances.relative_mip_gap;
     branch_and_bound_settings.integer_tol = context.settings.tolerances.integrality_tolerance;
-    branch_and_bound_settings.reliability_branching_settings.enable =
-      solver_settings_.reliability_branching;
+    branch_and_bound_settings.reliability_branching = solver_settings_.reliability_branching;
 
     if (context.settings.num_cpu_threads < 0) {
       branch_and_bound_settings.num_threads = std::max(1, omp_get_max_threads() - 1);
     } else {
       branch_and_bound_settings.num_threads = std::max(1, context.settings.num_cpu_threads);
     }
-
-    dual_simplex::mip_solve_mode_t solve_mode =
-      branch_and_bound_settings.num_threads > 1
-        ? dual_simplex::mip_solve_mode_t::BNB_PARALLEL
-        : dual_simplex::mip_solve_mode_t::BNB_SINGLE_THREADED;
 
     // Set the branch and bound -> primal heuristics callback
     branch_and_bound_settings.solution_callback =
@@ -231,8 +225,7 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
     branch_and_bound_status_future = std::async(std::launch::async,
                                                 &dual_simplex::branch_and_bound_t<i_t, f_t>::solve,
                                                 branch_and_bound.get(),
-                                                std::ref(branch_and_bound_solution),
-                                                solve_mode);
+                                                std::ref(branch_and_bound_solution));
   }
 
   // Start the primal heuristics

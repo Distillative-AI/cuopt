@@ -1,6 +1,6 @@
 /* clang-format off */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 /* clang-format on */
@@ -57,6 +57,7 @@
 #define CUOPT_MIP_HEURISTICS_ONLY         "mip_heuristics_only"
 #define CUOPT_MIP_SCALING                 "mip_scaling"
 #define CUOPT_MIP_PRESOLVE                "mip_presolve"
+#define CUOPT_MIP_RELIABILITY_BRANCHING   "mip_reliability_branching"
 #define CUOPT_SOLUTION_FILE               "solution_file"
 #define CUOPT_NUM_CPU_THREADS             "num_cpu_threads"
 #define CUOPT_NUM_GPUS                    "num_gpus"

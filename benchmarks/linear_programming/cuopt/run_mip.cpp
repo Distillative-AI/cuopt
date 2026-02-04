@@ -147,7 +147,7 @@ int run_single_file(std::string file_path,
                     int num_cpu_threads,
                     bool write_log_file,
                     bool log_to_console,
-                    bool reliability_branching,
+                    int reliability_branching,
                     double time_limit)
 {
   const raft::handle_t handle_{};
@@ -260,7 +260,7 @@ void run_single_file_mp(std::string file_path,
                         int num_cpu_threads,
                         bool write_log_file,
                         bool log_to_console,
-                        bool reliability_branching,
+                        int reliability_branching,
                         double time_limit)
 {
   std::cout << "running file " << file_path << " on gpu : " << device << std::endl;
@@ -361,8 +361,8 @@ int main(int argc, char* argv[])
     .default_value(std::string("f"));
 
   program.add_argument("--reliability-branching")
-    .help("enable reliability branching (t/f)")
-    .default_value(std::string("t"));
+    .help("reliability branching: -1 (automatic), 0 (disable) or k > 0 (use k)")
+    .default_value(std::string("-1"));
 
   // Parse arguments
   try {
@@ -386,13 +386,13 @@ int main(int argc, char* argv[])
   std::string result_file;
   int batch_num = -1;
 
-  bool heuristics_only       = program.get<std::string>("--heuristics-only")[0] == 't';
-  int num_cpu_threads        = program.get<int>("--num-cpu-threads");
-  bool write_log_file        = program.get<std::string>("--write-log-file")[0] == 't';
-  bool log_to_console        = program.get<std::string>("--log-to-console")[0] == 't';
-  double memory_limit        = program.get<double>("--memory-limit");
-  bool track_allocations     = program.get<std::string>("--track-allocations")[0] == 't';
-  bool reliability_branching = program.get<std::string>("--reliability-branching")[0] == 't';
+  bool heuristics_only      = program.get<std::string>("--heuristics-only")[0] == 't';
+  int num_cpu_threads       = program.get<int>("--num-cpu-threads");
+  bool write_log_file       = program.get<std::string>("--write-log-file")[0] == 't';
+  bool log_to_console       = program.get<std::string>("--log-to-console")[0] == 't';
+  double memory_limit       = program.get<double>("--memory-limit");
+  bool track_allocations    = program.get<std::string>("--track-allocations")[0] == 't';
+  int reliability_branching = program.get<std::string>("--reliability-branching");
 
   if (num_cpu_threads < 0) { num_cpu_threads = omp_get_max_threads() / n_gpus; }
 

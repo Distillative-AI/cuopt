@@ -44,50 +44,6 @@ struct diving_heuristics_settings_t {
 };
 
 template <typename i_t, typename f_t>
-struct reliability_branching_settings_t {
-  // Enable or disable reliability branching
-  bool enable = false;
-
-  // Lower bound for the maximum number of LP iterations for a single trial branching
-  i_t lower_max_lp_iter = 10;
-
-  // Upper bound for the maximum number of LP iterations for a single trial branching
-  i_t upper_max_lp_iter = 500;
-
-  // Priority of the tasks created when running the trial branching in parallel.
-  // Set to 1 to have the same priority as the other tasks.
-  i_t task_priority = 5;
-
-  // The number of tasks spawned for performing strong branching.
-  i_t num_tasks = -1;
-
-  // The maximum number of candidates initialized by strong branching in a single
-  // node
-  i_t max_num_candidates = 100;
-
-  // Define the maximum number of iteration spent in strong branching.
-  // Let `bnb_lp_iter` = total number of iterations in B&B, then
-  // `max iter in strong branching = bnb_lp_factor * bnb_lp_iter + bnb_lp_offset`.
-  // This is used for determining the `reliable_threshold`.
-  f_t bnb_lp_factor = 0.5;
-  i_t bnb_lp_offset = 100000;
-
-  // Threshold for determining for the number of pseudocost updates. Used for
-  // determining if the pseudocost is reliable or not.
-  // - <0: automatic
-  // - 0: disable (use pseudocost branching instead)
-  // - >0: will use the value for the threshold.
-  i_t reliable_threshold = -1;
-
-  // Maximum and minimum points of the curve to determine the value
-  // of the `reliable_threshold` based on the current number of LP
-  // iterations in strong branching and B&B.
-  // Only used when `reliable_threshold` is negative
-  i_t max_reliable_threshold = 5;
-  i_t min_reliable_threshold = 1;
-};
-
-template <typename i_t, typename f_t>
 struct simplex_solver_settings_t {
  public:
   simplex_solver_settings_t()
@@ -139,6 +95,7 @@ struct simplex_solver_settings_t {
       first_iteration_log(2),
       num_threads(omp_get_max_threads() - 1),
       random_seed(0),
+      reliability_branching(-1),
       inside_mip(0),
       solution_callback(nullptr),
       heuristic_preemption_callback(nullptr),
@@ -205,8 +162,12 @@ struct simplex_solver_settings_t {
   i_t random_seed;                 // random seed
 
   diving_heuristics_settings_t<i_t, f_t> diving_settings;  // Settings for the diving heuristics
-  reliability_branching_settings_t<i_t, f_t>
-    reliability_branching_settings;  // Settings for reliability branching
+
+  // Settings for the reliability branching.
+  // - -1: automatic
+  // - 0: disable (use pseudocost branching instead)
+  // - k > 0, a variable is considered reliable if it has been branched on k times.
+  i_t reliability_branching;
 
   i_t inside_mip;  // 0 if outside MIP, 1 if inside MIP at root node, 2 if inside MIP at leaf node
   std::function<void(std::vector<f_t>&, f_t)> solution_callback;

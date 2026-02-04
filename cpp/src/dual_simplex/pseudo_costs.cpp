@@ -154,6 +154,7 @@ f_t trial_branching(const lp_problem_t<i_t, f_t>& original_lp,
   child_problem.lower[branch_var] = branch_var_lower;
   child_problem.upper[branch_var] = branch_var_upper;
 
+  const bool initialize_basis                        = false;
   simplex_solver_settings_t<i_t, f_t> child_settings = settings;
   child_settings.set_log(false);
   i_t lp_iter_upper              = settings.reliability_branching_settings.upper_max_lp_iter;
@@ -173,7 +174,7 @@ f_t trial_branching(const lp_problem_t<i_t, f_t>& original_lp,
 
   dual::status_t status = dual_phase2_with_advanced_basis(2,
                                                           0,
-                                                          false,
+                                                          initialize_basis,
                                                           start_time,
                                                           child_problem,
                                                           child_settings,
@@ -267,6 +268,22 @@ void strong_branching(const lp_problem_t<i_t, f_t>& original_lp,
 }
 
 template <typename i_t, typename f_t>
+f_t pseudo_costs_t<i_t, f_t>::calculate_pseudocost_score(i_t j,
+                                                         const std::vector<f_t>& solution,
+                                                         f_t pseudo_cost_up_avg,
+                                                         f_t pseudo_cost_down_avg) const
+{
+  constexpr f_t eps = 1e-6;
+  i_t num_up        = pseudo_cost_num_up[j];
+  i_t num_down      = pseudo_cost_num_down[j];
+  f_t pc_up         = num_up > 0 ? pseudo_cost_sum_up[j] / num_up : pseudo_cost_up_avg;
+  f_t pc_down       = num_down > 0 ? pseudo_cost_sum_down[j] / num_down : pseudo_cost_down_avg;
+  f_t f_down        = solution[j] - std::floor(solution[j]);
+  f_t f_up          = std::ceil(solution[j]) - solution[j];
+  return std::max(f_down * pc_down, eps) * std::max(f_up * pc_up, eps);
+}
+
+template <typename i_t, typename f_t>
 void pseudo_costs_t<i_t, f_t>::update_pseudo_costs(mip_node_t<i_t, f_t>* node_ptr,
                                                    f_t leaf_objective)
 {
@@ -287,7 +304,7 @@ template <typename i_t, typename f_t>
 void pseudo_costs_t<i_t, f_t>::initialized(i_t& num_initialized_down,
                                            i_t& num_initialized_up,
                                            f_t& pseudo_cost_down_avg,
-                                           f_t& pseudo_cost_up_avg)
+                                           f_t& pseudo_cost_up_avg) const
 {
   num_initialized_down = 0;
   num_initialized_up   = 0;
@@ -327,11 +344,8 @@ i_t pseudo_costs_t<i_t, f_t>::variable_selection(const std::vector<i_t>& fractio
                                                  const std::vector<f_t>& solution,
                                                  logger_t& log)
 {
-  const i_t num_fractional = fractional.size();
-  std::vector<f_t> pseudo_cost_up(num_fractional);
-  std::vector<f_t> pseudo_cost_down(num_fractional);
-  std::vector<f_t> score(num_fractional);
-
+  i_t branch_var = fractional[0];
+  f_t max_score  = -1;
   i_t num_initialized_down;
   i_t num_initialized_up;
   f_t pseudo_cost_down_avg;
@@ -345,44 +359,19 @@ i_t pseudo_costs_t<i_t, f_t>::variable_selection(const std::vector<i_t>& fractio
              pseudo_cost_down_avg,
              pseudo_cost_up_avg);
 
-  for (i_t k = 0; k < num_fractional; k++) {
-    const i_t j = fractional[k];
+  for (auto j : fractional) {
+    f_t score = calculate_pseudocost_score(j, solution, pseudo_cost_up_avg, pseudo_cost_down_avg);
 
-    if (pseudo_cost_num_down[j] != 0) {
-      pseudo_cost_down[k] = pseudo_cost_sum_down[j] / pseudo_cost_num_down[j];
-    } else {
-      pseudo_cost_down[k] = pseudo_cost_down_avg;
-    }
-
-    if (pseudo_cost_num_up[j] != 0) {
-      pseudo_cost_up[k] = pseudo_cost_sum_up[j] / pseudo_cost_num_up[j];
-    } else {
-      pseudo_cost_up[k] = pseudo_cost_up_avg;
-    }
-
-    constexpr f_t eps = 1e-6;
-    const f_t f_down  = solution[j] - std::floor(solution[j]);
-    const f_t f_up    = std::ceil(solution[j]) - solution[j];
-    score[k] =
-      std::max(f_down * pseudo_cost_down[k], eps) * std::max(f_up * pseudo_cost_up[k], eps);
-  }
-
-  i_t branch_var = fractional[0];
-  f_t max_score  = -1;
-  i_t select     = -1;
-
-  for (i_t k = 0; k < num_fractional; k++) {
-    if (score[k] > max_score) {
-      max_score  = score[k];
-      branch_var = fractional[k];
-      select     = k;
+    if (score > max_score) {
+      max_score  = score;
+      branch_var = j;
     }
   }
 
   log.debug("Pseudocost branching on %d. Value %e. Score %e.\n",
             branch_var,
             solution[branch_var],
-            score[select]);
+            max_score);
 
   return branch_var;
 }
@@ -397,6 +386,7 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
   bnb_worker_data_t<i_t, f_t>* worker_data,
   const bnb_stats_t<i_t, f_t>& bnb_stats,
   f_t upper_bound,
+  int max_num_tasks,
   logger_t& log)
 {
   f_t start_time = bnb_stats.start_time;
@@ -415,24 +405,25 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
              pseudo_cost_down_avg,
              pseudo_cost_up_avg);
 
-  const int64_t bnb_total_lp_iter  = bnb_stats.total_lp_iters;
-  const int64_t bnb_nodes_explored = bnb_stats.nodes_explored;
-  const i_t bnb_lp_iter_per_node   = bnb_total_lp_iter / bnb_stats.nodes_explored;
+  const int64_t branch_and_bound_lp_iters = bnb_stats.total_lp_iters;
+  const int64_t branch_and_bound_explored = bnb_stats.nodes_explored;
+  const i_t branch_and_bound_lp_iter_per_node =
+    branch_and_bound_lp_iters / bnb_stats.nodes_explored;
 
-  i_t reliable_threshold = settings.reliability_branching_settings.reliable_threshold;
+  i_t reliable_threshold = settings.reliability_branching;
   if (reliable_threshold < 0) {
-    const i_t max_threshold = settings.reliability_branching_settings.max_reliable_threshold;
-    const i_t min_threshold = settings.reliability_branching_settings.min_reliable_threshold;
-    const f_t iter_factor   = settings.reliability_branching_settings.bnb_lp_factor;
-    const i_t iter_offset   = settings.reliability_branching_settings.bnb_lp_offset;
-    const int64_t alpha     = iter_factor * bnb_total_lp_iter;
-    const int64_t max_iter  = alpha + settings.reliability_branching_settings.bnb_lp_offset;
+    const i_t max_threshold = reliability_branching_settings.max_reliable_threshold;
+    const i_t min_threshold = reliability_branching_settings.min_reliable_threshold;
+    const f_t iter_factor   = reliability_branching_settings.bnb_lp_factor;
+    const i_t iter_offset   = reliability_branching_settings.bnb_lp_offset;
+    const int64_t alpha     = iter_factor * branch_and_bound_lp_iters;
+    const int64_t max_iter  = alpha + reliability_branching_settings.bnb_lp_offset;
 
-    f_t gamma          = (max_iter - sb_total_lp_iter) / (sb_total_lp_iter + 1.0);
-    gamma              = std::min(1.0, gamma);
-    gamma              = std::max((alpha - sb_total_lp_iter) / (sb_total_lp_iter + 1.0), gamma);
+    f_t gamma = (max_iter - strong_branching_lp_iter) / (strong_branching_lp_iter + 1.0);
+    gamma     = std::min(1.0, gamma);
+    gamma = std::max((alpha - strong_branching_lp_iter) / (strong_branching_lp_iter + 1.0), gamma);
     reliable_threshold = (1 - gamma) * min_threshold + gamma * max_threshold;
-    reliable_threshold = sb_total_lp_iter < max_iter ? reliable_threshold : 0;
+    reliable_threshold = strong_branching_lp_iter < max_iter ? reliable_threshold : 0;
   }
 
   std::vector<i_t> unreliable_list;
@@ -445,15 +436,7 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
       continue;
     }
 
-    f_t pc_up   = pseudo_cost_num_up[j] > 0 ? pseudo_cost_sum_up[j] / pseudo_cost_num_up[j]
-                                            : pseudo_cost_up_avg;
-    f_t pc_down = pseudo_cost_sum_down[j] > 0 ? pseudo_cost_sum_down[j] / pseudo_cost_num_down[j]
-                                              : pseudo_cost_down_avg;
-
-    constexpr f_t eps = 1e-6;
-    const f_t f_down  = solution[j] - std::floor(solution[j]);
-    const f_t f_up    = std::ceil(solution[j]) - solution[j];
-    f_t score         = std::max(f_down * pc_down, eps) * std::max(f_up * pc_up, eps);
+    f_t score = calculate_pseudocost_score(j, solution, pseudo_cost_up_avg, pseudo_cost_down_avg);
 
     if (score > max_score) {
       max_score  = score;
@@ -468,19 +451,20 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
     return branch_var;
   }
 
-  const int num_tasks          = std::max(settings.reliability_branching_settings.num_tasks, 1);
-  const int task_priority      = settings.reliability_branching_settings.task_priority;
-  const i_t max_num_candidates = settings.reliability_branching_settings.max_num_candidates;
+  const int num_tasks          = std::max(max_num_tasks, 1);
+  const int task_priority      = reliability_branching_settings.task_priority;
+  const i_t max_num_candidates = reliability_branching_settings.max_num_candidates;
   const i_t num_candidates     = std::min<size_t>(unreliable_list.size(), max_num_candidates);
 
   assert(task_priority > 0);
   assert(max_num_candidates > 0);
   assert(num_candidates > 0);
+  assert(num_tasks > 0);
 
   log.printf(
     "RB iters = %d, B&B iters = %d, unreliable = %d, num_tasks = %d, reliable_threshold = %d\n",
-    sb_total_lp_iter.load(),
-    bnb_total_lp_iter,
+    strong_branching_lp_iter.load(),
+    branch_and_bound_lp_iters,
     unreliable_list.size(),
     num_tasks,
     reliable_threshold);
@@ -509,9 +493,9 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
                                 worker_data->leaf_problem.lower[j],
                                 std::floor(solution[j]),
                                 upper_bound,
-                                bnb_lp_iter_per_node,
+                                branch_and_bound_lp_iter_per_node,
                                 start_time,
-                                sb_total_lp_iter);
+                                strong_branching_lp_iter);
 
       if (!std::isnan(obj)) {
         f_t change_in_obj = obj - node_ptr->lower_bound;
@@ -535,9 +519,9 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
                                 std::ceil(solution[j]),
                                 worker_data->leaf_problem.upper[j],
                                 upper_bound,
-                                bnb_lp_iter_per_node,
+                                branch_and_bound_lp_iter_per_node,
                                 start_time,
-                                sb_total_lp_iter);
+                                strong_branching_lp_iter);
 
       if (!std::isnan(obj)) {
         f_t change_in_obj = obj - node_ptr->lower_bound;
@@ -548,18 +532,10 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
     }
 
     if (toc(start_time) > settings.time_limit) { continue; }
-    f_t pc_up   = pseudo_cost_num_up[j] > 0 ? pseudo_cost_sum_up[j] / pseudo_cost_num_up[j]
-                                            : pseudo_cost_up_avg;
-    f_t pc_down = pseudo_cost_sum_down[j] > 0 ? pseudo_cost_sum_down[j] / pseudo_cost_num_down[j]
-                                              : pseudo_cost_down_avg;
 
-    constexpr f_t eps = 1e-6;
-    const f_t f_down  = solution[j] - std::floor(solution[j]);
-    const f_t f_up    = std::ceil(solution[j]) - solution[j];
-    f_t score         = std::max(f_down * pc_down, eps) * std::max(f_up * pc_up, eps);
+    f_t score = calculate_pseudocost_score(j, solution, pseudo_cost_up_avg, pseudo_cost_down_avg);
 
-    std::lock_guard<omp_mutex_t> score_lock(score_mutex);
-    if (score > max_score) {
+    if (std::lock_guard<omp_mutex_t> score_lock(score_mutex); score > max_score) {
       max_score  = score;
       branch_var = j;
     }
@@ -587,29 +563,15 @@ f_t pseudo_costs_t<i_t, f_t>::obj_estimate(const std::vector<i_t>& fractional,
 
   initialized(num_initialized_down, num_initialized_up, pseudo_cost_down_avg, pseudo_cost_up_avg);
 
-  for (i_t k = 0; k < num_fractional; k++) {
-    const i_t j = fractional[k];
-
-    f_t pseudo_cost_down = 0;
-    f_t pseudo_cost_up   = 0;
-
-    if (pseudo_cost_num_down[j] != 0) {
-      pseudo_cost_down = pseudo_cost_sum_down[j] / pseudo_cost_num_down[j];
-    } else {
-      pseudo_cost_down = pseudo_cost_down_avg;
-    }
-
-    if (pseudo_cost_num_up[j] != 0) {
-      pseudo_cost_up = pseudo_cost_sum_up[j] / pseudo_cost_num_up[j];
-    } else {
-      pseudo_cost_up = pseudo_cost_up_avg;
-    }
-
+  for (auto j : fractional) {
     constexpr f_t eps = 1e-6;
-    const f_t f_down  = solution[j] - std::floor(solution[j]);
-    const f_t f_up    = std::ceil(solution[j]) - solution[j];
-    estimate +=
-      std::min(std::max(pseudo_cost_down * f_down, eps), std::max(pseudo_cost_up * f_up, eps));
+    i_t num_up        = pseudo_cost_num_up[j];
+    i_t num_down      = pseudo_cost_num_down[j];
+    f_t pc_up         = num_up > 0 ? pseudo_cost_sum_up[j] / num_up : pseudo_cost_up_avg;
+    f_t pc_down       = num_down > 0 ? pseudo_cost_sum_down[j] / num_down : pseudo_cost_down_avg;
+    f_t f_down        = solution[j] - std::floor(solution[j]);
+    f_t f_up          = std::ceil(solution[j]) - solution[j];
+    estimate += std::min(pc_down * f_down, pc_up * f_up);
   }
 
   log.printf("pseudocost estimate = %e\n", estimate);
