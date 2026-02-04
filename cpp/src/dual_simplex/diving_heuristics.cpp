@@ -72,7 +72,7 @@ branch_variable_t<i_t> pseudocost_diving(pseudo_costs_t<i_t, f_t>& pc,
                                          logger_t& log)
 {
   i_t branch_var                 = -1;
-  f_t max_score                  = 0;
+  f_t max_score                  = -1;
   rounding_direction_t round_dir = rounding_direction_t::NONE;
   constexpr f_t eps              = 1e-6;
 
@@ -146,7 +146,7 @@ branch_variable_t<i_t> guided_diving(pseudo_costs_t<i_t, f_t>& pc,
                                      logger_t& log)
 {
   i_t branch_var                 = -1;
-  f_t max_score                  = 0;
+  f_t max_score                  = -1;
   rounding_direction_t round_dir = rounding_direction_t::NONE;
   constexpr f_t eps              = 1e-6;
 
