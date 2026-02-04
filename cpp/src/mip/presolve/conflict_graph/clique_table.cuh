@@ -45,6 +45,7 @@ struct knapsack_constraint_t {
   f_t rhs;
   i_t cstr_idx;
   bool is_set_packing = false;
+  i_t pair_idx        = -1;
 };
 
 template <typename i_t, typename f_t>

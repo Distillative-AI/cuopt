@@ -207,6 +207,7 @@ bool diversity_manager_t<i_t, f_t>::run_presolve(f_t time_limit)
     problem_ptr->get_host_user_problem(host_problem);
     find_initial_cliques(host_problem, context.settings.tolerances);
     problem_ptr->set_constraints_from_host_user_problem(host_problem);
+    trivial_presolve(*problem_ptr, remap_cache_ids);
   }
   if (!problem_ptr->empty) {
     // do the resizing no-matter what, bounds presolve might not change the bounds but
