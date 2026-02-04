@@ -268,7 +268,6 @@ class bsp_bfs_worker_t : public bsp_worker_base_t<i_t, f_t, bsp_bfs_worker_t<i_t
     record_event(bb_event_t<i_t, f_t>::make_branched(this->clock,
                                                      this->worker_id,
                                                      node->node_id,
-                                                     0,
                                                      down_child_id,
                                                      up_child_id,
                                                      node->lower_bound,
@@ -282,7 +281,7 @@ class bsp_bfs_worker_t : public bsp_worker_base_t<i_t, f_t, bsp_bfs_worker_t<i_t
   void record_integer_solution(mip_node_t<i_t, f_t>* node, f_t objective)
   {
     record_event(bb_event_t<i_t, f_t>::make_integer_solution(
-      this->clock, this->worker_id, node->node_id, 0, objective));
+      this->clock, this->worker_id, node->node_id, objective));
     ++nodes_processed_this_horizon;
     ++this->total_nodes_processed;
     ++this->total_integer_solutions;
@@ -291,7 +290,7 @@ class bsp_bfs_worker_t : public bsp_worker_base_t<i_t, f_t, bsp_bfs_worker_t<i_t
   void record_fathomed(mip_node_t<i_t, f_t>* node, f_t lower_bound)
   {
     record_event(bb_event_t<i_t, f_t>::make_fathomed(
-      this->clock, this->worker_id, node->node_id, 0, lower_bound));
+      this->clock, this->worker_id, node->node_id, lower_bound));
     ++nodes_processed_this_horizon;
     ++this->total_nodes_processed;
     ++total_nodes_pruned;
@@ -300,7 +299,7 @@ class bsp_bfs_worker_t : public bsp_worker_base_t<i_t, f_t, bsp_bfs_worker_t<i_t
   void record_infeasible(mip_node_t<i_t, f_t>* node)
   {
     record_event(
-      bb_event_t<i_t, f_t>::make_infeasible(this->clock, this->worker_id, node->node_id, 0));
+      bb_event_t<i_t, f_t>::make_infeasible(this->clock, this->worker_id, node->node_id));
     ++nodes_processed_this_horizon;
     ++this->total_nodes_processed;
     ++total_nodes_infeasible;
@@ -308,8 +307,7 @@ class bsp_bfs_worker_t : public bsp_worker_base_t<i_t, f_t, bsp_bfs_worker_t<i_t
 
   void record_numerical(mip_node_t<i_t, f_t>* node)
   {
-    record_event(
-      bb_event_t<i_t, f_t>::make_numerical(this->clock, this->worker_id, node->node_id, 0));
+    record_event(bb_event_t<i_t, f_t>::make_numerical(this->clock, this->worker_id, node->node_id));
     ++nodes_processed_this_horizon;
     ++this->total_nodes_processed;
   }

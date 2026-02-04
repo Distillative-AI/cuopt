@@ -267,7 +267,6 @@ class bsp_bfs_worker_t : public bsp_worker_base_t<i_t, f_t, bsp_bfs_worker_t<i_t
     record_event(bb_event_t<i_t, f_t>::make_branched(this->clock,
                                                      this->worker_id,
                                                      node->node_id,
-                                                     0,
                                                      down_child_id,
                                                      up_child_id,
                                                      node->lower_bound,
@@ -281,7 +280,7 @@ class bsp_bfs_worker_t : public bsp_worker_base_t<i_t, f_t, bsp_bfs_worker_t<i_t
   void record_integer_solution(mip_node_t<i_t, f_t>* node, f_t objective)
   {
     record_event(bb_event_t<i_t, f_t>::make_integer_solution(
-      this->clock, this->worker_id, node->node_id, 0, objective));
+      this->clock, this->worker_id, node->node_id, objective));
     ++nodes_processed_this_horizon;
     ++this->total_nodes_processed;
     ++this->total_integer_solutions;
@@ -290,7 +289,7 @@ class bsp_bfs_worker_t : public bsp_worker_base_t<i_t, f_t, bsp_bfs_worker_t<i_t
   void record_fathomed(mip_node_t<i_t, f_t>* node, f_t lower_bound)
   {
     record_event(bb_event_t<i_t, f_t>::make_fathomed(
-      this->clock, this->worker_id, node->node_id, 0, lower_bound));
+      this->clock, this->worker_id, node->node_id, lower_bound));
     ++nodes_processed_this_horizon;
     ++this->total_nodes_processed;
     ++total_nodes_pruned;
@@ -299,7 +298,7 @@ class bsp_bfs_worker_t : public bsp_worker_base_t<i_t, f_t, bsp_bfs_worker_t<i_t
   void record_infeasible(mip_node_t<i_t, f_t>* node)
   {
     record_event(
-      bb_event_t<i_t, f_t>::make_infeasible(this->clock, this->worker_id, node->node_id, 0));
+      bb_event_t<i_t, f_t>::make_infeasible(this->clock, this->worker_id, node->node_id));
     ++nodes_processed_this_horizon;
     ++this->total_nodes_processed;
     ++total_nodes_infeasible;
@@ -307,8 +306,7 @@ class bsp_bfs_worker_t : public bsp_worker_base_t<i_t, f_t, bsp_bfs_worker_t<i_t
 
   void record_numerical(mip_node_t<i_t, f_t>* node)
   {
-    record_event(
-      bb_event_t<i_t, f_t>::make_numerical(this->clock, this->worker_id, node->node_id, 0));
+    record_event(bb_event_t<i_t, f_t>::make_numerical(this->clock, this->worker_id, node->node_id));
     ++nodes_processed_this_horizon;
     ++this->total_nodes_processed;
   }
@@ -411,9 +409,6 @@ class bsp_diving_worker_t : public bsp_worker_base_t<i_t, f_t, bsp_diving_worker
   }
 };
 
-// ============================================================================
-// CRTP Base class for BSP worker pools
-// ============================================================================
 template <typename i_t, typename f_t, typename WorkerT, typename Derived>
 class bsp_worker_pool_base_t {
  protected:
@@ -422,31 +417,28 @@ class bsp_worker_pool_base_t {
  public:
   WorkerT& operator[](int worker_id) { return workers_[worker_id]; }
   const WorkerT& operator[](int worker_id) const { return workers_[worker_id]; }
-  int size() const { return static_cast<int>(workers_.size()); }
+  size_t size() const { return workers_.size(); }
 
   bool any_has_work() const
   {
-    for (const auto& worker : workers_) {
-      if (worker.has_work()) return true;
-    }
-    return false;
+    return std::any_of(
+      workers_.begin(), workers_.end(), [](const auto& worker) { return worker.has_work(); });
   }
 
   size_t total_queue_size() const
   {
-    size_t total = 0;
-    for (const auto& worker : workers_) {
-      total += worker.queue_size();
-    }
-    return total;
+    return std::accumulate(
+      workers_.begin(), workers_.end(), 0, [](size_t total, const auto& worker) {
+        return total + worker.queue_size();
+      });
   }
 
   bb_event_batch_t<i_t, f_t> collect_and_sort_events()
   {
     bb_event_batch_t<i_t, f_t> all_events;
-    for (auto& worker : workers_) {
+    std::for_each(workers_.begin(), workers_.end(), [&](auto& worker) {
       static_cast<Derived*>(this)->collect_worker_events(worker, all_events);
-    }
+    });
     all_events.sort_for_replay();
     return all_events;
   }
@@ -457,9 +449,6 @@ class bsp_worker_pool_base_t {
   auto end() const { return workers_.end(); }
 };
 
-// ============================================================================
-// BSP BFS Worker Pool
-// ============================================================================
 template <typename i_t, typename f_t>
 class bsp_bfs_worker_pool_t : public bsp_worker_pool_base_t<i_t,
                                                             f_t,
@@ -475,7 +464,6 @@ class bsp_bfs_worker_pool_t : public bsp_worker_pool_base_t<i_t,
                         const std::vector<variable_type_t>& var_types,
                         const simplex_solver_settings_t<i_t, f_t>& settings)
   {
-    this->workers_.reserve(num_workers);
     for (int i = 0; i < num_workers; ++i) {
       this->workers_.emplace_back(i, original_lp, Arow, var_types, settings);
     }
@@ -491,9 +479,6 @@ class bsp_bfs_worker_pool_t : public bsp_worker_pool_base_t<i_t,
   }
 };
 
-// ============================================================================
-// BSP Diving Worker Pool
-// ============================================================================
 template <typename i_t, typename f_t>
 class bsp_diving_worker_pool_t : public bsp_worker_pool_base_t<i_t,
                                                                f_t,

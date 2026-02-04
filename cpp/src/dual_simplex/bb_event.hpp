@@ -71,7 +71,6 @@ struct bb_event_t {
   static bb_event_t make_branched(double work_unit_ts,
                                   int worker,
                                   i_t node,
-                                  int seq,
                                   i_t down_id,
                                   i_t up_id,
                                   f_t lower_bound,
@@ -83,58 +82,49 @@ struct bb_event_t {
     e.wut              = work_unit_ts;
     e.worker_id        = worker;
     e.node_id          = node;
-    e.event_sequence   = seq;
     e.payload.branched = {down_id, up_id, lower_bound, branch_var, branch_val};
     return e;
   }
 
-  static bb_event_t make_integer_solution(
-    double work_unit_ts, int worker, i_t node, int seq, f_t objective)
+  static bb_event_t make_integer_solution(double work_unit_ts, int worker, i_t node, f_t objective)
   {
     bb_event_t e;
     e.type                     = bb_event_type_t::NODE_INTEGER;
     e.wut                      = work_unit_ts;
     e.worker_id                = worker;
     e.node_id                  = node;
-    e.event_sequence           = seq;
     e.payload.integer_solution = {objective};
     return e;
   }
 
-  static bb_event_t make_fathomed(
-    double work_unit_ts, int worker, i_t node, int seq, f_t lower_bound)
+  static bb_event_t make_fathomed(double work_unit_ts, int worker, i_t node, f_t lower_bound)
   {
     bb_event_t e;
     e.type             = bb_event_type_t::NODE_FATHOMED;
     e.wut              = work_unit_ts;
     e.worker_id        = worker;
     e.node_id          = node;
-    e.event_sequence   = seq;
     e.payload.fathomed = {lower_bound};
     return e;
   }
 
-  static bb_event_t make_infeasible(double work_unit_ts, int worker, i_t node, int seq)
+  static bb_event_t make_infeasible(double work_unit_ts, int worker, i_t node)
   {
     bb_event_t e;
-    e.type             = bb_event_type_t::NODE_INFEASIBLE;
-    e.wut              = work_unit_ts;
-    e.worker_id        = worker;
-    e.node_id          = node;
-    e.event_sequence   = seq;
-    e.payload.fathomed = {std::numeric_limits<f_t>::infinity()};
+    e.type      = bb_event_type_t::NODE_INFEASIBLE;
+    e.wut       = work_unit_ts;
+    e.worker_id = worker;
+    e.node_id   = node;
     return e;
   }
 
-  static bb_event_t make_numerical(double work_unit_ts, int worker, i_t node, int seq)
+  static bb_event_t make_numerical(double work_unit_ts, int worker, i_t node)
   {
     bb_event_t e;
-    e.type             = bb_event_type_t::NODE_NUMERICAL;
-    e.wut              = work_unit_ts;
-    e.worker_id        = worker;
-    e.node_id          = node;
-    e.event_sequence   = seq;
-    e.payload.fathomed = {std::numeric_limits<f_t>::infinity()};
+    e.type      = bb_event_type_t::NODE_NUMERICAL;
+    e.wut       = work_unit_ts;
+    e.worker_id = worker;
+    e.node_id   = node;
     return e;
   }
 };
