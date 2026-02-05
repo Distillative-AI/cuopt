@@ -120,6 +120,7 @@ void make_coeff_positive_knapsack_constraint(
       all_coeff_are_equal = false;
     }
     knapsack_constraint.is_set_packing = all_coeff_are_equal;
+    if (!all_coeff_are_equal) { knapsack_constraint.is_set_partitioning = false; }
     if (knapsack_constraint.is_set_packing) { set_packing_constraints.insert(i); }
     cuopt_assert(knapsack_constraint.rhs >= 0, "RHS must be non-negative");
   }
@@ -170,12 +171,15 @@ void fill_knapsack_constraints(const dual_simplex::user_problem_t<i_t, f_t>& pro
     }
     // equality part
     else {
-      bool ranged_constraint = ranged_constraint_counter < problem.num_range_rows &&
+      bool is_set_partitioning = problem.rhs[i] == 1.;
+      bool ranged_constraint   = ranged_constraint_counter < problem.num_range_rows &&
                                problem.range_rows[ranged_constraint_counter] == i;
       // less than part
       knapsack_constraint.rhs = problem.rhs[i];
       if (ranged_constraint) {
         knapsack_constraint.rhs += problem.range_value[ranged_constraint_counter];
+        is_set_partitioning =
+          problem.range_value[ranged_constraint_counter] == 0. && problem.rhs[i] == 1.;
         ranged_constraint_counter++;
       }
       for (i_t j = constraint_range.first; j < constraint_range.second; j++) {
@@ -188,8 +192,8 @@ void fill_knapsack_constraints(const dual_simplex::user_problem_t<i_t, f_t>& pro
       for (i_t j = constraint_range.first; j < constraint_range.second; j++) {
         knapsack_constraint2.entries.push_back({A.j[j], -A.x[j]});
       }
-      knapsack_constraint.pair_idx  = knapsack_constraint2.cstr_idx;
-      knapsack_constraint2.pair_idx = knapsack_constraint.cstr_idx;
+      knapsack_constraint.is_set_partitioning  = is_set_partitioning;
+      knapsack_constraint2.is_set_partitioning = is_set_partitioning;
       knapsack_constraints.push_back(knapsack_constraint2);
     }
     knapsack_constraints.push_back(knapsack_constraint);
@@ -510,7 +514,6 @@ void remove_dominated_cliques(
   CUOPT_LOG_DEBUG("Number of extended cliques: %d", n_extended_cliques);
   std::vector<i_t> removal_marker(problem.row_sense.size(), 0);
   std::vector<std::vector<i_t>> cstr_vars(knapsack_constraints.size());
-  std::vector<bool> is_set_partitioning(knapsack_constraints.size(), false);
   for (const auto knapsack_idx : set_packing_constraints) {
     cuopt_assert(knapsack_constraints[knapsack_idx].is_set_packing,
                  "Set packing constraint is not a set packing constraint");
@@ -519,17 +522,13 @@ void remove_dominated_cliques(
     for (const auto& entry : vars) {
       cstr_vars[knapsack_idx].push_back(entry.col);
     }
-    // if the constraint has a pair index, it means it is an equality constraint
-    // an equality set packing constraint is a set partitioning constraint
-    // we can use both representation of set packing constraint to fix some other varibles in the
-    // larger cliques
-    is_set_partitioning[knapsack_idx] = knapsack_constraints[knapsack_idx].pair_idx != -1;
     std::sort(cstr_vars[knapsack_idx].begin(), cstr_vars[knapsack_idx].end());
   }
   CUOPT_LOG_DEBUG("Constraint variable lists built: %zu", set_packing_constraints.size());
   constexpr size_t dominance_window = 1000;
   struct clique_sig_t {
-    i_t cstr_idx;
+    i_t knapsack_idx;
+    i_t row_idx;
     i_t size;
     long long signature;
   };
@@ -543,8 +542,10 @@ void remove_dominated_cliques(
     for (auto v : vars) {
       signature += static_cast<long long>(v);
     }
-    sp_sigs.push_back(
-      {knapsack_constraints[knapsack_idx].cstr_idx, static_cast<i_t>(vars.size()), signature});
+    sp_sigs.push_back({knapsack_idx,
+                       knapsack_constraints[knapsack_idx].cstr_idx,
+                       static_cast<i_t>(vars.size()),
+                       signature});
   }
   CUOPT_LOG_DEBUG("Sorting signatures: %zu", sp_sigs.size());
   std::sort(sp_sigs.begin(), sp_sigs.end(), [](const auto& a, const auto& b) {
@@ -572,7 +573,7 @@ void remove_dominated_cliques(
       if (var_idx >= problem.num_cols) {
         i_t orig_idx = var_idx - problem.num_cols;
         CUOPT_LOG_DEBUG("Fixing variable %d", orig_idx);
-        cuopt_assert(problem.lower[orig_idx] != 1 || problem.upper[orig_idx] != 1,
+        cuopt_assert(problem.lower[orig_idx] != 0 || problem.upper[orig_idx] != 0,
                      "Variable is fixed to other side");
         problem.lower[orig_idx] = 1;
         problem.upper[orig_idx] = 1;
@@ -610,19 +611,21 @@ void remove_dominated_cliques(
     size_t end   = std::min(sp_sigs.size(), start + dominance_window);
     for (size_t idx = start; idx < end; idx++) {
       const auto& sp = sp_sigs[idx];
-      if (removal_marker[sp.cstr_idx]) { continue; }
-      const auto& vars_sp = cstr_vars[sp.cstr_idx];
+      if (sp.row_idx >= 0 && sp.row_idx < static_cast<i_t>(removal_marker.size()) &&
+          removal_marker[sp.row_idx]) {
+        continue;
+      }
+      const auto& vars_sp = cstr_vars[sp.knapsack_idx];
       if (vars_sp.size() > curr_clique_vars.size()) { continue; }
       if (!is_subset(vars_sp, curr_clique_vars)) { continue; }
-      if (is_set_partitioning[sp.cstr_idx]) {
+      if (knapsack_constraints[sp.knapsack_idx].is_set_partitioning) {
         CUOPT_LOG_DEBUG("Fixing difference between clique %d and set packing constraint %d",
                         clique_idx,
-                        sp.cstr_idx);
+                        sp.row_idx);
         // note that we never deleter set partitioning constraints but it fixes some other variables
         fix_difference(curr_clique_vars, vars_sp);
       } else {
-        cuopt_assert(sp.cstr_idx < A.m, "Set packing constraint index is out of bounds");
-        removal_marker[sp.cstr_idx] = true;
+        if (sp.row_idx >= 0 && sp.row_idx < A.m) { removal_marker[sp.row_idx] = true; }
       }
     }
     if ((i % 128) == 0) {

@@ -44,8 +44,8 @@ struct knapsack_constraint_t {
   std::vector<entry_t<i_t, f_t>> entries;
   f_t rhs;
   i_t cstr_idx;
-  bool is_set_packing = false;
-  i_t pair_idx        = -1;
+  bool is_set_packing      = false;
+  bool is_set_partitioning = false;
 };
 
 template <typename i_t, typename f_t>

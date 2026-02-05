@@ -153,11 +153,11 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
   timer_t timer(time_limit);
   // in case this is the first time run, resize
   if (in_fj.cstr_weights.size() != (size_t)solution.problem_ptr->n_constraints) {
-    i_t old_size = in_fj.cstr_weights.size();
     in_fj.cstr_weights.resize(solution.problem_ptr->n_constraints,
                               solution.handle_ptr->get_stream());
+    // reset weights since this is most likely the first call
     thrust::uninitialized_fill(solution.handle_ptr->get_thrust_policy(),
-                               in_fj.cstr_weights.begin() + old_size,
+                               in_fj.cstr_weights.begin(),
                                in_fj.cstr_weights.end(),
                                1.);
   }
