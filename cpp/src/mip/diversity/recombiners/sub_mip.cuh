@@ -13,6 +13,7 @@
 #include <dual_simplex/branch_and_bound.hpp>
 #include <dual_simplex/simplex_solver_settings.hpp>
 #include <dual_simplex/solve.hpp>
+#include <dual_simplex/tic_toc.hpp>
 
 namespace cuopt::linear_programming::detail {
 
@@ -70,15 +71,17 @@ class sub_mip_recombiner_t : public recombiner_t<i_t, f_t> {
       "n_vars_from_guiding %d n_vars_from_other %d", n_vars_from_guiding, n_vars_from_other);
     this->compute_vars_to_fix(offspring, vars_to_fix, n_vars_from_other, n_vars_from_guiding);
     auto [fixed_problem, fixed_assignment, variable_map] = offspring.fix_variables(vars_to_fix);
+    // TODO ask Akif and Alice if this is ok
     pdlp_initial_scaling_strategy_t<i_t, f_t> scaling(
       fixed_problem.handle_ptr,
       fixed_problem,
-      pdlp_hyper_params::default_l_inf_ruiz_iterations,
-      (f_t)pdlp_hyper_params::default_alpha_pock_chambolle_rescaling,
+      context.settings.hyper_params.default_l_inf_ruiz_iterations,
+      (f_t)context.settings.hyper_params.default_alpha_pock_chambolle_rescaling,
       fixed_problem.reverse_coefficients,
       fixed_problem.reverse_offsets,
       fixed_problem.reverse_constraints,
       nullptr,
+      context.settings.hyper_params,
       true);
     scaling.scale_problem();
     fixed_problem.presolve_data.reset_additional_vars(fixed_problem, offspring.handle_ptr);
@@ -104,6 +107,8 @@ class sub_mip_recombiner_t : public recombiner_t<i_t, f_t> {
       branch_and_bound_settings.integer_tol = context.settings.tolerances.integrality_tolerance;
       branch_and_bound_settings.num_threads = 1;
       branch_and_bound_settings.reliability_branching = 0;
+      branch_and_bound_settings.max_cut_passes        = 0;
+      branch_and_bound_settings.sub_mip               = 1;
       branch_and_bound_settings.solution_callback     = [this](std::vector<f_t>& solution,
                                                            f_t objective) {
         this->solution_callback(solution, objective);
@@ -111,8 +116,8 @@ class sub_mip_recombiner_t : public recombiner_t<i_t, f_t> {
 
       // disable B&B logs, so that it is not interfering with the main B&B thread
       branch_and_bound_settings.log.log = false;
-      dual_simplex::branch_and_bound_t<i_t, f_t> branch_and_bound(branch_and_bound_problem,
-                                                                  branch_and_bound_settings);
+      dual_simplex::branch_and_bound_t<i_t, f_t> branch_and_bound(
+        branch_and_bound_problem, branch_and_bound_settings, dual_simplex::tic());
       branch_and_bound_status = branch_and_bound.solve(branch_and_bound_solution);
       if (solution_vector.size() > 0) {
         cuopt_assert(fixed_assignment.size() == branch_and_bound_solution.x.size(),

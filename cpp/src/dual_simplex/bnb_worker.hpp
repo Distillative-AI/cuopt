@@ -125,8 +125,7 @@ class bnb_worker_data_t {
 
     std::fill(bounds_changed.begin(), bounds_changed.end(), false);
     node->get_variable_bounds(start_lower, start_upper, bounds_changed);
-
-    return node_presolver.bounds_strengthening(start_lower, start_upper, bounds_changed, settings);
+    return node_presolver.bounds_strengthening(settings, bounds_changed, start_lower, start_upper);
   }
 
   // Set the variables bounds for the LP relaxation of the current node.
@@ -148,7 +147,7 @@ class bnb_worker_data_t {
     }
 
     return node_presolver.bounds_strengthening(
-      leaf_problem.lower, leaf_problem.upper, bounds_changed, settings);
+      settings, bounds_changed, leaf_problem.lower, leaf_problem.upper);
   }
 
  private:

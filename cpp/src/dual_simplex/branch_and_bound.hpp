@@ -8,6 +8,7 @@
 #pragma once
 
 #include <dual_simplex/bnb_worker.hpp>
+#include <dual_simplex/cuts.hpp>
 #include <dual_simplex/diving_heuristics.hpp>
 #include <dual_simplex/initial_basis.hpp>
 #include <dual_simplex/mip_node.hpp>
@@ -22,6 +23,7 @@
 #include <utilities/omp_helpers.hpp>
 
 #include <omp.h>
+#include <functional>
 #include <vector>
 
 namespace cuopt::linear_programming::dual_simplex {
@@ -43,7 +45,8 @@ template <typename i_t, typename f_t>
 class branch_and_bound_t {
  public:
   branch_and_bound_t(const user_problem_t<i_t, f_t>& user_problem,
-                     const simplex_solver_settings_t<i_t, f_t>& solver_settings);
+                     const simplex_solver_settings_t<i_t, f_t>& solver_settings,
+                     f_t start_time);
 
   // Set an initial guess based on the user_problem. This should be called before solve.
   void set_initial_guess(const std::vector<f_t>& user_guess) { guess_ = user_guess; }
@@ -71,6 +74,11 @@ class branch_and_bound_t {
   // Set a solution based on the user problem during the course of the solve
   void set_new_solution(const std::vector<f_t>& solution);
 
+  void set_user_bound_callback(std::function<void(f_t)> callback)
+  {
+    user_bound_callback_ = std::move(callback);
+  }
+
   void set_concurrent_lp_root_solve(bool enable) { enable_concurrent_lp_root_solve_ = enable; }
 
   // Repair a low-quality solution from the heuristics.
@@ -83,7 +91,17 @@ class branch_and_bound_t {
   bool enable_concurrent_lp_root_solve() const { return enable_concurrent_lp_root_solve_; }
   std::atomic<int>* get_root_concurrent_halt() { return &root_concurrent_halt_; }
   void set_root_concurrent_halt(int value) { root_concurrent_halt_ = value; }
-  lp_status_t solve_root_relaxation(simplex_solver_settings_t<i_t, f_t> const& lp_settings);
+  lp_status_t solve_root_relaxation(simplex_solver_settings_t<i_t, f_t> const& lp_settings,
+                                    lp_solution_t<i_t, f_t>& root_relax_soln,
+                                    std::vector<variable_status_t>& root_vstatus,
+                                    basis_update_mpf_t<i_t, f_t>& basis_update,
+                                    std::vector<i_t>& basic_list,
+                                    std::vector<i_t>& nonbasic_list,
+                                    std::vector<f_t>& edge_norms);
+
+  i_t find_reduced_cost_fixings(f_t upper_bound,
+                                std::vector<f_t>& lower_bounds,
+                                std::vector<f_t>& upper_bounds);
 
   // The main entry routine. Returns the solver status and populates solution with the incumbent.
   mip_status_t solve(mip_solution_t<i_t, f_t>& solution);
@@ -106,6 +124,13 @@ class branch_and_bound_t {
   // Here we assume that the constraints are in the form `Ax = b, l <= x <= u`.
   std::vector<i_t> var_up_locks_;
   std::vector<i_t> var_down_locks_;
+
+  // Mutex for the original LP
+  // The heuristics threads look at the original LP. But the main thread modifies the
+  // size of the original LP by adding slacks for cuts. Heuristic threads should lock
+  // this mutex when accessing the original LP. The main thread should lock this mutex
+  // when modifying the original LP.
+  omp_mutex_t mutex_original_lp_;
 
   // Mutex for upper bound
   omp_mutex_t mutex_upper_;
@@ -163,9 +188,15 @@ class branch_and_bound_t {
   // In case, a best-first thread encounters a numerical issue when solving a node,
   // its blocks the progression of the lower bound.
   omp_atomic_t<f_t> lower_bound_ceiling_;
+  std::function<void(f_t)> user_bound_callback_;
 
   void report_heuristic(f_t obj);
-  void report(char symbol, f_t obj, f_t lower_bound, i_t node_depth);
+  void report(char symbol, f_t obj, f_t lower_bound, i_t node_depth, i_t node_int_infeas);
+
+  // Set the solution when found at the root node
+  void set_solution_at_root(mip_solution_t<i_t, f_t>& solution,
+                            const cut_info_t<i_t, f_t>& cut_info);
+  void update_user_bound(f_t lower_bound);
 
   // Set the final solution.
   void set_final_solution(mip_solution_t<i_t, f_t>& solution, f_t lower_bound);
