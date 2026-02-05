@@ -54,6 +54,8 @@ void work_unit_scheduler_t::set_sync_interval(double interval) { sync_interval_ 
 
 void work_unit_scheduler_t::on_work_recorded(work_limit_context_t& ctx, double total_work)
 {
+  if (is_shutdown()) return;
+
   if (verbose) {
     CUOPT_LOG_DEBUG("[%s] Work recorded: %f, sync_target: %f (gen %zu)",
                     ctx.name.c_str(),
@@ -63,7 +65,7 @@ void work_unit_scheduler_t::on_work_recorded(work_limit_context_t& ctx, double t
   }
 
   // Loop to handle large work increments that cross multiple sync points
-  while (total_work >= current_sync_target()) {
+  while (total_work >= current_sync_target() && !is_shutdown()) {
     wait_at_sync_point(ctx, current_sync_target());
   }
 }
@@ -75,6 +77,8 @@ void work_unit_scheduler_t::set_sync_callback(sync_callback_t callback)
 
 void work_unit_scheduler_t::wait_for_next_sync(work_limit_context_t& ctx)
 {
+  if (is_shutdown()) return;
+
   double next_sync              = current_sync_target();
   ctx.global_work_units_elapsed = next_sync;
   wait_at_sync_point(ctx, next_sync);

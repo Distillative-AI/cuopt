@@ -16,6 +16,7 @@
  */
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <vector>
 
@@ -50,6 +51,10 @@ class work_unit_scheduler_t {
   // Get the current sync target (for work tracking)
   double current_sync_target() const;
 
+  // Signal shutdown - prevents threads from entering barriers after termination
+  void signal_shutdown() { shutdown_.store(true, std::memory_order_release); }
+  bool is_shutdown() const { return shutdown_.load(std::memory_order_acquire); }
+
  public:
   bool verbose{false};
 
@@ -64,6 +69,9 @@ class work_unit_scheduler_t {
 
   // Sync callback - executed when all contexts reach sync point
   sync_callback_t sync_callback_;
+
+  // Shutdown flag - prevents threads from entering barriers after termination is signaled
+  std::atomic<bool> shutdown_{false};
 };
 
 // RAII helper for registering multiple contexts with automatic cleanup

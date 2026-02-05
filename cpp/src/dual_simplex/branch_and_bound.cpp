@@ -2711,6 +2711,11 @@ void branch_and_bound_t<i_t, f_t>::determinism_sync_callback(int worker_id)
     determinism_global_termination_status_ = mip_status_t::WORK_LIMIT;
   }
 
+  // Signal shutdown to prevent threads from entering barriers after termination
+  if (determinism_global_termination_status_ != mip_status_t::UNSET) {
+    determinism_scheduler_->signal_shutdown();
+  }
+
   f_t obj              = compute_user_objective(original_lp_, upper_bound);
   f_t user_lower       = compute_user_objective(original_lp_, lower_bound);
   std::string gap_user = user_mip_gap<f_t>(obj, user_lower);
