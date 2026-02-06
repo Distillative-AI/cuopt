@@ -282,7 +282,8 @@ branch_and_bound_t<i_t, f_t>::branch_and_bound_t(
   }
 #endif
 
-  upper_bound_ = inf;
+  upper_bound_    = inf;
+  root_objective_ = std::numeric_limits<f_t>::quiet_NaN();
 }
 
 template <typename i_t, typename f_t>
@@ -292,7 +293,14 @@ f_t branch_and_bound_t<i_t, f_t>::get_lower_bound()
   f_t heap_lower_bound = node_queue_.get_lower_bound();
   lower_bound          = std::min(heap_lower_bound, lower_bound);
   lower_bound          = std::min(worker_pool_.get_lower_bound(), lower_bound);
-  return std::isfinite(lower_bound) ? lower_bound : -inf;
+
+  if (std::isfinite(lower_bound)) {
+    return lower_bound;
+  } else if (std::isfinite(root_objective_)) {
+    return root_objective_;
+  } else {
+    return -inf;
+  }
 }
 
 template <typename i_t, typename f_t>
