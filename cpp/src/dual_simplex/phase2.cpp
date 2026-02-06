@@ -2652,8 +2652,8 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
   aggregator.add("A.x", lp.A.x);
 
   // Track iteration interval start time for runtime measurement
-  f_t interval_start_time   = toc(start_time);
-  i_t last_feature_log_iter = iter;
+  [[maybe_unused]] f_t interval_start_time = toc(start_time);
+  i_t last_feature_log_iter                = iter;
 
   cuopt::scope_guard work_unit_guard([&]() {
     i_t remaining_iters = iter - last_feature_log_iter;
