@@ -948,9 +948,14 @@ struct determinism_tree_update_policy_t {
                                  const std::vector<i_t>& fractional,
                                  const std::vector<f_t>& x)
   {
-    logger_t log;
-    log.log                  = false;
-    node->objective_estimate = bnb.pc_.obj_estimate(fractional, x, node->lower_bound, log);
+    node->objective_estimate = obj_estimate_from_arrays(worker.pc_sum_down_snapshot.data(),
+                                                        worker.pc_sum_up_snapshot.data(),
+                                                        worker.pc_num_down_snapshot.data(),
+                                                        worker.pc_num_up_snapshot.data(),
+                                                        (i_t)worker.pc_sum_down_snapshot.size(),
+                                                        fractional,
+                                                        x,
+                                                        node->lower_bound);
   }
 
   void on_node_completed(mip_node_t<i_t, f_t>* node, node_status_t status, rounding_direction_t dir)
@@ -981,6 +986,97 @@ struct determinism_tree_update_policy_t {
     worker.local_lower_bound_ceiling =
       std::min<f_t>(node->lower_bound, worker.local_lower_bound_ceiling);
   }
+
+  void graphviz(search_tree_t<i_t, f_t>&, mip_node_t<i_t, f_t>*, const char*, f_t) {}
+
+  void on_optimal_callback(const std::vector<f_t>&, f_t) {}
+};
+
+template <typename i_t, typename f_t>
+struct determinism_diving_tree_update_policy_t {
+  branch_and_bound_t<i_t, f_t>& bnb;
+  determinism_diving_worker_t<i_t, f_t>& worker;
+  std::deque<mip_node_t<i_t, f_t>*>& stack;
+  i_t max_backtrack_depth;
+
+  f_t upper_bound() const { return worker.local_upper_bound; }
+
+  void update_pseudo_costs(mip_node_t<i_t, f_t>* node, f_t leaf_obj)
+  {
+    if (node->branch_var < 0) return;
+    f_t change = leaf_obj - node->lower_bound;
+    f_t frac   = node->branch_dir == rounding_direction_t::DOWN
+                   ? node->fractional_val - std::floor(node->fractional_val)
+                   : std::ceil(node->fractional_val) - node->fractional_val;
+    if (frac > 1e-10) {
+      worker.queue_pseudo_cost_update(node->branch_var, node->branch_dir, change / frac);
+    }
+  }
+
+  void handle_integer_solution(mip_node_t<i_t, f_t>* node, f_t obj, const std::vector<f_t>& x)
+  {
+    if (obj < worker.local_upper_bound) {
+      worker.local_upper_bound = obj;
+      worker.queue_integer_solution(obj, x, node->depth);
+    }
+  }
+
+  branch_variable_t<i_t> select_branch_variable(mip_node_t<i_t, f_t>*,
+                                                const std::vector<i_t>& fractional,
+                                                const std::vector<f_t>& x)
+  {
+    switch (worker.diving_type) {
+      case search_strategy_t::PSEUDOCOST_DIVING:
+        return worker.variable_selection_from_snapshot(fractional, x);
+
+      case search_strategy_t::LINE_SEARCH_DIVING:
+        if (worker.root_solution) {
+          logger_t log;
+          log.log = false;
+          return line_search_diving<i_t, f_t>(fractional, x, *worker.root_solution, log);
+        }
+        return worker.variable_selection_from_snapshot(fractional, x);
+
+      case search_strategy_t::GUIDED_DIVING: return worker.guided_variable_selection(fractional, x);
+
+      case search_strategy_t::COEFFICIENT_DIVING: {
+        logger_t log;
+        log.log = false;
+        return coefficient_diving<i_t, f_t>(
+          worker.leaf_problem, fractional, x, bnb.var_up_locks_, bnb.var_down_locks_, log);
+      }
+
+      default: return worker.variable_selection_from_snapshot(fractional, x);
+    }
+  }
+
+  void update_objective_estimate(mip_node_t<i_t, f_t>* node,
+                                 const std::vector<i_t>& fractional,
+                                 const std::vector<f_t>& x)
+  {
+    node->objective_estimate = worker.obj_estimate_from_snapshot(fractional, x, node->lower_bound);
+  }
+
+  void on_node_completed(mip_node_t<i_t, f_t>* node, node_status_t status, rounding_direction_t dir)
+  {
+    if (status == node_status_t::HAS_CHILDREN) {
+      if (dir == rounding_direction_t::UP) {
+        stack.push_front(node->get_down_child());
+        stack.push_front(node->get_up_child());
+      } else {
+        stack.push_front(node->get_up_child());
+        stack.push_front(node->get_down_child());
+      }
+      if (stack.size() > 1 && stack.front()->depth - stack.back()->depth > max_backtrack_depth) {
+        stack.pop_back();
+      }
+      worker.recompute_bounds_and_basis = false;
+    } else {
+      worker.recompute_bounds_and_basis = true;
+    }
+  }
+
+  void on_numerical_issue(mip_node_t<i_t, f_t>*) {}
 
   void graphviz(search_tree_t<i_t, f_t>&, mip_node_t<i_t, f_t>*, const char*, f_t) {}
 
@@ -2445,7 +2541,7 @@ void branch_and_bound_t<i_t, f_t>::run_determinism_coordinator(const csr_matrix_
   (*determinism_workers_)[0].enqueue_node(search_tree_.root.get_down_child());
   (*determinism_workers_)[1 % num_bfs_workers].enqueue_node(search_tree_.root.get_up_child());
 
-  determinism_scheduler_->set_sync_callback([this](double) { determinism_sync_callback(0); });
+  determinism_scheduler_->set_sync_callback([this](double) { determinism_sync_callback(); });
 
   std::vector<f_t> incumbent_snapshot;
   if (incumbent_.has_incumbent) { incumbent_snapshot = incumbent_.x; }
@@ -2575,7 +2671,7 @@ void branch_and_bound_t<i_t, f_t>::run_deterministic_bfs_loop(
 
       f_t upper_bound = worker.local_upper_bound;
       f_t rel_gap     = user_relative_gap(original_lp_, upper_bound, node->lower_bound);
-      if (node->lower_bound >= upper_bound || rel_gap < settings_.relative_mip_gap_tol) {
+      if (node->lower_bound > upper_bound || rel_gap < settings_.relative_mip_gap_tol) {
         worker.current_node = nullptr;
         worker.record_fathomed(node, node->lower_bound);
         search_tree.update(node, node_status_t::FATHOMED);
@@ -2586,9 +2682,8 @@ void branch_and_bound_t<i_t, f_t>::run_deterministic_bfs_loop(
       bool is_child                     = (node->parent == worker.last_solved_node);
       worker.recompute_bounds_and_basis = !is_child;
 
-      node_solve_info_t status =
-        solve_node_deterministic(worker, node, search_tree, worker.horizon_end);
-      worker.last_solved_node = node;
+      node_solve_info_t status = solve_node_deterministic(worker, node, search_tree);
+      worker.last_solved_node  = node;
 
       if (status == node_solve_info_t::TIME_LIMIT || status == node_solve_info_t::WORK_LIMIT) {
         continue;
@@ -2605,13 +2700,12 @@ void branch_and_bound_t<i_t, f_t>::run_deterministic_bfs_loop(
 }
 
 template <typename i_t, typename f_t>
-void branch_and_bound_t<i_t, f_t>::determinism_sync_callback(int worker_id)
+void branch_and_bound_t<i_t, f_t>::determinism_sync_callback()
 {
   raft::common::nvtx::range scope("BB::determinism_sync_callback");
 
   ++determinism_horizon_number_;
-  double horizon_start = determinism_current_horizon_ - determinism_horizon_step_;
-  double horizon_end   = determinism_current_horizon_;
+  double horizon_end = determinism_current_horizon_;
 
   double wait_start = tic();
   producer_sync_.wait_for_producers(horizon_end);
@@ -2768,13 +2862,11 @@ template <typename i_t, typename f_t>
 node_solve_info_t branch_and_bound_t<i_t, f_t>::solve_node_deterministic(
   determinism_bfs_worker_t<i_t, f_t>& worker,
   mip_node_t<i_t, f_t>* node_ptr,
-  search_tree_t<i_t, f_t>& search_tree,
-  double current_horizon)
+  search_tree_t<i_t, f_t>& search_tree)
 {
   raft::common::nvtx::range scope("BB::solve_node_deterministic");
 
   double work_units_at_start = worker.work_context.global_work_units_elapsed;
-  double clock_at_start      = worker.clock;
 
   std::fill(worker.bounds_changed.begin(), worker.bounds_changed.end(), false);
 
@@ -2802,10 +2894,8 @@ node_solve_info_t branch_and_bound_t<i_t, f_t>::solve_node_deterministic(
   bool feasible = true;
 #ifndef DETERMINISM_DISABLE_BOUNDS_STRENGTHENING
   raft::common::nvtx::range scope_bs("BB::bound_strengthening");
-  f_t bs_start_time = tic();
-  feasible          = worker.node_presolver.bounds_strengthening(
+  feasible = worker.node_presolver.bounds_strengthening(
     lp_settings, worker.bounds_changed, worker.leaf_problem.lower, worker.leaf_problem.upper);
-  f_t bs_actual_time = toc(bs_start_time);
 
   if (settings_.deterministic) {
     // TEMP APPROXIMATION;
@@ -3413,7 +3503,7 @@ void branch_and_bound_t<i_t, f_t>::deterministic_dive(determinism_diving_worker_
 
     // Prune check using snapshot upper bound
     f_t rel_gap = user_relative_gap(original_lp_, worker.local_upper_bound, node_ptr->lower_bound);
-    if (node_ptr->lower_bound >= worker.local_upper_bound ||
+    if (node_ptr->lower_bound > worker.local_upper_bound ||
         rel_gap < settings_.relative_mip_gap_tol) {
       worker.recompute_bounds_and_basis = true;
       continue;
@@ -3506,129 +3596,9 @@ void branch_and_bound_t<i_t, f_t>::deterministic_dive(determinism_diving_worker_
       break;
     }
 
-    if (lp_status == dual::status_t::DUAL_UNBOUNDED || lp_status == dual::status_t::CUTOFF) {
-      worker.recompute_bounds_and_basis = true;
-      continue;
-    }
-
-    if (lp_status == dual::status_t::OPTIMAL) {
-      std::vector<i_t> leaf_fractional;
-      fractional_variables(settings_, worker.leaf_solution.x, var_types_, leaf_fractional);
-
-      f_t leaf_objective = compute_objective(worker.leaf_problem, worker.leaf_solution.x);
-
-      if (node_ptr->branch_var >= 0) {
-        const f_t change_in_obj = leaf_objective - node_ptr->lower_bound;
-        const f_t frac          = node_ptr->branch_dir == rounding_direction_t::DOWN
-                                    ? node_ptr->fractional_val - std::floor(node_ptr->fractional_val)
-                                    : std::ceil(node_ptr->fractional_val) - node_ptr->fractional_val;
-        if (frac > 1e-10) {
-          worker.queue_pseudo_cost_update(
-            node_ptr->branch_var, node_ptr->branch_dir, change_in_obj / frac);
-        }
-      }
-
-      node_ptr->lower_bound = leaf_objective;
-
-      if (leaf_fractional.empty()) {
-        // Integer feasible solution found!
-        if (leaf_objective < worker.local_upper_bound) {
-          worker.queue_integer_solution(leaf_objective, worker.leaf_solution.x, node_ptr->depth);
-        }
-        worker.recompute_bounds_and_basis = true;
-        continue;
-      }
-
-      if (leaf_objective <= worker.local_upper_bound + settings_.absolute_mip_gap_tol / 10) {
-        // Branch - select variable using diving-type-specific strategy
-        branch_variable_t<i_t> branch_result;
-
-        switch (worker.diving_type) {
-          case search_strategy_t::PSEUDOCOST_DIVING:
-            branch_result =
-              worker.variable_selection_from_snapshot(leaf_fractional, worker.leaf_solution.x);
-            break;
-
-          case search_strategy_t::LINE_SEARCH_DIVING:
-            if (worker.root_solution) {
-              logger_t log;
-              log.log       = false;
-              branch_result = line_search_diving<i_t, f_t>(
-                leaf_fractional, worker.leaf_solution.x, *worker.root_solution, log);
-            } else {
-              branch_result =
-                worker.variable_selection_from_snapshot(leaf_fractional, worker.leaf_solution.x);
-            }
-            break;
-
-          case search_strategy_t::GUIDED_DIVING:
-            branch_result =
-              worker.guided_variable_selection(leaf_fractional, worker.leaf_solution.x);
-            break;
-
-          case search_strategy_t::COEFFICIENT_DIVING: {
-            logger_t log;
-            log.log       = false;
-            branch_result = coefficient_diving<i_t, f_t>(worker.leaf_problem,
-                                                         leaf_fractional,
-                                                         worker.leaf_solution.x,
-                                                         var_up_locks_,
-                                                         var_down_locks_,
-                                                         log);
-          } break;
-
-          default:
-            branch_result =
-              worker.variable_selection_from_snapshot(leaf_fractional, worker.leaf_solution.x);
-            break;
-        }
-
-        i_t branch_var                 = branch_result.variable;
-        rounding_direction_t round_dir = branch_result.direction;
-
-        if (branch_var < 0) {
-          worker.recompute_bounds_and_basis = true;
-          continue;
-        }
-
-        // Update objective estimate for node selection heuristics
-        node_ptr->objective_estimate = worker.obj_estimate_from_snapshot(
-          leaf_fractional, worker.leaf_solution.x, leaf_objective);
-
-        // Create children
-        logger_t log;
-        log.log = false;
-        dive_tree.branch(node_ptr,
-                         branch_var,
-                         worker.leaf_solution.x[branch_var],
-                         (i_t)leaf_fractional.size(),
-                         leaf_vstatus,
-                         worker.leaf_problem,
-                         log);
-
-        // Add children to stack (preferred direction first)
-        if (round_dir == rounding_direction_t::UP) {
-          stack.push_front(node_ptr->get_down_child());
-          stack.push_front(node_ptr->get_up_child());
-        } else {
-          stack.push_front(node_ptr->get_up_child());
-          stack.push_front(node_ptr->get_down_child());
-        }
-
-        // Limit backtracking depth
-        if (stack.size() > 1 && stack.front()->depth - stack.back()->depth > max_backtrack_depth) {
-          stack.pop_back();
-        }
-
-        worker.recompute_bounds_and_basis = false;
-      } else {
-        // Fathomed by bound
-        worker.recompute_bounds_and_basis = true;
-      }
-    } else {
-      // Numerical or other error
-      worker.recompute_bounds_and_basis = true;
-    }
+    determinism_diving_tree_update_policy_t<i_t, f_t> policy{
+      *this, worker, stack, max_backtrack_depth};
+    update_tree_impl(node_ptr, dive_tree, &worker, lp_status, policy);
   }
 }
 

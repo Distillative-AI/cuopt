@@ -44,21 +44,6 @@ enum class mip_status_t {
   WORK_LIMIT = 7,  // The solver reached a deterministic work limit
 };
 
-enum class mip_solve_mode_t {
-  BNB_PARALLEL        = 0,  // Parallel B&B (default)
-  BNB_SINGLE_THREADED = 1,  // Single threaded B&B for SubMIP and RINS
-};
-
-enum class mip_exploration_status_t {
-  UNSET      = 0,  // The status is not set
-  TIME_LIMIT = 1,  // The solver reached a time limit
-  NODE_LIMIT = 2,  // The maximum number of nodes was reached (not implemented)
-  NUMERICAL  = 3,  // The solver encountered a numerical error
-  RUNNING    = 4,  // The solver is currently exploring the tree
-  COMPLETED  = 5,  // The solver finished exploring the tree
-  WORK_LIMIT = 6,  // The solver reached a deterministic work limit
-};
-
 enum class node_solve_info_t {
   NO_CHILDREN      = 0,  // The node does not produced children
   UP_CHILD_FIRST   = 1,  // The up child should be explored first
@@ -79,6 +64,8 @@ template <typename i_t, typename f_t>
 struct opportunistic_tree_update_policy_t;
 template <typename i_t, typename f_t>
 struct determinism_tree_update_policy_t;
+template <typename i_t, typename f_t>
+struct determinism_diving_tree_update_policy_t;
 
 template <typename i_t, typename f_t>
 class branch_and_bound_t {
@@ -323,8 +310,7 @@ class branch_and_bound_t {
 
   node_solve_info_t solve_node_deterministic(determinism_bfs_worker_t<i_t, f_t>& worker,
                                              mip_node_t<i_t, f_t>* node_ptr,
-                                             search_tree_t<i_t, f_t>& search_tree,
-                                             double current_horizon);
+                                             search_tree_t<i_t, f_t>& search_tree);
 
   f_t compute_lower_bound_deterministic();
 
@@ -333,7 +319,7 @@ class branch_and_bound_t {
 
   // Executed when all workers reach barrier
   // Handles termination logic serially in deterministic mode
-  void determinism_sync_callback(int worker_id);
+  void determinism_sync_callback();
 
   void run_deterministic_diving_loop(determinism_diving_worker_t<i_t, f_t>& worker);
 
@@ -357,6 +343,7 @@ class branch_and_bound_t {
 
   friend struct opportunistic_tree_update_policy_t<i_t, f_t>;
   friend struct determinism_tree_update_policy_t<i_t, f_t>;
+  friend struct determinism_diving_tree_update_policy_t<i_t, f_t>;
 
  private:
   // unique_ptr as we only want to initialize these if we're in the determinism codepath
