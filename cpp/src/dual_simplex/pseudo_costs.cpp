@@ -561,11 +561,12 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
     const int64_t alpha                = iter_factor * branch_and_bound_lp_iters;
     const int64_t max_reliability_iter = alpha + reliability_branching_settings.bnb_lp_offset;
 
-    f_t gamma =
+    f_t iter_fraction =
       (max_reliability_iter - strong_branching_lp_iter) / (strong_branching_lp_iter + 1.0);
-    gamma = std::min(1.0, gamma);
-    gamma = std::max((alpha - strong_branching_lp_iter) / (strong_branching_lp_iter + 1.0), gamma);
-    reliable_threshold = (1 - gamma) * min_threshold + gamma * max_threshold;
+    iter_fraction = std::min(1.0, iter_fraction);
+    iter_fraction = std::max((alpha - strong_branching_lp_iter) / (strong_branching_lp_iter + 1.0),
+                             iter_fraction);
+    reliable_threshold = (1 - iter_fraction) * min_threshold + iter_fraction * max_threshold;
     reliable_threshold = strong_branching_lp_iter < max_reliability_iter ? reliable_threshold : 0;
   }
 
