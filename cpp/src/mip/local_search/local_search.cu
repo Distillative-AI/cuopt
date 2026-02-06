@@ -34,7 +34,7 @@ local_search_t<i_t, f_t>::local_search_t(mip_solver_context_t<i_t, f_t>& context
     fj_sol_on_lp_opt(context.problem_ptr->n_variables,
                      context.problem_ptr->handle_ptr->get_stream()),
     fj(context),
-    // fj_tree(fj),1
+    // fj_tree(fj),
     constraint_prop(context),
     line_segment_search(fj, constraint_prop),
     fp(context,
