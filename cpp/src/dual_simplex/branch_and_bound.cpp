@@ -210,7 +210,7 @@ std::string user_mip_gap(f_t obj_value, f_t lower_bound)
 }
 
 #ifdef SHOW_DIVING_TYPE
-inline char feasible_solution_symbol(bnb_worker_type_t strategy)
+inline char feasible_solution_symbol(search_strategy_t strategy)
 {
   switch (strategy) {
     case search_strategy_t::BEST_FIRST: return 'B';
@@ -2072,7 +2072,9 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
                                                                   root_relax_soln_,
                                                                   iter,
                                                                   edge_norms_);
-      f_t dual_phase2_time        = toc(dual_phase2_start_time);
+      exploration_stats_.total_lp_iters += iter;
+      root_objective_      = compute_objective(original_lp_, root_relax_soln_.x);
+      f_t dual_phase2_time = toc(dual_phase2_start_time);
       if (dual_phase2_time > 1.0) {
         settings_.log.debug("Dual phase2 time %.2f seconds\n", dual_phase2_time);
       }
@@ -2083,11 +2085,27 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
       }
 
       if (cut_status != dual::status_t::OPTIMAL) {
-        settings_.log.printf("Cut status %s\n", dual::status_to_string(cut_status).c_str());
-        return mip_status_t::NUMERICAL;
+        settings_.log.printf("Numerical issue at root node. Resolving from scratch\n");
+        lp_status_t scratch_status =
+          solve_linear_program_with_advanced_basis(original_lp_,
+                                                   exploration_stats_.start_time,
+                                                   lp_settings,
+                                                   root_relax_soln_,
+                                                   basis_update,
+                                                   basic_list,
+                                                   nonbasic_list,
+                                                   root_vstatus_,
+                                                   edge_norms_);
+        if (scratch_status == lp_status_t::OPTIMAL) {
+          // We recovered
+          cut_status = convert_lp_status_to_dual_status(scratch_status);
+          exploration_stats_.total_lp_iters += root_relax_soln_.iterations;
+          root_objective_ = compute_objective(original_lp_, root_relax_soln_.x);
+        } else {
+          settings_.log.printf("Cut status %s\n", dual::status_to_string(cut_status).c_str());
+          return mip_status_t::NUMERICAL;
+        }
       }
-      exploration_stats_.total_lp_iters += root_relax_soln_.iterations;
-      root_objective_ = compute_objective(original_lp_, root_relax_soln_.x);
 
       f_t remove_cuts_start_time = tic();
       mutex_original_lp_.lock();

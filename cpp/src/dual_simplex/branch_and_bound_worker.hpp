@@ -91,7 +91,8 @@ class branch_and_bound_worker_t {
       nonbasic_list(),
       node_presolver(leaf_problem, Arow, {}, var_type),
       bounds_changed(original_lp.num_cols, false),
-      rng(pcgenerator_t::default_seed ^ worker_id, pcgenerator_t::default_stream + worker_id)
+      rng(settings.random_seed + pcgenerator_t::default_seed + worker_id,
+          pcgenerator_t::default_stream ^ worker_id)
   {
   }
 

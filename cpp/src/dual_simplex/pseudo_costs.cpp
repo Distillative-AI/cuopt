@@ -36,7 +36,6 @@ void strong_branch_helper(i_t start,
                           pseudo_costs_t<i_t, f_t>& pc)
 {
   raft::common::nvtx::range scope("BB::strong_branch_helper");
-  constexpr f_t eps          = 1e-6;
   lp_problem_t child_problem = original_lp;
 
   constexpr bool verbose = false;
@@ -92,7 +91,7 @@ void strong_branch_helper(i_t start,
       }
 
       if (branch == 0) {
-        pc.strong_branch_down[k] = std::max(obj - root_obj, eps);
+        pc.strong_branch_down[k] = std::max(obj - root_obj, 0.0);
         if (verbose) {
           settings.log.printf("Thread id %2d remaining %d variable %d branch %d obj %e time %.2f\n",
                               thread_id,
@@ -103,7 +102,7 @@ void strong_branch_helper(i_t start,
                               toc(start_time));
         }
       } else {
-        pc.strong_branch_up[k] = std::max(obj - root_obj, eps);
+        pc.strong_branch_up[k] = std::max(obj - root_obj, 0.0);
         if (verbose) {
           settings.log.printf(
             "Thread id %2d remaining %d variable %d branch %d obj %e change down %e change up %e "
@@ -179,6 +178,9 @@ f_t trial_branching(const lp_problem_t<i_t, f_t>& original_lp,
   std::vector<i_t> child_basic_list                = basic_list;
   std::vector<i_t> child_nonbasic_list             = nonbasic_list;
   basis_update_mpf_t<i_t, f_t> child_basis_factors = basis_factors;
+
+  // Only refactor the basis if we encounter numerical issues.
+  child_basis_factors.set_refactor_frequency(upper_max_lp_iter);
 
   dual::status_t status = dual_phase2_with_advanced_basis(2,
                                                           0,
@@ -448,8 +450,7 @@ template <typename i_t, typename f_t>
 void pseudo_costs_t<i_t, f_t>::update_pseudo_costs(mip_node_t<i_t, f_t>* node_ptr,
                                                    f_t leaf_objective)
 {
-  constexpr f_t eps       = 1e-6;
-  const f_t change_in_obj = std::max(leaf_objective - node_ptr->lower_bound, eps);
+  const f_t change_in_obj = std::max(leaf_objective - node_ptr->lower_bound, 0.0);
   const f_t frac          = node_ptr->branch_dir == rounding_direction_t::DOWN
                               ? node_ptr->fractional_val - std::floor(node_ptr->fractional_val)
                               : std::ceil(node_ptr->fractional_val) - node_ptr->fractional_val;
@@ -499,7 +500,7 @@ i_t pseudo_costs_t<i_t, f_t>::variable_selection(const std::vector<i_t>& fractio
              pseudo_cost_down_avg,
              pseudo_cost_up_avg);
 
-  for (auto j : fractional) {
+  for (i_t j : fractional) {
     f_t score = calculate_pseudocost_score(j, solution, pseudo_cost_up_avg, pseudo_cost_down_avg);
 
     if (score > max_score) {
@@ -571,7 +572,7 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
   std::vector<i_t> unreliable_list;
   omp_mutex_t score_mutex;
 
-  for (auto j : fractional) {
+  for (i_t j : fractional) {
     if (pseudo_cost_num_down[j] < reliable_threshold ||
         pseudo_cost_num_up[j] < reliable_threshold) {
       unreliable_list.push_back(j);
@@ -691,10 +692,12 @@ i_t pseudo_costs_t<i_t, f_t>::reliable_variable_selection(
 
     f_t score = calculate_pseudocost_score(j, solution, pseudo_cost_up_avg, pseudo_cost_down_avg);
 
-    if (std::lock_guard<omp_mutex_t> score_lock(score_mutex); score > max_score) {
+    score_mutex.lock();
+    if (score > max_score) {
       max_score  = score;
       branch_var = j;
     }
+    score_mutex.unlock();
   }
 
   log.printf(
@@ -719,7 +722,7 @@ f_t pseudo_costs_t<i_t, f_t>::obj_estimate(const std::vector<i_t>& fractional,
 
   initialized(num_initialized_down, num_initialized_up, pseudo_cost_down_avg, pseudo_cost_up_avg);
 
-  for (auto j : fractional) {
+  for (i_t j : fractional) {
     constexpr f_t eps = 1e-6;
     i_t num_up        = pseudo_cost_num_up[j];
     i_t num_down      = pseudo_cost_num_down[j];

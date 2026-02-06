@@ -384,6 +384,8 @@ class basis_update_mpf_t {
                      std::vector<i_t>& nonbasic_list,
                      std::vector<variable_status_t>& vstatus);
 
+  void set_refactor_frequency(i_t new_frequency) { refactor_frequency_ = new_frequency; }
+
  private:
   void clear()
   {
