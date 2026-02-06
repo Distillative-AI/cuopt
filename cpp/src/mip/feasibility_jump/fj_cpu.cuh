@@ -32,33 +32,33 @@ struct fj_cpu_climber_t {
 #define ADD_INSTRUMENTED(var) \
   std::make_pair(#var, std::ref(static_cast<memory_instrumentation_base_t&>(var)))
 
-    // Initialize memory manifold with all ins_vector members
-    memory_manifold = instrumentation_manifold_t{ADD_INSTRUMENTED(h_reverse_coefficients),
-                                                 ADD_INSTRUMENTED(h_reverse_constraints),
-                                                 ADD_INSTRUMENTED(h_reverse_offsets),
-                                                 ADD_INSTRUMENTED(h_coefficients),
-                                                 ADD_INSTRUMENTED(h_offsets),
-                                                 ADD_INSTRUMENTED(h_variables),
-                                                 ADD_INSTRUMENTED(h_obj_coeffs),
-                                                 ADD_INSTRUMENTED(h_var_bounds),
-                                                 ADD_INSTRUMENTED(h_cstr_lb),
-                                                 ADD_INSTRUMENTED(h_cstr_ub),
-                                                 ADD_INSTRUMENTED(h_var_types),
-                                                 ADD_INSTRUMENTED(h_is_binary_variable),
-                                                 ADD_INSTRUMENTED(h_objective_vars),
-                                                 ADD_INSTRUMENTED(h_binary_indices),
-                                                 ADD_INSTRUMENTED(h_tabu_nodec_until),
-                                                 ADD_INSTRUMENTED(h_tabu_noinc_until),
-                                                 ADD_INSTRUMENTED(h_tabu_lastdec),
-                                                 ADD_INSTRUMENTED(h_tabu_lastinc),
-                                                 ADD_INSTRUMENTED(h_lhs),
-                                                 ADD_INSTRUMENTED(h_lhs_sumcomp),
-                                                 ADD_INSTRUMENTED(h_cstr_left_weights),
-                                                 ADD_INSTRUMENTED(h_cstr_right_weights),
-                                                 ADD_INSTRUMENTED(h_assignment),
-                                                 ADD_INSTRUMENTED(h_best_assignment),
-                                                 ADD_INSTRUMENTED(cached_cstr_bounds),
-                                                 ADD_INSTRUMENTED(iter_mtm_vars)};
+    // Initialize memory aggregator with all ins_vector members
+    memory_aggregator = instrumentation_aggregator_t{ADD_INSTRUMENTED(h_reverse_coefficients),
+                                                     ADD_INSTRUMENTED(h_reverse_constraints),
+                                                     ADD_INSTRUMENTED(h_reverse_offsets),
+                                                     ADD_INSTRUMENTED(h_coefficients),
+                                                     ADD_INSTRUMENTED(h_offsets),
+                                                     ADD_INSTRUMENTED(h_variables),
+                                                     ADD_INSTRUMENTED(h_obj_coeffs),
+                                                     ADD_INSTRUMENTED(h_var_bounds),
+                                                     ADD_INSTRUMENTED(h_cstr_lb),
+                                                     ADD_INSTRUMENTED(h_cstr_ub),
+                                                     ADD_INSTRUMENTED(h_var_types),
+                                                     ADD_INSTRUMENTED(h_is_binary_variable),
+                                                     ADD_INSTRUMENTED(h_objective_vars),
+                                                     ADD_INSTRUMENTED(h_binary_indices),
+                                                     ADD_INSTRUMENTED(h_tabu_nodec_until),
+                                                     ADD_INSTRUMENTED(h_tabu_noinc_until),
+                                                     ADD_INSTRUMENTED(h_tabu_lastdec),
+                                                     ADD_INSTRUMENTED(h_tabu_lastinc),
+                                                     ADD_INSTRUMENTED(h_lhs),
+                                                     ADD_INSTRUMENTED(h_lhs_sumcomp),
+                                                     ADD_INSTRUMENTED(h_cstr_left_weights),
+                                                     ADD_INSTRUMENTED(h_cstr_right_weights),
+                                                     ADD_INSTRUMENTED(h_assignment),
+                                                     ADD_INSTRUMENTED(h_best_assignment),
+                                                     ADD_INSTRUMENTED(cached_cstr_bounds),
+                                                     ADD_INSTRUMENTED(iter_mtm_vars)};
 
 #undef ADD_INSTRUMENTED
   }
@@ -187,8 +187,8 @@ struct fj_cpu_climber_t {
   double cstr_degree_cv{0.0};
   double problem_density{0.0};
 
-  // Memory instrumentation manifold
-  instrumentation_manifold_t memory_manifold;
+  // Memory instrumentation aggregator
+  instrumentation_aggregator_t memory_aggregator;
   // TODO atomic ref? c++20
   std::atomic<bool>& preemption_flag;
 };

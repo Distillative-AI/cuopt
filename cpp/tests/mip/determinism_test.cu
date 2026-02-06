@@ -130,7 +130,7 @@ TEST_F(DeterministicBBTest, reproducible_high_contention)
   settings.work_limit       = 1;
 
   auto seed = std::random_device{}() & 0x7fffffff;
-  ;
+
   std::cout << "Tested with seed " << seed << "\n";
   settings.seed = seed;
 
@@ -188,7 +188,7 @@ TEST_P(DeterministicBBInstanceTest, deterministic_across_runs)
 
   // Get a random seed for each run
   auto seed = std::random_device{}() & 0x7fffffff;
-  ;
+
   std::cout << "Tested with seed " << seed << "\n";
 
   mip_solver_settings_t<int, double> settings;

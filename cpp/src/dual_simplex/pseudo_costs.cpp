@@ -470,7 +470,6 @@ void pseudo_costs_t<i_t, f_t>::initialized(i_t& num_initialized_down,
                                            f_t& pseudo_cost_down_avg,
                                            f_t& pseudo_cost_up_avg) const
 {
-  // Count initialized variables while computing averages
   auto avgs            = compute_pseudo_cost_averages(pseudo_cost_sum_down.data(),
                                            pseudo_cost_sum_up.data(),
                                            pseudo_cost_num_down.data(),

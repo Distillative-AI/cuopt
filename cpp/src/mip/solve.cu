@@ -23,7 +23,6 @@
 #include <utilities/logger.hpp>
 #include <utilities/seed_generator.cuh>
 #include <utilities/version_info.hpp>
-#include <utilities/work_limit_timer.hpp>
 
 #include <cuopt/linear_programming/mip/solver_settings.hpp>
 #include <cuopt/linear_programming/mip/solver_solution.hpp>

@@ -401,12 +401,12 @@ static void log_regression_features(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
 
   // Build per-wrapper memory statistics string
   std::stringstream wrapper_stats;
-  auto per_wrapper_stats = fj_cpu.memory_manifold.collect_per_wrapper();
+  auto per_wrapper_stats = fj_cpu.memory_aggregator.collect_per_wrapper();
   for (const auto& [name, loads, stores] : per_wrapper_stats) {
     wrapper_stats << " " << name << "_loads=" << loads << " " << name << "_stores=" << stores;
   }
 
-  fj_cpu.memory_manifold.flush();
+  fj_cpu.memory_aggregator.flush();
 
   // Print everything on a single line using precomputed features
   CUOPT_LOG_DEBUG(
@@ -1538,7 +1538,7 @@ bool fj_t<i_t, f_t>::cpu_solve(fj_cpu_climber_t<i_t, f_t>& fj_cpu, f_t in_time_l
 
     if (fj_cpu.iterations % 100 == 0 && fj_cpu.iterations > 0) {
       // Collect memory statistics
-      auto [loads, stores] = fj_cpu.memory_manifold.collect();
+      auto [loads, stores] = fj_cpu.memory_aggregator.collect();
 
       double biased_work = (loads + stores) * fj_cpu.work_unit_bias / 1e10;
       fj_cpu.work_units_elapsed += biased_work;

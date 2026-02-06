@@ -194,7 +194,7 @@ lp_status_t solve_linear_program_with_advanced_basis(
   edge_norms.clear();
   dual::status_t phase1_status;
   {
-    raft::common::nvtx::range scope_phase1("DualSimplex::phase2");
+    raft::common::nvtx::range scope_phase1("DualSimplex::phase1");
     phase1_status = dual_phase2(1,
                                 1,
                                 start_time,

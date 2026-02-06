@@ -18,9 +18,8 @@
 
 #include <utilities/scope_guard.hpp>
 #include <utilities/timing_utils.hpp>
-#include <utilities/work_limit_timer.hpp>
-
 #include <utilities/version_info.hpp>
+#include <utilities/work_limit_context.hpp>
 
 #include <raft/common/nvtx.hpp>
 
@@ -1121,8 +1120,8 @@ i_t flip_bounds(const lp_problem_t<i_t, f_t>& lp,
                 const std::vector<i_t>& nonbasic_list,
                 i_t entering_index,
                 std::vector<variable_status_t>& vstatus,
-                ins_vector<f_t>& delta_x_flip,
-                ins_vector<i_t>& atilde_mark,
+                ins_vector<f_t>& delta_x,
+                ins_vector<i_t>& mark,
                 ins_vector<f_t>& atilde,
                 ins_vector<i_t>& atilde_index)
 {
@@ -1137,8 +1136,8 @@ i_t flip_bounds(const lp_problem_t<i_t, f_t>& lp,
       settings.dual_tol;  // lower to 1e-7 or less will cause 25fv47 and d2q06c to cycle
     if (vstatus[j] == variable_status_t::NONBASIC_LOWER && z[j] < -dual_tol) {
       const f_t delta = lp.upper[j] - lp.lower[j];
-      scatter_dense(lp.A, j, -delta, atilde, atilde_mark, atilde_index);
-      delta_x_flip[j] += delta;
+      scatter_dense(lp.A, j, -delta, atilde, mark, atilde_index);
+      delta_x[j] += delta;
       vstatus[j] = variable_status_t::NONBASIC_UPPER;
 #ifdef BOUND_FLIP_DEBUG
       settings.log.printf(
@@ -1147,8 +1146,8 @@ i_t flip_bounds(const lp_problem_t<i_t, f_t>& lp,
       num_flipped++;
     } else if (vstatus[j] == variable_status_t::NONBASIC_UPPER && z[j] > dual_tol) {
       const f_t delta = lp.lower[j] - lp.upper[j];
-      scatter_dense(lp.A, j, -delta, atilde, atilde_mark, atilde_index);
-      delta_x_flip[j] += delta;
+      scatter_dense(lp.A, j, -delta, atilde, mark, atilde_index);
+      delta_x[j] += delta;
       vstatus[j] = variable_status_t::NONBASIC_LOWER;
 #ifdef BOUND_FLIP_DEBUG
       settings.log.printf(
@@ -2404,20 +2403,18 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
   std::vector<f_t>& y = sol.y;
   std::vector<f_t>& z = sol.z;
 
-  // Declare instrumented vectors used during initialization (before manifold setup)
+  // Declare instrumented vectors used during initialization (before aggregator setup)
   // Perturbed objective
   ins_vector<f_t> objective(lp.objective);
   ins_vector<f_t> c_basic(m);
   ins_vector<f_t> xB_workspace(m);
 
-  // Create instrumentation manifold early to capture init section memory operations
-  instrumentation_manifold_t manifold;
-  // manifold.add("x", x);
-  // manifold.add("y", y);
-  // manifold.add("z", z);
-  manifold.add("objective", objective);
-  manifold.add("c_basic", c_basic);
-  manifold.add("xB_workspace", xB_workspace);
+  // Create instrumentation aggregator early to capture init section memory operations
+  instrumentation_aggregator_t aggregator;
+
+  aggregator.add("objective", objective);
+  aggregator.add("c_basic", c_basic);
+  aggregator.add("xB_workspace", xB_workspace);
 
   dual::status_t status = dual::status_t::UNSET;
 
@@ -2579,15 +2576,14 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
 #endif
 
   csc_matrix_t<i_t, f_t> A_transpose(1, 1, 0);
-  manifold.add("A_transpose.col_start", A_transpose.col_start);
-  manifold.add("A_transpose.i", A_transpose.i);
-  manifold.add("A_transpose.x", A_transpose.x);
+  aggregator.add("A_transpose.col_start", A_transpose.col_start);
+  aggregator.add("A_transpose.i", A_transpose.i);
+  aggregator.add("A_transpose.x", A_transpose.x);
   {
     PHASE2_NVTX_RANGE("DualSimplex::transpose_A");
     lp.A.transpose(A_transpose);
   }
   f_t obj = compute_objective(lp, x);
-
   init_scope.pop();  // End phase2_advanced_init range
 
   const i_t start_iter = iter;
@@ -2614,46 +2610,46 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
   sparse_vector_t<i_t, f_t> v_sparse(m, 0);       // For steepest edge norms
   sparse_vector_t<i_t, f_t> atilde_sparse(m, 0);  // For flip adjustments
 
-  // Add remaining instrumented vectors to manifold (x, y, z, objective, c_basic, xB_workspace added
-  // earlier) Delta vectors
-  manifold.add("delta_y", delta_y);
-  manifold.add("delta_z", delta_z);
-  manifold.add("delta_x", delta_x);
-  manifold.add("delta_x_flip", delta_x_flip);
-  manifold.add("atilde", atilde);
-  manifold.add("atilde_mark", atilde_mark);
-  manifold.add("atilde_index", atilde_index);
-  manifold.add("nonbasic_mark", nonbasic_mark);
-  manifold.add("basic_mark", basic_mark);
-  manifold.add("delta_z_mark", delta_z_mark);
-  manifold.add("delta_z_indices", delta_z_indices);
-  manifold.add("v", v);
-  manifold.add("squared_infeasibilities", squared_infeasibilities);
-  manifold.add("infeasibility_indices", infeasibility_indices);
-  manifold.add("bounded_variables", bounded_variables);
+  // Add remaining instrumented vectors to aggregator (x, y, z, objective, c_basic, xB_workspace
+  // added earlier) Delta vectors
+  aggregator.add("delta_y", delta_y);
+  aggregator.add("delta_z", delta_z);
+  aggregator.add("delta_x", delta_x);
+  aggregator.add("delta_x_flip", delta_x_flip);
+  aggregator.add("atilde", atilde);
+  aggregator.add("atilde_mark", atilde_mark);
+  aggregator.add("atilde_index", atilde_index);
+  aggregator.add("nonbasic_mark", nonbasic_mark);
+  aggregator.add("basic_mark", basic_mark);
+  aggregator.add("delta_z_mark", delta_z_mark);
+  aggregator.add("delta_z_indices", delta_z_indices);
+  aggregator.add("v", v);
+  aggregator.add("squared_infeasibilities", squared_infeasibilities);
+  aggregator.add("infeasibility_indices", infeasibility_indices);
+  aggregator.add("bounded_variables", bounded_variables);
 
-  // Add sparse vector internal arrays to manifold
-  manifold.add("delta_y_sparse.i", delta_y_sparse.i);
-  manifold.add("delta_y_sparse.x", delta_y_sparse.x);
-  manifold.add("UTsol_sparse.i", UTsol_sparse.i);
-  manifold.add("UTsol_sparse.x", UTsol_sparse.x);
-  manifold.add("delta_xB_0_sparse.i", delta_xB_0_sparse.i);
-  manifold.add("delta_xB_0_sparse.x", delta_xB_0_sparse.x);
-  manifold.add("utilde_sparse.i", utilde_sparse.i);
-  manifold.add("utilde_sparse.x", utilde_sparse.x);
-  manifold.add("scaled_delta_xB_sparse.i", scaled_delta_xB_sparse.i);
-  manifold.add("scaled_delta_xB_sparse.x", scaled_delta_xB_sparse.x);
-  manifold.add("rhs_sparse.i", rhs_sparse.i);
-  manifold.add("rhs_sparse.x", rhs_sparse.x);
-  manifold.add("v_sparse.i", v_sparse.i);
-  manifold.add("v_sparse.x", v_sparse.x);
-  manifold.add("atilde_sparse.i", atilde_sparse.i);
-  manifold.add("atilde_sparse.x", atilde_sparse.x);
+  // Add sparse vector internal arrays to aggregator
+  aggregator.add("delta_y_sparse.i", delta_y_sparse.i);
+  aggregator.add("delta_y_sparse.x", delta_y_sparse.x);
+  aggregator.add("UTsol_sparse.i", UTsol_sparse.i);
+  aggregator.add("UTsol_sparse.x", UTsol_sparse.x);
+  aggregator.add("delta_xB_0_sparse.i", delta_xB_0_sparse.i);
+  aggregator.add("delta_xB_0_sparse.x", delta_xB_0_sparse.x);
+  aggregator.add("utilde_sparse.i", utilde_sparse.i);
+  aggregator.add("utilde_sparse.x", utilde_sparse.x);
+  aggregator.add("scaled_delta_xB_sparse.i", scaled_delta_xB_sparse.i);
+  aggregator.add("scaled_delta_xB_sparse.x", scaled_delta_xB_sparse.x);
+  aggregator.add("rhs_sparse.i", rhs_sparse.i);
+  aggregator.add("rhs_sparse.x", rhs_sparse.x);
+  aggregator.add("v_sparse.i", v_sparse.i);
+  aggregator.add("v_sparse.x", v_sparse.x);
+  aggregator.add("atilde_sparse.i", atilde_sparse.i);
+  aggregator.add("atilde_sparse.x", atilde_sparse.x);
 
   // Add A matrix for entering column access during basis update
-  manifold.add("A.col_start", lp.A.col_start);
-  manifold.add("A.i", lp.A.i);
-  manifold.add("A.x", lp.A.x);
+  aggregator.add("A.col_start", lp.A.col_start);
+  aggregator.add("A.i", lp.A.i);
+  aggregator.add("A.x", lp.A.x);
 
   // Track iteration interval start time for runtime measurement
   f_t interval_start_time   = toc(start_time);
@@ -2663,7 +2659,7 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     i_t remaining_iters = iter - last_feature_log_iter;
     if (remaining_iters <= 0) return;
 
-    auto [total_loads, total_stores] = manifold.collect_and_flush();
+    auto [total_loads, total_stores] = aggregator.collect_and_flush();
     // features.byte_loads              = total_loads;
     // features.byte_stores             = total_stores;
 
@@ -3377,7 +3373,7 @@ dual::status_t dual_phase2_with_advanced_basis(i_t phase,
     if ((iter % FEATURE_LOG_INTERVAL) == 0 && work_unit_context) {
       i_t iters_elapsed = iter - last_feature_log_iter;
 
-      auto [total_loads, total_stores] = manifold.collect_and_flush();
+      auto [total_loads, total_stores] = aggregator.collect_and_flush();
       // features.byte_loads              = total_loads;
       // features.byte_stores             = total_stores;
 

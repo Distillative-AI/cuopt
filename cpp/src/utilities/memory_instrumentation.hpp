@@ -23,7 +23,6 @@
  *   // When enabled: tracking occurs, counters accumulate
  *   // When disabled: direct passthrough, compiler optimizes away all overhead
  */
-// Thank you Cursor!
 
 #pragma once
 
@@ -94,13 +93,13 @@ struct memory_instrumentation_base_t {
 
 #if CUOPT_ENABLE_MEMORY_INSTRUMENTATION
 
-// Manifold class to collect statistics from multiple instrumented objects
-class instrumentation_manifold_t {
+// aggregator class to collect statistics from multiple instrumented objects
+class instrumentation_aggregator_t {
  public:
-  instrumentation_manifold_t() = default;
+  instrumentation_aggregator_t() = default;
 
   // Construct with initializer list of (description, instrumented object) pairs
-  instrumentation_manifold_t(
+  instrumentation_aggregator_t(
     std::initializer_list<
       std::pair<std::string, std::reference_wrapper<const memory_instrumentation_base_t>>>
       instrumented)
@@ -165,11 +164,11 @@ class instrumentation_manifold_t {
 
 #else
 
-// No-op manifold when instrumentation is disabled
-class instrumentation_manifold_t {
+// No-op aggregator when instrumentation is disabled
+class instrumentation_aggregator_t {
  public:
-  instrumentation_manifold_t() = default;
-  instrumentation_manifold_t(
+  instrumentation_aggregator_t() = default;
+  instrumentation_aggregator_t(
     std::initializer_list<
       std::pair<std::string, std::reference_wrapper<const memory_instrumentation_base_t>>>)
   {

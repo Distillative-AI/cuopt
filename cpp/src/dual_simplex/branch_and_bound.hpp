@@ -24,7 +24,7 @@
 #include <utilities/macros.cuh>
 #include <utilities/omp_helpers.hpp>
 #include <utilities/producer_sync.hpp>
-#include <utilities/work_limit_timer.hpp>
+#include <utilities/work_limit_context.hpp>
 #include <utilities/work_unit_scheduler.hpp>
 
 #include <omp.h>
@@ -44,16 +44,6 @@ enum class mip_status_t {
   WORK_LIMIT = 7,  // The solver reached a deterministic work limit
 };
 
-enum class node_solve_info_t {
-  NO_CHILDREN      = 0,  // The node does not produced children
-  UP_CHILD_FIRST   = 1,  // The up child should be explored first
-  DOWN_CHILD_FIRST = 2,  // The down child should be explored first
-  TIME_LIMIT       = 3,  // The solver reached a time limit
-  ITERATION_LIMIT  = 4,  // The solver reached a iteration limit
-  NUMERICAL        = 5,  // The solver encounter a numerical error when solving the node
-  WORK_LIMIT       = 6,  // The solver reached a deterministic work limit
-};
-
 template <typename i_t, typename f_t>
 class bounds_strengthening_t;
 
@@ -61,11 +51,13 @@ template <typename i_t, typename f_t>
 void upper_bound_callback(f_t upper_bound);
 
 template <typename i_t, typename f_t>
-struct opportunistic_tree_update_policy_t;
+struct opportunistic_tree_update_callbacks_t;
+template <typename i_t, typename f_t, typename WorkerT>
+struct determinism_tree_update_policy_base_t;
 template <typename i_t, typename f_t>
-struct determinism_tree_update_policy_t;
+struct determinism_bfs_tree_update_callbacks_t;
 template <typename i_t, typename f_t>
-struct determinism_diving_tree_update_policy_t;
+struct determinism_diving_tree_update_callbacks_t;
 
 template <typename i_t, typename f_t>
 class branch_and_bound_t {
@@ -256,7 +248,7 @@ class branch_and_bound_t {
   // to find integer feasible solutions.
   void dive_with(branch_and_bound_worker_t<i_t, f_t>* worker);
 
-  // Run the scheduler (aka the master) whose will schedule and manage
+  // Run the scheduler whose will schedule and manage
   // all the other workers.
   void run_scheduler();
 
@@ -300,19 +292,19 @@ class branch_and_bound_t {
   void run_determinism_coordinator(const csr_matrix_t<i_t, f_t>& Arow);
 
   // Gather all events generated, sort by WU timestamp, apply
-  void sort_replay_events(const bb_event_batch_t<i_t, f_t>& events);
+  void determinism_sort_replay_events(const bb_event_batch_t<i_t, f_t>& events);
 
   // Prune nodes held by workers based on new incumbent
-  void prune_worker_nodes_vs_incumbent();
+  void determinism_prune_worker_nodes_vs_incumbent();
 
   // Balance worker loads - redistribute nodes only if significant imbalance detected
-  void balance_worker_loads();
+  void determinism_balance_worker_loads();
 
-  node_solve_info_t solve_node_deterministic(determinism_bfs_worker_t<i_t, f_t>& worker,
-                                             mip_node_t<i_t, f_t>* node_ptr,
-                                             search_tree_t<i_t, f_t>& search_tree);
+  node_status_t solve_node_deterministic(determinism_bfs_worker_t<i_t, f_t>& worker,
+                                         mip_node_t<i_t, f_t>* node_ptr,
+                                         search_tree_t<i_t, f_t>& search_tree);
 
-  f_t compute_lower_bound_deterministic();
+  f_t determinism_compute_lower_bound();
 
   void run_deterministic_bfs_loop(determinism_bfs_worker_t<i_t, f_t>& worker,
                                   search_tree_t<i_t, f_t>& search_tree);
@@ -324,26 +316,32 @@ class branch_and_bound_t {
   void run_deterministic_diving_loop(determinism_diving_worker_t<i_t, f_t>& worker);
 
   void deterministic_dive(determinism_diving_worker_t<i_t, f_t>& worker,
-                          mip_node_t<i_t, f_t> starting_node);
+                          dive_queue_entry_t<i_t, f_t> entry);
 
   // Populate diving heap from BFS worker backlogs at sync
-  void populate_diving_heap();
+  void determinism_populate_diving_heap();
 
   // Assign starting nodes to diving workers from diving heap
-  void assign_diving_nodes();
+  void determinism_assign_diving_nodes();
 
   // Collect and merge diving solutions at sync
-  void collect_diving_solutions();
+  void determinism_collect_diving_solutions();
 
   template <typename PoolT, typename WorkerTypeGetter>
-  void process_worker_solutions(PoolT& pool, WorkerTypeGetter get_worker_type);
+  void determinism_process_worker_solutions(PoolT& pool, WorkerTypeGetter get_worker_type);
 
   template <typename PoolT>
-  void merge_pseudo_cost_updates(PoolT& pool);
+  void determinism_merge_pseudo_cost_updates(PoolT& pool);
 
-  friend struct opportunistic_tree_update_policy_t<i_t, f_t>;
-  friend struct determinism_tree_update_policy_t<i_t, f_t>;
-  friend struct determinism_diving_tree_update_policy_t<i_t, f_t>;
+  template <typename PoolT>
+  void determinism_broadcast_snapshots(PoolT& pool,
+                                       const std::vector<f_t>& incumbent_snapshot,
+                                       double horizon_start,
+                                       double horizon_end);
+
+  friend struct opportunistic_tree_update_callbacks_t<i_t, f_t>;
+  friend struct determinism_bfs_tree_update_callbacks_t<i_t, f_t>;
+  friend struct determinism_diving_tree_update_callbacks_t<i_t, f_t>;
 
  private:
   // unique_ptr as we only want to initialize these if we're in the determinism codepath

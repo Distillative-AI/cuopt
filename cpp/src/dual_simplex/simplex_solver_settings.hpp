@@ -157,7 +157,7 @@ struct simplex_solver_settings_t {
   bool barrier_presolve;      // true to use barrier presolve
   bool cudss_deterministic;   // true to use cuDSS deterministic mode, false for non-deterministic
   bool barrier;               // true to use barrier method, false to use dual simplex method
-  bool deterministic;  // true to use B&B   deterministic mode, false to use non-deterministic mode
+  bool deterministic;  // true to use B&B deterministic mode, false to use non-deterministic mode
   bool eliminate_dense_columns;  // true to eliminate dense columns from A*D*A^T
   int num_gpus;   // Number of GPUs to use (maximum of 2 gpus are supported at the moment)
   i_t folding;    // -1 automatic, 0 don't fold, 1 fold

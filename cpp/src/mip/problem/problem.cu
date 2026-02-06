@@ -212,6 +212,7 @@ problem_t<i_t, f_t>::problem_t(const problem_t<i_t, f_t>& problem_,
                                const raft::handle_t* handle_ptr_)
   : original_problem_ptr(problem_.original_problem_ptr),
     tolerances(problem_.tolerances),
+    deterministic(problem_.deterministic),
     handle_ptr(handle_ptr_),
     integer_fixed_problem(problem_.integer_fixed_problem),
     integer_fixed_variable_map(problem_.integer_fixed_variable_map, handle_ptr->get_stream()),

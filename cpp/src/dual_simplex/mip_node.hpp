@@ -284,7 +284,7 @@ class mip_node_t {
            static_cast<uint64_t>(static_cast<uint32_t>(creation_seq));
   }
 
-  uint64_t compute_path_hash() const
+  uint32_t compute_path_hash() const
   {
     std::vector<uint64_t> path_steps;
     const mip_node_t* node = this;

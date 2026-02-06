@@ -10,8 +10,8 @@
 #include <linear_programming/initial_scaling_strategy/initial_scaling.cuh>
 #include <mip/problem/problem.cuh>
 #include <mip/relaxed_lp/lp_state.cuh>
-
-#include <utilities/work_limit_timer.hpp>
+#include <utilities/work_limit_context.hpp>
+#include <utilities/work_unit_scheduler.hpp>
 
 #include <limits>
 

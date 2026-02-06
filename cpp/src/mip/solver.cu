@@ -107,11 +107,10 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
     context.problem_ptr->post_process_solution(sol);
     return sol;
   }
-
   dm.timer                = timer_;
   const bool run_presolve = context.settings.presolve;
   f_t time_limit          = context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC
-                              ? timer_.get_time_limit()
+                              ? std::numeric_limits<f_t>::infinity()
                               : timer_.remaining_time();
   bool presolve_success   = run_presolve ? dm.run_presolve(time_limit) : true;
   if (!presolve_success) {

@@ -17,7 +17,7 @@
 
 #include "work_unit_scheduler.hpp"
 
-#include "work_limit_timer.hpp"
+#include "work_limit_context.hpp"
 
 #include <algorithm>
 #include <chrono>
