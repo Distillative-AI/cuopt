@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 import math
@@ -20,6 +20,7 @@ from cuopt.linear_programming.problem import (
     Problem,
     VType,
     sense,
+    QuadraticExpression,
 )
 from cuopt.linear_programming.solver.solver_parameters import (
     CUOPT_AUGMENTED,
@@ -321,34 +322,45 @@ def test_read_write_mps_and_relaxation():
         assert v.getValue() == pytest.approx(expected_values_lp[i])
 
 
-def test_incumbent_solutions():
+def _run_incumbent_solutions(include_set_callback):
     # Callback for incumbent solution
     class CustomGetSolutionCallback(GetSolutionCallback):
-        def __init__(self):
+        def __init__(self, user_data):
             super().__init__()
             self.n_callbacks = 0
             self.solutions = []
+            self.user_data = user_data
 
-        def get_solution(self, solution, solution_cost):
+        def get_solution(
+            self, solution, solution_cost, solution_bound, user_data
+        ):
+            assert user_data is self.user_data
             self.n_callbacks += 1
             assert len(solution) > 0
             assert len(solution_cost) == 1
+            assert len(solution_bound) == 1
 
             self.solutions.append(
                 {
-                    "solution": solution.copy_to_host(),
-                    "cost": solution_cost.copy_to_host()[0],
+                    "solution": solution.tolist(),
+                    "cost": float(solution_cost[0]),
+                    "bound": float(solution_bound[0]),
                 }
             )
 
     class CustomSetSolutionCallback(SetSolutionCallback):
-        def __init__(self, get_callback):
+        def __init__(self, get_callback, user_data):
             super().__init__()
             self.n_callbacks = 0
             self.get_callback = get_callback
+            self.user_data = user_data
 
-        def set_solution(self, solution, solution_cost):
+        def set_solution(
+            self, solution, solution_cost, solution_bound, user_data
+        ):
+            assert user_data is self.user_data
             self.n_callbacks += 1
+            assert len(solution_bound) == 1
             if self.get_callback.solutions:
                 solution[:] = self.get_callback.solutions[-1]["solution"]
                 solution_cost[0] = float(
@@ -362,11 +374,17 @@ def test_incumbent_solutions():
     prob.addConstraint(3 * x + 2 * y <= 190)
     prob.setObjective(5 * x + 3 * y, sense=sense.MAXIMIZE)
 
-    get_callback = CustomGetSolutionCallback()
-    set_callback = CustomSetSolutionCallback(get_callback)
+    user_data = {"source": "test_incumbent_solutions"}
+    get_callback = CustomGetSolutionCallback(user_data)
+    set_callback = (
+        CustomSetSolutionCallback(get_callback, user_data)
+        if include_set_callback
+        else None
+    )
     settings = SolverSettings()
-    settings.set_mip_callback(get_callback)
-    settings.set_mip_callback(set_callback)
+    settings.set_mip_callback(get_callback, user_data)
+    if include_set_callback:
+        settings.set_mip_callback(set_callback, user_data)
     settings.set_parameter("time_limit", 1)
 
     prob.solve(settings)
@@ -377,9 +395,18 @@ def test_incumbent_solutions():
         x_val = sol["solution"][0]
         y_val = sol["solution"][1]
         cost = sol["cost"]
-        assert 2 * x_val + 4 * y_val >= 230
-        assert 3 * x_val + 2 * y_val <= 190
-        assert 5 * x_val + 3 * y_val == cost
+        tol = 1e-6
+        assert 2 * x_val + 4 * y_val >= 230 - tol
+        assert 3 * x_val + 2 * y_val <= 190 + tol
+        assert abs(5 * x_val + 3 * y_val - cost) < tol
+
+
+def test_incumbent_get_solutions():
+    _run_incumbent_solutions(include_set_callback=False)
+
+
+def test_incumbent_get_set_solutions():
+    _run_incumbent_solutions(include_set_callback=True)
 
 
 def test_warm_start():
@@ -748,15 +775,15 @@ def test_quadratic_expression_and_matrix():
 
     # Test Quadratic Matrix
     problem.setObjective(expr9)
-    Qcsr = problem.getQcsr()
+    Qcsr = problem.getQCSR()
 
     exp_row_ptrs = [0, 0, 3, 6]
     exp_col_inds = [0, 1, 2, 0, 1, 2]
     exp_vals = [21, -7, 7, 3, -1, 1]
 
-    assert Qcsr.row_pointers == exp_row_ptrs
-    assert Qcsr.column_indices == exp_col_inds
-    assert Qcsr.values == exp_vals
+    assert list(Qcsr.row_pointers) == exp_row_ptrs
+    assert list(Qcsr.column_indices) == exp_col_inds
+    assert list(Qcsr.values) == exp_vals
 
 
 def test_quadratic_objective_1():
@@ -813,3 +840,117 @@ def test_quadratic_objective_2():
     assert x2.getValue() == pytest.approx(0.0000000, abs=0.000001)
     assert x3.getValue() == pytest.approx(0.1092896, abs=1e-3)
     assert problem.ObjValue == pytest.approx(-0.284153, abs=1e-3)
+
+
+def test_quadratic_matrix_1():
+    problem = Problem()
+    x1 = problem.addVariable(lb=1, name="x1")
+    x2 = problem.addVariable(lb=1, name="x2")
+    x3 = problem.addVariable(lb=2.0, name="x3")
+    x4 = problem.addVariable(lb=1, name="x4")
+
+    # Constraints
+    problem.addConstraint(x1 + x2 + x3 + x4 <= 10, "c1")
+    problem.addConstraint(2 * x1 - x2 + x4 >= 5, "c2")
+
+    # Quadratic objective
+    # Minimize 2 x1^2 + 3 x2^2 + x3^2 + 4 x4^2 + 1.5 x1 x2 - 2 x3 x4 - 4 x1 + x2 + 3 x3 + 5
+
+    quad_matrix = [[2, 1.5, 0, 0], [0, 3, 0, 0], [0, 0, 1, -2], [0, 0, 0, 4]]
+    lin_terms = x2 + 3 * x3 - 4 * x1 + 5
+    quad_expr = (
+        2 * x1 * x1
+        + 3 * x2 * x2
+        + 1 * x3 * x3
+        + 4 * x4 * x4
+        + 1.5 * x1 * x2
+        - 2 * x3 * x4
+        - 4 * x1
+        + 1 * x2
+        + 3 * x3
+        + 5
+    )
+
+    # Break down obj into multiple expressions
+    lin_mix_1 = x2 + 3 * x3
+    lin_mix_2 = 4 * x1
+    quad_mix_1 = [[1, 0, 0, 0], [0, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 2]]
+    quad_mix_2 = 3 * x2 * x2
+    quad_mix_3 = [[1, 1.5, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 2]]
+    quad_mix_4 = 2 * x3 * x4 - 5
+
+    # Expected Solution
+    obj_value_exp = 25.25
+    x1_exp = 2.5
+    x2_exp = 1
+    x3_exp = 2
+    x4_exp = 1
+
+    # Solve 1
+    problem.setObjective(quad_expr)
+    problem.solve()
+    assert problem.ObjValue == pytest.approx(obj_value_exp, abs=1e-3)
+
+    # Solve 2
+    quad_obj = QuadraticExpression(quad_matrix, problem.getVariables())
+    problem.setObjective(quad_obj + lin_terms)
+    problem.solve()
+    assert problem.ObjValue == pytest.approx(obj_value_exp, abs=1e-3)
+
+    # Solve 3
+    vars = problem.getVariables()
+    qmatrix1 = QuadraticExpression(quad_mix_1, vars)
+    qmatrix3 = QuadraticExpression(quad_mix_3, vars)
+    quad_obj = (
+        lin_mix_1 + qmatrix1 + quad_mix_2 + qmatrix3 - quad_mix_4 - lin_mix_2
+    )
+    problem.setObjective(quad_obj)
+    problem.solve()
+    assert problem.ObjValue == pytest.approx(obj_value_exp, abs=1e-3)
+
+    # Verify accessor functions
+    q_vars = quad_obj.getVariables()
+    q_coeffs = quad_obj.getCoefficients()
+    lin_expr = quad_obj.getLinearExpression()
+    obj_value = 0.0
+    for i, (var1, var2) in enumerate(q_vars):
+        obj_value += var1.Value * var2.Value * q_coeffs[i]
+    obj_value += lin_expr.getValue()
+    assert obj_value == pytest.approx(obj_value_exp, abs=1e-3)
+    assert quad_obj.getValue() == pytest.approx(obj_value_exp, abs=1e-3)
+    assert x1.Value == pytest.approx(x1_exp, abs=1e-3)
+    assert x2.Value == pytest.approx(x2_exp, abs=1e-3)
+    assert x3.Value == pytest.approx(x3_exp, abs=1e-3)
+    assert x4.Value == pytest.approx(x4_exp, abs=1e-3)
+
+
+def test_quadratic_matrix_2():
+    # Minimize 4 x1^2 + 2 x2^2 + 3 x3^2 + 1.5 x1 x3 - 2 x1 + 0.5 x2 - x3 + 4
+    # subject to x1 + 2*x2 + x3 <= 3
+    #         x1 >= 0
+    #         x2 >= 0
+    #         x3 >= 0
+
+    problem = Problem()
+    x1 = problem.addVariable(lb=0, name="x")
+    x2 = problem.addVariable(lb=0, name="y")
+    x3 = problem.addVariable(lb=0, name="z")
+
+    problem.addConstraint(x1 + 2 * x2 + x3 <= 3)
+
+    Q = [[4, 0, 1.5], [0, 2, 0], [0, 0, 3]]
+    quad_expr = QuadraticExpression(qmatrix=Q, qvars=problem.getVariables())
+    quad_expr1 = quad_expr + 4  # Quad_matrix add constant
+    quad_expr2 = quad_expr1 - x3  # Quad_matrix sub variable
+    quad_expr2 -= 2 * x1  # Quad_matrix isub lin_expr
+    quad_expr2 += 0.5 * x2  # Quad_matrix iadd lin_expr
+
+    problem.setObjective(quad_expr2)
+
+    problem.solve()
+
+    assert problem.Status.name == "Optimal"
+    assert x1.getValue() == pytest.approx(0.2295081, abs=1e-3)
+    assert x2.getValue() == pytest.approx(0.0000000, abs=1e-3)
+    assert x3.getValue() == pytest.approx(0.1092896, abs=1e-3)
+    assert problem.ObjValue == pytest.approx(3.715847, abs=1e-3)

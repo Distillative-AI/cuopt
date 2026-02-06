@@ -681,7 +681,7 @@ class iteration_data_t {
           solve_status = chol->solve(U_col, M_col);
           if (solve_status != 0) { return solve_status; }
           if (settings_.concurrent_halt != nullptr && *settings_.concurrent_halt == 1) {
-            return -2;
+            return CONCURRENT_HALT_RETURN;
           }
           M.set_column(k, M_col);
 
@@ -700,7 +700,7 @@ class iteration_data_t {
           AD_dense.transpose_multiply(
             1.0, M.values.data() + k * M.m, 0.0, H.values.data() + k * H.m);
           if (settings_.concurrent_halt != nullptr && *settings_.concurrent_halt == 1) {
-            return -2;
+            return CONCURRENT_HALT_RETURN;
           }
         }
 
@@ -1121,9 +1121,10 @@ class iteration_data_t {
     csr_matrix_t<i_t, f_t> A_row(0, 0, 0);
     A.to_compressed_row(A_row);
 
-    std::vector<i_t> histogram(m, 0);
+    std::vector<i_t> histogram(m + 1, 0);
     for (i_t j = 0; j < n; j++) {
       const i_t col_nz_j = A.col_start[j + 1] - A.col_start[j];
+      cuopt_assert(col_nz_j <= m, "Column nonzero count exceeds histogram size");
       histogram[col_nz_j]++;
     }
 #ifdef HISTOGRAM
@@ -1143,9 +1144,10 @@ class iteration_data_t {
       }
     }
 
-    std::vector<i_t> histogram_row(n, 0);
+    std::vector<i_t> histogram_row(n + 1, 0);
     max_row_nz = 0;
     for (i_t k = 0; k < m; k++) {
+      cuopt_assert(row_nz[k] <= n, "Row nonzero count exceeds histogram_row size");
       histogram_row[row_nz[k]]++;
       max_row_nz = std::max(max_row_nz, row_nz[k]);
     }
@@ -1743,7 +1745,7 @@ int barrier_solver_t<i_t, f_t>::initial_point(iteration_data_t<i_t, f_t>& data)
   } else {
     status = data.chol->factorize(data.device_ADAT);
   }
-  if (status == -2) { return -2; }
+  if (status == CONCURRENT_HALT_RETURN) { return CONCURRENT_HALT_RETURN; }
   if (status != 0) {
     settings.log.printf("Initial factorization failed\n");
     return -1;
@@ -2307,7 +2309,7 @@ i_t barrier_solver_t<i_t, f_t>::gpu_compute_search_direction(iteration_data_t<i_
     data.num_factorizations++;
 
     data.has_solve_info = false;
-    if (status == -2) { return -2; }
+    if (status == CONCURRENT_HALT_RETURN) { return CONCURRENT_HALT_RETURN; }
 
     if (status < 0) {
       settings.log.printf("Factorization failed.\n");
@@ -2409,7 +2411,7 @@ i_t barrier_solver_t<i_t, f_t>::gpu_compute_search_direction(iteration_data_t<i_
       // TODO Chris, we need to write to cpu because dx is used outside
       // Can't we also GPUify what's usinng this dx?
       raft::copy(dy.data(), data.d_dy_.data(), dy.size(), stream_view_);
-      if (solve_status == -2) { return -2; }
+      if (solve_status == CONCURRENT_HALT_RETURN) { return CONCURRENT_HALT_RETURN; }
       if (solve_status < 0) {
         settings.log.printf("Linear solve failed\n");
         return -1;

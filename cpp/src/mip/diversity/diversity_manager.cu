@@ -90,8 +90,8 @@ diversity_manager_t<i_t, f_t>::diversity_manager_t(mip_solver_context_t<i_t, f_t
     }
   }
   if (max_config > 1) {
-    int config_id             = -1;  // Default value
-    const char* env_config_id = std::getenv("CUOPT_CONFIG_ID");
+    [[maybe_unused]] int config_id = -1;  // Default value
+    const char* env_config_id      = std::getenv("CUOPT_CONFIG_ID");
     if (env_config_id != nullptr) {
       try {
         config_id = std::stoi(env_config_id);
@@ -225,10 +225,11 @@ bool diversity_manager_t<i_t, f_t>::run_presolve(f_t time_limit)
   lp_dual_optimal_solution.resize(problem_ptr->n_constraints,
                                   problem_ptr->handle_ptr->get_stream());
   problem_ptr->handle_ptr->sync_stream();
-  CUOPT_LOG_INFO("After trivial presolve: %d constraints, %d variables, objective offset %f.",
+  CUOPT_LOG_INFO("After cuOpt presolve: %d constraints, %d variables, objective offset %f.",
                  problem_ptr->n_constraints,
                  problem_ptr->n_variables,
                  problem_ptr->presolve_data.objective_offset);
+  CUOPT_LOG_INFO("cuOpt presolve time: %.2f", stats.presolve_time);
   return true;
 }
 
@@ -420,7 +421,7 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
       // to bring variables within the bounds
     }
 
-    // Send PDLP relaxed solution to branch and bound before it solves the root node
+    // Send PDLP relaxed solution to branch and bound
     if (problem_ptr->set_root_relaxation_solution_callback != nullptr) {
       auto& d_primal_solution = lp_result.get_primal_solution();
       auto& d_dual_solution   = lp_result.get_dual_solution();
@@ -443,15 +444,13 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
                  problem_ptr->handle_ptr->get_stream());
       problem_ptr->handle_ptr->sync_stream();
 
-      auto user_obj   = problem_ptr->get_user_obj_from_solver_obj(lp_result.get_objective_value());
+      // PDLP returns user-space objective (it applies objective_scaling_factor internally)
+      auto user_obj   = lp_result.get_objective_value();
+      auto solver_obj = problem_ptr->get_solver_obj_from_user_obj(user_obj);
       auto iterations = lp_result.get_additional_termination_information().number_of_steps_taken;
-      // Set for the B&B
-      problem_ptr->set_root_relaxation_solution_callback(host_primal,
-                                                         host_dual,
-                                                         host_reduced_costs,
-                                                         lp_result.get_objective_value(),
-                                                         user_obj,
-                                                         iterations);
+      // Set for the B&B (param4 expects solver space, param5 expects user space)
+      problem_ptr->set_root_relaxation_solution_callback(
+        host_primal, host_dual, host_reduced_costs, solver_obj, user_obj, iterations);
     }
 
     // in case the pdlp returned var boudns that are out of bounds
@@ -535,7 +534,7 @@ void diversity_manager_t<i_t, f_t>::diversity_step(i_t max_iterations_without_im
 template <typename i_t, typename f_t>
 void diversity_manager_t<i_t, f_t>::set_new_user_bound(f_t new_bound)
 {
-  stats.solution_bound = new_bound;
+  stats.set_solution_bound(new_bound);
 }
 
 template <typename i_t, typename f_t>
