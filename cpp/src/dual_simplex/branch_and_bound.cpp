@@ -483,10 +483,12 @@ void branch_and_bound_t<i_t, f_t>::queue_external_solution_deterministic(
     return;
   }
 
+  mutex_original_lp_.lock();
   std::vector<f_t> crushed_solution;
   crush_primal_solution<i_t, f_t>(
     original_problem_, original_lp_, solution, new_slacks_, crushed_solution);
   f_t obj = compute_objective(original_lp_, crushed_solution);
+  mutex_original_lp_.unlock();
 
   // Validate solution before queueing
   f_t primal_err;
