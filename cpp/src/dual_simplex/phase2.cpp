@@ -23,7 +23,7 @@
 
 #include <raft/common/nvtx.hpp>
 
-#define PHASE2_NVTX_RANGES
+// #define PHASE2_NVTX_RANGES
 
 #ifdef PHASE2_NVTX_RANGES
 #define PHASE2_NVTX_RANGE(name) raft::common::nvtx::range NVTX_UNIQUE_NAME(nvtx_scope_)(name)
