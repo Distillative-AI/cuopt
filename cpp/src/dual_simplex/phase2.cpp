@@ -813,26 +813,39 @@ template <typename i_t, typename f_t>
 void clean_up_infeasibilities(ins_vector<f_t>& squared_infeasibilities,
                               ins_vector<i_t>& infeasibility_indices)
 {
-  bool needs_clean_up = false;
-  for (i_t k = 0; k < infeasibility_indices.size(); ++k) {
-    const i_t j              = infeasibility_indices[k];
-    const f_t squared_infeas = squared_infeasibilities[j];
+  auto& sq_inf = squared_infeasibilities.underlying();
+  auto& idx    = infeasibility_indices.underlying();
+
+  bool needs_clean_up  = false;
+  const i_t initial_nz = idx.size();
+  for (i_t k = 0; k < initial_nz; ++k) {
+    const i_t j              = idx[k];
+    const f_t squared_infeas = sq_inf[j];
     if (squared_infeas == 0.0) { needs_clean_up = true; }
   }
 
+  size_t idx_accesses = initial_nz;
+  size_t sq_accesses  = initial_nz;
+
   if (needs_clean_up) {
-    for (i_t k = 0; k < infeasibility_indices.size(); ++k) {
-      const i_t j              = infeasibility_indices[k];
-      const f_t squared_infeas = squared_infeasibilities[j];
+    for (size_t k = 0; k < idx.size(); ++k) {
+      const i_t j              = idx[k];
+      const f_t squared_infeas = sq_inf[j];
+      idx_accesses++;
+      sq_accesses++;
       if (squared_infeas == 0.0) {
-        // Set to the last element
-        const i_t new_j          = infeasibility_indices.back();
-        infeasibility_indices[k] = new_j;
-        infeasibility_indices.pop_back();
-        if (squared_infeasibilities[new_j] == 0.0) { k--; }
+        const i_t new_j = idx.back();
+        idx[k]          = new_j;
+        idx.pop_back();
+        idx_accesses += 2;
+        sq_accesses++;
+        if (sq_inf[new_j] == 0.0) { k--; }
       }
     }
   }
+
+  infeasibility_indices.byte_loads += idx_accesses * sizeof(i_t);
+  squared_infeasibilities.byte_loads += sq_accesses * sizeof(f_t);
 }
 
 template <typename i_t, typename f_t>
@@ -847,12 +860,16 @@ i_t steepest_edge_pricing_with_infeasibilities(const lp_problem_t<i_t, f_t>& lp,
                                                i_t& basic_leaving,
                                                f_t& max_val)
 {
+  auto& sq_inf = squared_infeasibilities.underlying();
+  auto& idx    = infeasibility_indices.underlying();
+  auto& bmark  = basic_mark.underlying();
+
   max_val           = 0.0;
   i_t leaving_index = -1;
-  const i_t nz      = infeasibility_indices.size();
+  const i_t nz      = idx.size();
   for (i_t k = 0; k < nz; ++k) {
-    const i_t j              = infeasibility_indices[k];
-    const f_t squared_infeas = squared_infeasibilities[j];
+    const i_t j              = idx[k];
+    const f_t squared_infeas = sq_inf[j];
     const f_t val            = squared_infeas / dy_steepest_edge[j];
     if (val > max_val || (val == max_val && j > leaving_index)) {
       max_val                = val;
@@ -863,7 +880,12 @@ i_t steepest_edge_pricing_with_infeasibilities(const lp_problem_t<i_t, f_t>& lp,
     }
   }
 
-  basic_leaving = leaving_index >= 0 ? basic_mark[leaving_index] : -1;
+  basic_leaving = leaving_index >= 0 ? bmark[leaving_index] : -1;
+
+  infeasibility_indices.byte_loads += nz * sizeof(i_t);
+  squared_infeasibilities.byte_loads += nz * sizeof(f_t);
+  if (leaving_index >= 0) { basic_mark.byte_loads += sizeof(i_t); }
+
   return leaving_index;
 }
 
@@ -1364,15 +1386,20 @@ i_t update_steepest_edge_norms(const simplex_solver_settings_t<i_t, f_t>& settin
   if (wr == 0) { return -1; }
   const f_t omegar             = dy_norm_squared / (wr * wr);
   const i_t scaled_delta_xB_nz = scaled_delta_xB.i.size();
+
+  auto& dxB_i = scaled_delta_xB.i.underlying();
+  auto& dxB_x = scaled_delta_xB.x.underlying();
+  auto& v_raw = v.underlying();
+
   for (i_t h = 0; h < scaled_delta_xB_nz; ++h) {
-    const i_t k = scaled_delta_xB.i[h];
+    const i_t k = dxB_i[h];
     const i_t j = basic_list[k];
     if (k == basic_leaving_index) {
-      const f_t w_squared      = scaled_delta_xB.x[h] * scaled_delta_xB.x[h];
+      const f_t w_squared      = dxB_x[h] * dxB_x[h];
       delta_y_steepest_edge[j] = (1.0 / w_squared) * dy_norm_squared;
     } else {
-      const f_t wk = -scaled_delta_xB.x[h];
-      f_t new_val  = delta_y_steepest_edge[j] + wk * (2.0 * v[k] / wr + wk * omegar);
+      const f_t wk = -dxB_x[h];
+      f_t new_val  = delta_y_steepest_edge[j] + wk * (2.0 * v_raw[k] / wr + wk * omegar);
       new_val      = std::max(new_val, 1e-4);
 #ifdef STEEPEST_EDGE_DEBUG
       if (!(new_val >= 0)) {
@@ -1382,7 +1409,7 @@ i_t update_steepest_edge_norms(const simplex_solver_settings_t<i_t, f_t>& settin
                             j,
                             delta_y_steepest_edge[j],
                             wk,
-                            v[k],
+                            v_raw[k],
                             wr,
                             omegar);
       }
@@ -1392,10 +1419,17 @@ i_t update_steepest_edge_norms(const simplex_solver_settings_t<i_t, f_t>& settin
     }
   }
 
-  const i_t v_nz = v_sparse.i.size();
+  auto& vs_i     = v_sparse.i.underlying();
+  const i_t v_nz = vs_i.size();
   for (i_t k = 0; k < v_nz; ++k) {
-    v[v_sparse.i[k]] = 0.0;
+    v_raw[vs_i[k]] = 0.0;
   }
+
+  scaled_delta_xB.i.byte_loads += scaled_delta_xB_nz * sizeof(i_t);
+  scaled_delta_xB.x.byte_loads += scaled_delta_xB_nz * sizeof(f_t);
+  v.byte_loads += scaled_delta_xB_nz * sizeof(f_t);
+  v.byte_stores += v_nz * sizeof(f_t);
+  v_sparse.i.byte_loads += v_nz * sizeof(i_t);
 
   return 0;
 }

@@ -70,12 +70,17 @@ void sparse_vector_t<i_t, f_t>::from_dense(const std::vector<f_t>& in)
   n = in.size();
   i.reserve(n);
   x.reserve(n);
+  auto& i_vec = i.underlying();
+  auto& x_vec = x.underlying();
   for (i_t k = 0; k < n; ++k) {
     if (in[k] != 0) {
-      i.push_back(k);
-      x.push_back(in[k]);
+      i_vec.push_back(k);
+      x_vec.push_back(in[k]);
     }
   }
+  const size_t nz = i_vec.size();
+  i.byte_stores += nz * sizeof(i_t);
+  x.byte_stores += nz * sizeof(f_t);
 }
 
 template <typename i_t, typename f_t>
@@ -127,10 +132,17 @@ template <typename i_t, typename f_t>
 void sparse_vector_t<i_t, f_t>::scatter(ins_vector<f_t>& x_dense) const
 {
   // Assumes x_dense is already cleared
-  const i_t nz = i.size();
+  auto& sv_i   = i.underlying();
+  auto& sv_x   = x.underlying();
+  auto& dense  = x_dense.underlying();
+  const i_t nz = sv_i.size();
   for (i_t k = 0; k < nz; ++k) {
-    x_dense[i[k]] += x[k];
+    dense[sv_i[k]] += sv_x[k];
   }
+  i.byte_loads += nz * sizeof(i_t);
+  x.byte_loads += nz * sizeof(f_t);
+  x_dense.byte_loads += nz * sizeof(f_t);
+  x_dense.byte_stores += nz * sizeof(f_t);
 }
 
 template <typename i_t, typename f_t>

@@ -30,18 +30,30 @@ i_t lower_triangular_solve(const csc_matrix_t<i_t, f_t>& L, VectorF& x)
 {
   i_t n = L.n;
   assert(x.size() == n);
+
+  auto& L_cs = L.col_start.underlying();
+  auto& L_i  = L.i.underlying();
+  auto& L_x  = L.x.underlying();
+
+  size_t nnz_processed = 0;
   for (i_t j = 0; j < n; ++j) {
-    i_t col_start = L.col_start[j];
-    i_t col_end   = L.col_start[j + 1];
+    i_t col_start = L_cs[j];
+    i_t col_end   = L_cs[j + 1];
     if (x[j] != 0.0) {
-      x[j] /= L.x[col_start];
+      x[j] /= L_x[col_start];
       auto x_j = x[j];  // hoist this load out of the loop
       // as the compiler cannot guess that x[j] never aliases to x[L.i[p]]
       for (i_t p = col_start + 1; p < col_end; ++p) {
-        x[L.i[p]] -= L.x[p] * x_j;
+        x[L_i[p]] -= L_x[p] * x_j;
       }
+      nnz_processed += col_end - col_start;
     }
   }
+
+  L.col_start.byte_loads += (n + 1) * sizeof(i_t);
+  L.i.byte_loads += nnz_processed * sizeof(i_t);
+  L.x.byte_loads += nnz_processed * sizeof(f_t);
+
   return 0;
 }
 
@@ -52,14 +64,25 @@ i_t lower_triangular_transpose_solve(const csc_matrix_t<i_t, f_t>& L, VectorF& x
 {
   const i_t n = L.n;
   assert(x.size() == n);
+
+  auto& L_cs = L.col_start.underlying();
+  auto& L_i  = L.i.underlying();
+  auto& L_x  = L.x.underlying();
+
   for (i_t j = n - 1; j >= 0; --j) {
-    const i_t col_start = L.col_start[j] + 1;
-    const i_t col_end   = L.col_start[j + 1];
+    const i_t col_start = L_cs[j] + 1;
+    const i_t col_end   = L_cs[j + 1];
     for (i_t p = col_start; p < col_end; ++p) {
-      x[j] -= L.x[p] * x[L.i[p]];
+      x[j] -= L_x[p] * x[L_i[p]];
     }
-    x[j] /= L.x[L.col_start[j]];
+    x[j] /= L_x[L_cs[j]];
   }
+
+  const size_t total_nnz = L_cs[n];
+  L.col_start.byte_loads += (n + 1) * sizeof(i_t);
+  L.i.byte_loads += total_nnz * sizeof(i_t);
+  L.x.byte_loads += total_nnz * sizeof(f_t);
+
   return 0;
 }
 
@@ -70,17 +93,29 @@ i_t upper_triangular_solve(const csc_matrix_t<i_t, f_t>& U, VectorF& x)
 {
   const i_t n = U.n;
   assert(x.size() == n);
+
+  auto& U_cs = U.col_start.underlying();
+  auto& U_i  = U.i.underlying();
+  auto& U_x  = U.x.underlying();
+
+  size_t nnz_processed = 0;
   for (i_t j = n - 1; j >= 0; --j) {
-    const i_t col_start = U.col_start[j];
-    const i_t col_end   = U.col_start[j + 1] - 1;
+    const i_t col_start = U_cs[j];
+    const i_t col_end   = U_cs[j + 1] - 1;
     if (x[j] != 0.0) {
-      x[j] /= U.x[col_end];
+      x[j] /= U_x[col_end];
       auto x_j = x[j];  // same x_j load hoisting
       for (i_t p = col_start; p < col_end; ++p) {
-        x[U.i[p]] -= U.x[p] * x_j;
+        x[U_i[p]] -= U_x[p] * x_j;
       }
+      nnz_processed += col_end - col_start;
     }
   }
+
+  U.col_start.byte_loads += (n + 1) * sizeof(i_t);
+  U.i.byte_loads += nnz_processed * sizeof(i_t);
+  U.x.byte_loads += nnz_processed * sizeof(f_t);
+
   return 0;
 }
 
@@ -91,14 +126,25 @@ i_t upper_triangular_transpose_solve(const csc_matrix_t<i_t, f_t>& U, VectorF& x
 {
   const i_t n = U.n;
   assert(x.size() == n);
+
+  auto& U_cs = U.col_start.underlying();
+  auto& U_i  = U.i.underlying();
+  auto& U_x  = U.x.underlying();
+
   for (i_t j = 0; j < n; ++j) {
-    const i_t col_start = U.col_start[j];
-    const i_t col_end   = U.col_start[j + 1] - 1;
+    const i_t col_start = U_cs[j];
+    const i_t col_end   = U_cs[j + 1] - 1;
     for (i_t p = col_start; p < col_end; ++p) {
-      x[j] -= U.x[p] * x[U.i[p]];
+      x[j] -= U_x[p] * x[U_i[p]];
     }
-    x[j] /= U.x[col_end];
+    x[j] /= U_x[col_end];
   }
+
+  const size_t total_nnz = U_cs[n];
+  U.col_start.byte_loads += (n + 1) * sizeof(i_t);
+  U.i.byte_loads += total_nnz * sizeof(i_t);
+  U.x.byte_loads += total_nnz * sizeof(f_t);
+
   return 0;
 }
 
