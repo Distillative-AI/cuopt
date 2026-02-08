@@ -387,28 +387,62 @@ void compute_delta_z(const csc_matrix_t<i_t, f_t>& A_transpose,
                      ins_vector<i_t>& delta_z_indices,
                      ins_vector<f_t>& delta_z)
 {
+  auto& At_cs  = A_transpose.col_start.underlying();
+  auto& At_i   = A_transpose.i.underlying();
+  auto& At_x   = A_transpose.x.underlying();
+  auto& dy_i   = delta_y.i.underlying();
+  auto& dy_x   = delta_y.x.underlying();
+  auto& nb_mk  = nonbasic_mark.underlying();
+  auto& dz_mk  = delta_z_mark.underlying();
+  auto& dz_idx = delta_z_indices.underlying();
+  auto& dz     = delta_z.underlying();
+
   // delta_zN = - N'*delta_y
-  const i_t nz_delta_y = delta_y.i.size();
+  const i_t nz_delta_y = dy_i.size();
+  size_t nnz_processed = 0;
+  size_t nb_reads      = 0;
+  size_t dz_rmws       = 0;
+  size_t dz_mk_reads   = 0;
+  size_t dz_mk_writes  = 0;
+  size_t dz_idx_writes = 0;
   for (i_t k = 0; k < nz_delta_y; k++) {
-    const i_t i         = delta_y.i[k];
-    const f_t delta_y_i = delta_y.x[k];
+    const i_t i         = dy_i[k];
+    const f_t delta_y_i = dy_x[k];
     if (std::abs(delta_y_i) < 1e-12) { continue; }
-    const i_t row_start = A_transpose.col_start[i];
-    const i_t row_end   = A_transpose.col_start[i + 1];
+    const i_t row_start = At_cs[i];
+    const i_t row_end   = At_cs[i + 1];
+    nnz_processed += row_end - row_start;
     for (i_t p = row_start; p < row_end; ++p) {
-      const i_t j = A_transpose.i[p];
-      if (nonbasic_mark[j] >= 0) {
-        delta_z[j] -= delta_y_i * A_transpose.x[p];
-        if (!delta_z_mark[j]) {
-          delta_z_mark[j] = 1;
-          delta_z_indices.push_back(j);  // Note delta_z_indices has n elements reserved
+      const i_t j = At_i[p];
+      nb_reads++;
+      if (nb_mk[j] >= 0) {
+        dz[j] -= delta_y_i * At_x[p];
+        dz_rmws++;
+        dz_mk_reads++;
+        if (!dz_mk[j]) {
+          dz_mk[j] = 1;
+          dz_idx.push_back(j);
+          dz_mk_writes++;
+          dz_idx_writes++;
         }
       }
     }
   }
 
   // delta_zB = sigma*ei
-  delta_z[leaving_index] = direction;
+  dz[leaving_index] = direction;
+
+  delta_y.i.byte_loads += nz_delta_y * sizeof(i_t);
+  delta_y.x.byte_loads += nz_delta_y * sizeof(f_t);
+  A_transpose.col_start.byte_loads += 2 * nz_delta_y * sizeof(i_t);
+  A_transpose.i.byte_loads += nnz_processed * sizeof(i_t);
+  A_transpose.x.byte_loads += dz_rmws * sizeof(f_t);
+  nonbasic_mark.byte_loads += nb_reads * sizeof(i_t);
+  delta_z.byte_loads += dz_rmws * sizeof(f_t);
+  delta_z.byte_stores += (dz_rmws + 1) * sizeof(f_t);
+  delta_z_mark.byte_loads += dz_mk_reads * sizeof(i_t);
+  delta_z_mark.byte_stores += dz_mk_writes * sizeof(i_t);
+  delta_z_indices.byte_stores += dz_idx_writes * sizeof(i_t);
 
 #ifdef CHECK_CHANGE_IN_REDUCED_COST
   delta_y_sparse.to_dense(delta_y);
