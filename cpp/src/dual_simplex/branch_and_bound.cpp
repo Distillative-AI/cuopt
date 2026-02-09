@@ -2765,7 +2765,7 @@ void branch_and_bound_t<i_t, f_t>::determinism_sync_callback()
 
   determinism_sort_replay_events(all_events);
 
-  determinism_prune_worker_nodes_vs_incumbent();
+  // determinism_prune_worker_nodes_vs_incumbent();
 
   deterministic_collect_diving_solutions_and_update_pseudocosts();
 
