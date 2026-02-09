@@ -37,23 +37,6 @@ struct backlog_node_compare_t {
 };
 
 template <typename i_t, typename f_t>
-struct pseudo_cost_update_t {
-  i_t variable;
-  rounding_direction_t direction;
-  f_t delta;
-  double work_timestamp;
-  int worker_id;
-
-  bool operator<(const pseudo_cost_update_t& other) const
-  {
-    if (work_timestamp != other.work_timestamp) return work_timestamp < other.work_timestamp;
-    if (variable != other.variable) return variable < other.variable;
-    if (delta != other.delta) return delta < other.delta;
-    return worker_id < other.worker_id;
-  }
-};
-
-template <typename i_t, typename f_t>
 struct queued_integer_solution_t {
   f_t objective;
   std::vector<f_t> solution;
@@ -73,10 +56,7 @@ struct queued_integer_solution_t {
 template <typename i_t, typename f_t>
 struct determinism_snapshot_t {
   f_t upper_bound;
-  std::vector<f_t> pc_sum_up;
-  std::vector<f_t> pc_sum_down;
-  std::vector<i_t> pc_num_up;
-  std::vector<i_t> pc_num_down;
+  pseudo_cost_snapshot_t<i_t, f_t> pc_snapshot;
   std::vector<f_t> incumbent;
   i_t total_lp_iters;
 };
@@ -89,11 +69,7 @@ class determinism_worker_base_t : public branch_and_bound_worker_t<i_t, f_t> {
   double clock{0.0};
   work_limit_context_t work_context;
 
-  // Local snapshots of global state
-  std::vector<f_t> pc_sum_up_snapshot;
-  std::vector<f_t> pc_sum_down_snapshot;
-  std::vector<i_t> pc_num_up_snapshot;
-  std::vector<i_t> pc_num_down_snapshot;
+  pseudo_cost_snapshot_t<i_t, f_t> pc_snapshot;
   f_t local_upper_bound{std::numeric_limits<f_t>::infinity()};
 
   // Diving-specific snapshots (ignored by BFS workers)
@@ -101,7 +77,6 @@ class determinism_worker_base_t : public branch_and_bound_worker_t<i_t, f_t> {
   i_t total_lp_iters_snapshot{0};
 
   std::vector<queued_integer_solution_t<i_t, f_t>> integer_solutions;
-  std::vector<pseudo_cost_update_t<i_t, f_t>> pseudo_cost_updates;
   int next_solution_seq{0};
 
   i_t total_nodes_processed{0};
@@ -123,38 +98,9 @@ class determinism_worker_base_t : public branch_and_bound_worker_t<i_t, f_t> {
   void set_snapshots(const determinism_snapshot_t<i_t, f_t>& snap)
   {
     local_upper_bound       = snap.upper_bound;
-    pc_sum_up_snapshot      = snap.pc_sum_up;
-    pc_sum_down_snapshot    = snap.pc_sum_down;
-    pc_num_up_snapshot      = snap.pc_num_up;
-    pc_num_down_snapshot    = snap.pc_num_down;
+    pc_snapshot             = snap.pc_snapshot;
     incumbent_snapshot      = snap.incumbent;
     total_lp_iters_snapshot = snap.total_lp_iters;
-  }
-
-  // Queue pseudo-cost update and apply to local snapshot
-  void queue_pseudo_cost_update(i_t variable, rounding_direction_t direction, f_t delta)
-  {
-    pseudo_cost_updates.push_back({variable, direction, delta, clock, this->worker_id});
-    if (direction == rounding_direction_t::DOWN) {
-      pc_sum_down_snapshot[variable] += delta;
-      pc_num_down_snapshot[variable]++;
-    } else {
-      pc_sum_up_snapshot[variable] += delta;
-      pc_num_up_snapshot[variable]++;
-    }
-  }
-
-  // Basic variable selection from snapshots
-  i_t variable_selection_from_snapshot(const std::vector<i_t>& fractional,
-                                       const std::vector<f_t>& solution) const
-  {
-    return variable_selection_from_pseudo_costs(pc_sum_down_snapshot.data(),
-                                                pc_sum_up_snapshot.data(),
-                                                pc_num_down_snapshot.data(),
-                                                pc_num_up_snapshot.data(),
-                                                (i_t)pc_sum_down_snapshot.size(),
-                                                fractional,
-                                                solution);
   }
 
   bool has_work() const { return static_cast<const Derived*>(this)->has_work_impl(); }
@@ -401,14 +347,7 @@ class determinism_diving_worker_t
                                                           const std::vector<f_t>& solution) const
   {
     assert(root_solution != nullptr);
-    return pseudocost_diving_from_arrays(this->pc_sum_down_snapshot.data(),
-                                         this->pc_sum_up_snapshot.data(),
-                                         this->pc_num_down_snapshot.data(),
-                                         this->pc_num_up_snapshot.data(),
-                                         (i_t)this->pc_sum_down_snapshot.size(),
-                                         fractional,
-                                         solution,
-                                         *root_solution);
+    return this->pc_snapshot.pseudocost_diving(fractional, solution, *root_solution);
   }
 
   branch_variable_t<i_t> guided_variable_selection(const std::vector<i_t>& fractional,
@@ -417,28 +356,7 @@ class determinism_diving_worker_t
     if (this->incumbent_snapshot.empty()) {
       return variable_selection_from_snapshot(fractional, solution);
     }
-    return guided_diving_from_arrays(this->pc_sum_down_snapshot.data(),
-                                     this->pc_sum_up_snapshot.data(),
-                                     this->pc_num_down_snapshot.data(),
-                                     this->pc_num_up_snapshot.data(),
-                                     (i_t)this->pc_sum_down_snapshot.size(),
-                                     fractional,
-                                     solution,
-                                     this->incumbent_snapshot);
-  }
-
-  f_t obj_estimate_from_snapshot(const std::vector<i_t>& fractional,
-                                 const std::vector<f_t>& solution,
-                                 f_t lower_bound) const
-  {
-    return obj_estimate_from_arrays(this->pc_sum_down_snapshot.data(),
-                                    this->pc_sum_up_snapshot.data(),
-                                    this->pc_num_down_snapshot.data(),
-                                    this->pc_num_up_snapshot.data(),
-                                    (i_t)this->pc_sum_down_snapshot.size(),
-                                    fractional,
-                                    solution,
-                                    lower_bound);
+    return this->pc_snapshot.guided_diving(fractional, solution, this->incumbent_snapshot);
   }
 };
 

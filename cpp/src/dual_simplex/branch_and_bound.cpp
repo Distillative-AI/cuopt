@@ -974,7 +974,8 @@ struct determinism_policy_base_t : tree_update_policy_t<i_t, f_t> {
                    ? node->fractional_val - std::floor(node->fractional_val)
                    : std::ceil(node->fractional_val) - node->fractional_val;
     if (frac > 1e-10) {
-      worker.queue_pseudo_cost_update(node->branch_var, node->branch_dir, change / frac);
+      worker.pc_snapshot.queue_update(
+        node->branch_var, node->branch_dir, change / frac, worker.clock, worker.worker_id);
     }
   }
 
@@ -1004,7 +1005,7 @@ struct deterministic_bfs_policy_t
                                                 const std::vector<i_t>& fractional,
                                                 const std::vector<f_t>& x) override
   {
-    i_t var  = this->worker.variable_selection_from_snapshot(fractional, x);
+    i_t var  = this->worker.pc_snapshot.variable_selection(fractional, x);
     auto dir = martin_criteria(x[var], this->bnb.root_relax_soln_.x[var]);
     return {var, dir};
   }
@@ -1014,14 +1015,7 @@ struct deterministic_bfs_policy_t
                                  const std::vector<f_t>& x) override
   {
     node->objective_estimate =
-      obj_estimate_from_arrays(this->worker.pc_sum_down_snapshot.data(),
-                               this->worker.pc_sum_up_snapshot.data(),
-                               this->worker.pc_num_down_snapshot.data(),
-                               this->worker.pc_num_up_snapshot.data(),
-                               (i_t)this->worker.pc_sum_down_snapshot.size(),
-                               fractional,
-                               x,
-                               node->lower_bound);
+      this->worker.pc_snapshot.obj_estimate(fractional, x, node->lower_bound);
   }
 
   void on_node_completed(mip_node_t<i_t, f_t>* node,
@@ -2771,12 +2765,10 @@ void branch_and_bound_t<i_t, f_t>::determinism_sync_callback()
 
   for (auto& worker : *determinism_workers_) {
     worker.integer_solutions.clear();
-    worker.pseudo_cost_updates.clear();
   }
   if (determinism_diving_workers_) {
     for (auto& worker : *determinism_diving_workers_) {
       worker.integer_solutions.clear();
-      worker.pseudo_cost_updates.clear();
     }
   }
 
@@ -3065,26 +3057,11 @@ void branch_and_bound_t<i_t, f_t>::determinism_merge_pseudo_cost_updates(PoolT& 
 {
   std::vector<pseudo_cost_update_t<i_t, f_t>> all_pc_updates;
   for (auto& worker : pool) {
-    for (auto& upd : worker.pseudo_cost_updates) {
-      all_pc_updates.push_back(upd);
-    }
+    auto updates = worker.pc_snapshot.take_updates();
+    all_pc_updates.insert(all_pc_updates.end(), updates.begin(), updates.end());
   }
-
   std::sort(all_pc_updates.begin(), all_pc_updates.end());
-
-  for (const auto& upd : all_pc_updates) {
-    if (upd.direction == rounding_direction_t::DOWN) {
-      pc_.pseudo_cost_sum_down[upd.variable] += upd.delta;
-      pc_.pseudo_cost_num_down[upd.variable]++;
-    } else {
-      pc_.pseudo_cost_sum_up[upd.variable] += upd.delta;
-      pc_.pseudo_cost_num_up[upd.variable]++;
-    }
-  }
-
-  for (auto& worker : pool) {
-    worker.pseudo_cost_updates.clear();
-  }
+  pc_.merge_updates(all_pc_updates);
 }
 
 template <typename i_t, typename f_t>
@@ -3092,20 +3069,11 @@ template <typename PoolT>
 void branch_and_bound_t<i_t, f_t>::determinism_broadcast_snapshots(
   PoolT& pool, const std::vector<f_t>& incumbent_snapshot)
 {
-  const i_t n = original_lp_.num_cols;
   determinism_snapshot_t<i_t, f_t> snap;
   snap.upper_bound    = upper_bound_.load();
   snap.total_lp_iters = exploration_stats_.total_lp_iters.load();
   snap.incumbent      = incumbent_snapshot;
-  // Copy from atomic vectors once, then broadcast the snapshot to all workers
-  snap.pc_sum_up.assign((const f_t*)pc_.pseudo_cost_sum_up.data(),
-                        (const f_t*)pc_.pseudo_cost_sum_up.data() + n);
-  snap.pc_sum_down.assign((const f_t*)pc_.pseudo_cost_sum_down.data(),
-                          (const f_t*)pc_.pseudo_cost_sum_down.data() + n);
-  snap.pc_num_up.assign((const i_t*)pc_.pseudo_cost_num_up.data(),
-                        (const i_t*)pc_.pseudo_cost_num_up.data() + n);
-  snap.pc_num_down.assign((const i_t*)pc_.pseudo_cost_num_down.data(),
-                          (const i_t*)pc_.pseudo_cost_num_down.data() + n);
+  snap.pc_snapshot    = pc_.create_snapshot();
 
   for (auto& worker : pool) {
     worker.set_snapshots(snap);
