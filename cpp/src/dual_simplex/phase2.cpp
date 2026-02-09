@@ -2414,7 +2414,8 @@ dual::status_t dual_phase2(i_t phase,
                            std::vector<variable_status_t>& vstatus,
                            lp_solution_t<i_t, f_t>& sol,
                            i_t& iter,
-                           std::vector<f_t>& delta_y_steepest_edge)
+                           std::vector<f_t>& delta_y_steepest_edge,
+                           work_limit_context_t* work_unit_context)
 {
   PHASE2_NVTX_RANGE("DualSimplex::phase2");
   const i_t m = lp.num_rows;
@@ -2436,7 +2437,8 @@ dual::status_t dual_phase2(i_t phase,
                                          nonbasic_list,
                                          sol,
                                          iter,
-                                         delta_y_steepest_edge);
+                                         delta_y_steepest_edge,
+                                         work_unit_context);
 }
 
 template <typename i_t, typename f_t>
@@ -3528,7 +3530,8 @@ template dual::status_t dual_phase2<int, double>(
   std::vector<variable_status_t>& vstatus,
   lp_solution_t<int, double>& sol,
   int& iter,
-  std::vector<double>& steepest_edge_norms);
+  std::vector<double>& steepest_edge_norms,
+  work_limit_context_t* work_unit_context);
 
 template dual::status_t dual_phase2_with_advanced_basis<int, double>(
   int phase,

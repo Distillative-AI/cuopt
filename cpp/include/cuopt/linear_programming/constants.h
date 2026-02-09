@@ -59,7 +59,6 @@
 #define CUOPT_MIP_HEURISTICS_ONLY             "mip_heuristics_only"
 #define CUOPT_MIP_SCALING                     "mip_scaling"
 #define CUOPT_MIP_PRESOLVE                    "mip_presolve"
-#define CUOPT_MIP_SEED                        "mip_seed"
 #define CUOPT_MIP_RELIABILITY_BRANCHING       "mip_reliability_branching"
 #define CUOPT_MIP_CUT_PASSES                  "mip_cut_passes"
 #define CUOPT_MIP_MIXED_INTEGER_ROUNDING_CUTS "mip_mixed_integer_rounding_cuts"
@@ -74,6 +73,7 @@
 #define CUOPT_NUM_CPU_THREADS                 "num_cpu_threads"
 #define CUOPT_NUM_GPUS                        "num_gpus"
 #define CUOPT_USER_PROBLEM_FILE               "user_problem_file"
+#define CUOPT_RANDOM_SEED                     "random_seed"
 
 /* @brief MIP determinism mode constants */
 #define CUOPT_MODE_OPPORTUNISTIC 0

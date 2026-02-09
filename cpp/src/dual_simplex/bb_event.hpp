@@ -45,7 +45,7 @@ struct fathomed_payload_t {
 template <typename i_t, typename f_t>
 struct bb_event_t {
   bb_event_type_t type;
-  double wut;
+  double work_timestamp;
   int worker_id;
   i_t node_id;
   int event_sequence;
@@ -57,15 +57,19 @@ struct bb_event_t {
   } payload;
 
   bb_event_t()
-    : type(bb_event_type_t::NODE_FATHOMED), wut(0.0), worker_id(0), node_id(0), event_sequence(0)
+    : type(bb_event_type_t::NODE_FATHOMED),
+      work_timestamp(0.0),
+      worker_id(0),
+      node_id(0),
+      event_sequence(0)
   {
     payload.fathomed = {0.0};
   }
 
   bool operator<(const bb_event_t& other) const
   {
-    return std::tie(wut, worker_id, node_id, event_sequence) <
-           std::tie(other.wut, other.worker_id, other.node_id, other.event_sequence);
+    return std::tie(work_timestamp, worker_id, node_id, event_sequence) <
+           std::tie(other.work_timestamp, other.worker_id, other.node_id, other.event_sequence);
   }
 
   static bb_event_t make_branched(double work_unit_ts,
@@ -79,7 +83,7 @@ struct bb_event_t {
   {
     bb_event_t e;
     e.type             = bb_event_type_t::NODE_BRANCHED;
-    e.wut              = work_unit_ts;
+    e.work_timestamp   = work_unit_ts;
     e.worker_id        = worker;
     e.node_id          = node;
     e.payload.branched = {down_id, up_id, lower_bound, branch_var, branch_val};
@@ -90,7 +94,7 @@ struct bb_event_t {
   {
     bb_event_t e;
     e.type                     = bb_event_type_t::NODE_INTEGER;
-    e.wut                      = work_unit_ts;
+    e.work_timestamp           = work_unit_ts;
     e.worker_id                = worker;
     e.node_id                  = node;
     e.payload.integer_solution = {objective};
@@ -101,7 +105,7 @@ struct bb_event_t {
   {
     bb_event_t e;
     e.type             = bb_event_type_t::NODE_FATHOMED;
-    e.wut              = work_unit_ts;
+    e.work_timestamp   = work_unit_ts;
     e.worker_id        = worker;
     e.node_id          = node;
     e.payload.fathomed = {lower_bound};
@@ -111,20 +115,20 @@ struct bb_event_t {
   static bb_event_t make_infeasible(double work_unit_ts, int worker, i_t node)
   {
     bb_event_t e;
-    e.type      = bb_event_type_t::NODE_INFEASIBLE;
-    e.wut       = work_unit_ts;
-    e.worker_id = worker;
-    e.node_id   = node;
+    e.type           = bb_event_type_t::NODE_INFEASIBLE;
+    e.work_timestamp = work_unit_ts;
+    e.worker_id      = worker;
+    e.node_id        = node;
     return e;
   }
 
   static bb_event_t make_numerical(double work_unit_ts, int worker, i_t node)
   {
     bb_event_t e;
-    e.type      = bb_event_type_t::NODE_NUMERICAL;
-    e.wut       = work_unit_ts;
-    e.worker_id = worker;
-    e.node_id   = node;
+    e.type           = bb_event_type_t::NODE_NUMERICAL;
+    e.work_timestamp = work_unit_ts;
+    e.worker_id      = worker;
+    e.node_id        = node;
     return e;
   }
 };

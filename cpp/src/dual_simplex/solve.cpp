@@ -108,7 +108,8 @@ lp_status_t solve_linear_program_advanced(const lp_problem_t<i_t, f_t>& original
                                           const simplex_solver_settings_t<i_t, f_t>& settings,
                                           lp_solution_t<i_t, f_t>& original_solution,
                                           std::vector<variable_status_t>& vstatus,
-                                          std::vector<f_t>& edge_norms)
+                                          std::vector<f_t>& edge_norms,
+                                          work_limit_context_t* work_unit_context)
 {
   raft::common::nvtx::range scope("DualSimplex::solve_lp");
   const i_t m = original_lp.num_rows;
@@ -125,7 +126,8 @@ lp_status_t solve_linear_program_advanced(const lp_problem_t<i_t, f_t>& original
                                                   basic_list,
                                                   nonbasic_list,
                                                   vstatus,
-                                                  edge_norms);
+                                                  edge_norms,
+                                                  work_unit_context);
 }
 
 template <typename i_t, typename f_t>
@@ -138,7 +140,8 @@ lp_status_t solve_linear_program_with_advanced_basis(
   std::vector<i_t>& basic_list,
   std::vector<i_t>& nonbasic_list,
   std::vector<variable_status_t>& vstatus,
-  std::vector<f_t>& edge_norms)
+  std::vector<f_t>& edge_norms,
+  work_limit_context_t* work_unit_context)
 {
   lp_status_t lp_status = lp_status_t::UNSET;
   lp_problem_t<i_t, f_t> presolved_lp(original_lp.handle_ptr, 1, 1, 1);
@@ -203,7 +206,8 @@ lp_status_t solve_linear_program_with_advanced_basis(
                                 phase1_vstatus,
                                 phase1_solution,
                                 iter,
-                                edge_norms);
+                                edge_norms,
+                                work_unit_context);
   }
   if (phase1_status == dual::status_t::NUMERICAL ||
       phase1_status == dual::status_t::DUAL_UNBOUNDED) {
@@ -235,7 +239,8 @@ lp_status_t solve_linear_program_with_advanced_basis(
                                                             nonbasic_list,
                                                             solution,
                                                             iter,
-                                                            edge_norms);
+                                                            edge_norms,
+                                                            work_unit_context);
     if (status == dual::status_t::NUMERICAL) {
       // Became dual infeasible. Try phase 1 again
       phase1_vstatus = vstatus;
@@ -254,7 +259,8 @@ lp_status_t solve_linear_program_with_advanced_basis(
                                       nonbasic_list,
                                       phase1_solution,
                                       iter,
-                                      edge_norms);
+                                      edge_norms,
+                                      work_unit_context);
       vstatus = phase1_vstatus;
       edge_norms.clear();
       status = dual_phase2_with_advanced_basis(2,
@@ -269,7 +275,8 @@ lp_status_t solve_linear_program_with_advanced_basis(
                                                nonbasic_list,
                                                solution,
                                                iter,
-                                               edge_norms);
+                                               edge_norms,
+                                               work_unit_context);
     }
     constexpr bool primal_cleanup = false;
     if (status == dual::status_t::OPTIMAL && primal_cleanup) {
@@ -767,7 +774,8 @@ template lp_status_t solve_linear_program_advanced(
   const simplex_solver_settings_t<int, double>& settings,
   lp_solution_t<int, double>& original_solution,
   std::vector<variable_status_t>& vstatus,
-  std::vector<double>& edge_norms);
+  std::vector<double>& edge_norms,
+  work_limit_context_t* work_unit_context);
 
 template lp_status_t solve_linear_program_with_advanced_basis(
   const lp_problem_t<int, double>& original_lp,
@@ -778,7 +786,8 @@ template lp_status_t solve_linear_program_with_advanced_basis(
   std::vector<int>& basic_list,
   std::vector<int>& nonbasic_list,
   std::vector<variable_status_t>& vstatus,
-  std::vector<double>& edge_norms);
+  std::vector<double>& edge_norms,
+  work_limit_context_t* work_unit_context);
 
 template lp_status_t solve_linear_program_with_barrier(
   const user_problem_t<int, double>& user_problem,

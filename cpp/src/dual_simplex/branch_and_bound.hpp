@@ -51,13 +51,13 @@ template <typename i_t, typename f_t>
 void upper_bound_callback(f_t upper_bound);
 
 template <typename i_t, typename f_t>
-struct opportunistic_tree_update_callbacks_t;
+struct nondeterministic_policy_t;
 template <typename i_t, typename f_t, typename WorkerT>
-struct determinism_tree_update_policy_base_t;
+struct determinism_policy_base_t;
 template <typename i_t, typename f_t>
-struct determinism_bfs_tree_update_callbacks_t;
+struct deterministic_bfs_policy_t;
 template <typename i_t, typename f_t>
-struct determinism_diving_tree_update_callbacks_t;
+struct deterministic_diving_policy_t;
 
 template <typename i_t, typename f_t>
 class branch_and_bound_t {
@@ -219,7 +219,12 @@ class branch_and_bound_t {
   std::function<void(f_t)> user_bound_callback_;
 
   void report_heuristic(f_t obj);
-  void report(char symbol, f_t obj, f_t lower_bound, i_t node_depth, i_t node_int_infeas);
+  void report(char symbol,
+              f_t obj,
+              f_t lower_bound,
+              i_t node_depth,
+              i_t node_int_infeas,
+              double work_time = -1);
 
   // Set the solution when found at the root node
   void set_solution_at_root(mip_solution_t<i_t, f_t>& solution,
@@ -325,7 +330,7 @@ class branch_and_bound_t {
   void determinism_assign_diving_nodes();
 
   // Collect and merge diving solutions at sync
-  void determinism_collect_diving_solutions();
+  void determistic_collect_diving_solutions_and_update_psuedocosts();
 
   template <typename PoolT, typename WorkerTypeGetter>
   void determinism_process_worker_solutions(PoolT& pool, WorkerTypeGetter get_worker_type);
@@ -334,14 +339,11 @@ class branch_and_bound_t {
   void determinism_merge_pseudo_cost_updates(PoolT& pool);
 
   template <typename PoolT>
-  void determinism_broadcast_snapshots(PoolT& pool,
-                                       const std::vector<f_t>& incumbent_snapshot,
-                                       double horizon_start,
-                                       double horizon_end);
+  void determinism_broadcast_snapshots(PoolT& pool, const std::vector<f_t>& incumbent_snapshot);
 
-  friend struct opportunistic_tree_update_callbacks_t<i_t, f_t>;
-  friend struct determinism_bfs_tree_update_callbacks_t<i_t, f_t>;
-  friend struct determinism_diving_tree_update_callbacks_t<i_t, f_t>;
+  friend struct nondeterministic_policy_t<i_t, f_t>;
+  friend struct deterministic_bfs_policy_t<i_t, f_t>;
+  friend struct deterministic_diving_policy_t<i_t, f_t>;
 
  private:
   // unique_ptr as we only want to initialize these if we're in the determinism codepath
@@ -364,13 +366,8 @@ class branch_and_bound_t {
 
   // Determinism heuristic solution queue - solutions received from GPU heuristics
   // Stored with work unit timestamp for deterministic ordering
-  struct queued_heuristic_solution_t {
-    std::vector<f_t> solution;
-    f_t objective;
-    double wut;
-  };
   omp_mutex_t mutex_heuristic_queue_;
-  std::vector<queued_heuristic_solution_t> heuristic_solution_queue_;
+  std::vector<queued_integer_solution_t<i_t, f_t>> heuristic_solution_queue_;
 
   // ============================================================================
   // Determinism Diving state

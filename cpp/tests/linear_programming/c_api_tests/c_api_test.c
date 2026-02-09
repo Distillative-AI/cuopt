@@ -1517,7 +1517,7 @@ cuopt_int_t test_deterministic_bb(const char* filename,
     cuopt_float_t objective;
     cuopt_int_t termination_status;
 
-    status = cuOptSetIntegerParameter(settings, CUOPT_MIP_SEED, seed);
+    status = cuOptSetIntegerParameter(settings, CUOPT_RANDOM_SEED, seed);
     if (status != CUOPT_SUCCESS) {
       printf("Error setting seed: %d\n", status);
       goto DONE;

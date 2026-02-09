@@ -41,12 +41,12 @@ struct pseudo_cost_update_t {
   i_t variable;
   rounding_direction_t direction;
   f_t delta;
-  double wut;
+  double work_timestamp;
   int worker_id;
 
   bool operator<(const pseudo_cost_update_t& other) const
   {
-    if (wut != other.wut) return wut < other.wut;
+    if (work_timestamp != other.work_timestamp) return work_timestamp < other.work_timestamp;
     if (variable != other.variable) return variable < other.variable;
     if (delta != other.delta) return delta < other.delta;
     return worker_id < other.worker_id;
@@ -57,9 +57,10 @@ template <typename i_t, typename f_t>
 struct queued_integer_solution_t {
   f_t objective;
   std::vector<f_t> solution;
-  i_t depth;
-  int worker_id;
-  int sequence_id;
+  i_t depth{0};
+  int worker_id{-1};
+  int sequence_id{0};
+  double work_timestamp{0.0};
 
   bool operator<(const queued_integer_solution_t& other) const
   {
@@ -69,14 +70,23 @@ struct queued_integer_solution_t {
   }
 };
 
+template <typename i_t, typename f_t>
+struct determinism_snapshot_t {
+  f_t upper_bound;
+  std::vector<f_t> pc_sum_up;
+  std::vector<f_t> pc_sum_down;
+  std::vector<i_t> pc_num_up;
+  std::vector<i_t> pc_num_down;
+  std::vector<f_t> incumbent;
+  i_t total_lp_iters;
+};
+
 template <typename i_t, typename f_t, typename Derived>
 class determinism_worker_base_t : public branch_and_bound_worker_t<i_t, f_t> {
   using base_t = branch_and_bound_worker_t<i_t, f_t>;
 
  public:
   double clock{0.0};
-  double horizon_start{0.0};
-  double horizon_end{0.0};
   work_limit_context_t work_context;
 
   // Local snapshots of global state
@@ -110,26 +120,15 @@ class determinism_worker_base_t : public branch_and_bound_worker_t<i_t, f_t> {
     work_context.deterministic = true;
   }
 
-  void set_snapshots(f_t global_upper_bound,
-                     const f_t* pc_sum_up,
-                     const f_t* pc_sum_down,
-                     const i_t* pc_num_up,
-                     const i_t* pc_num_down,
-                     const std::vector<f_t>& incumbent,
-                     i_t total_lp_iters,
-                     double new_horizon_start,
-                     double new_horizon_end)
+  void set_snapshots(const determinism_snapshot_t<i_t, f_t>& snap)
   {
-    const i_t n       = this->leaf_problem.num_cols;
-    local_upper_bound = global_upper_bound;
-    pc_sum_up_snapshot.assign(pc_sum_up, pc_sum_up + n);
-    pc_sum_down_snapshot.assign(pc_sum_down, pc_sum_down + n);
-    pc_num_up_snapshot.assign(pc_num_up, pc_num_up + n);
-    pc_num_down_snapshot.assign(pc_num_down, pc_num_down + n);
-    incumbent_snapshot      = incumbent;
-    total_lp_iters_snapshot = total_lp_iters;
-    horizon_start           = new_horizon_start;
-    horizon_end             = new_horizon_end;
+    local_upper_bound       = snap.upper_bound;
+    pc_sum_up_snapshot      = snap.pc_sum_up;
+    pc_sum_down_snapshot    = snap.pc_sum_down;
+    pc_num_up_snapshot      = snap.pc_num_up;
+    pc_num_down_snapshot    = snap.pc_num_down;
+    incumbent_snapshot      = snap.incumbent;
+    total_lp_iters_snapshot = snap.total_lp_iters;
   }
 
   // Queue pseudo-cost update and apply to local snapshot

@@ -39,8 +39,6 @@
 #include <unordered_map>
 #include <vector>
 
-// #define DETERMINISM_DISABLE_BOUNDS_STRENGTHENING
-
 namespace cuopt::linear_programming::dual_simplex {
 
 namespace {
@@ -326,7 +324,7 @@ void branch_and_bound_t<i_t, f_t>::report_heuristic(f_t obj)
 
 template <typename i_t, typename f_t>
 void branch_and_bound_t<i_t, f_t>::report(
-  char symbol, f_t obj, f_t lower_bound, i_t node_depth, i_t node_int_infeas)
+  char symbol, f_t obj, f_t lower_bound, i_t node_depth, i_t node_int_infeas, double work_time)
 {
   update_user_bound(lower_bound);
   const i_t nodes_explored   = exploration_stats_.nodes_explored;
@@ -336,17 +334,33 @@ void branch_and_bound_t<i_t, f_t>::report(
   const f_t iters            = static_cast<f_t>(exploration_stats_.total_lp_iters);
   const f_t iter_node        = nodes_explored > 0 ? iters / nodes_explored : iters;
   const std::string user_gap = user_mip_gap<f_t>(user_obj, user_lower);
-  settings_.log.printf("%c %10d   %10lu    %+13.6e    %+10.6e   %6d %6d   %7.1e     %s %9.2f\n",
-                       symbol,
-                       nodes_explored,
-                       nodes_unexplored,
-                       user_obj,
-                       user_lower,
-                       node_int_infeas,
-                       node_depth,
-                       iter_node,
-                       user_gap.c_str(),
-                       toc(exploration_stats_.start_time));
+  if (work_time >= 0) {
+    settings_.log.printf(
+      "%c %10d   %10lu    %+13.6e    %+10.6e   %6d %6d   %7.1e     %s %9.2f %9.2f\n",
+      symbol,
+      nodes_explored,
+      nodes_unexplored,
+      user_obj,
+      user_lower,
+      node_int_infeas,
+      node_depth,
+      iter_node,
+      user_gap.c_str(),
+      toc(exploration_stats_.start_time),
+      work_time);
+  } else {
+    settings_.log.printf("%c %10d   %10lu    %+13.6e    %+10.6e   %6d %6d   %7.1e     %s %9.2f\n",
+                         symbol,
+                         nodes_explored,
+                         nodes_unexplored,
+                         user_obj,
+                         user_lower,
+                         node_int_infeas,
+                         node_depth,
+                         iter_node,
+                         user_gap.c_str(),
+                         toc(exploration_stats_.start_time));
+  }
 }
 
 template <typename i_t, typename f_t>
@@ -515,7 +529,7 @@ void branch_and_bound_t<i_t, f_t>::queue_external_solution_deterministic(
 
   // Queue the solution with its work unit timestamp
   mutex_heuristic_queue_.lock();
-  heuristic_solution_queue_.push_back({std::move(crushed_solution), obj, work_unit_ts});
+  heuristic_solution_queue_.push_back({obj, std::move(crushed_solution), 0, -1, 0, work_unit_ts});
   mutex_heuristic_queue_.unlock();
 }
 
@@ -840,34 +854,67 @@ branch_variable_t<i_t> branch_and_bound_t<i_t, f_t>::variable_selection(
 // These allow sharing the tree update logic between the default and deterministic codepaths
 // ============================================================================
 
+// Compiler is able to devirtualize the policy objects in update_tree_impl.
+// This is for self-documenting purposes
 template <typename i_t, typename f_t>
-struct opportunistic_tree_update_callbacks_t {
+struct tree_update_policy_t {
+  virtual ~tree_update_policy_t()                                                  = default;
+  virtual f_t upper_bound() const                                                  = 0;
+  virtual void update_pseudo_costs(mip_node_t<i_t, f_t>* node, f_t obj)            = 0;
+  virtual void handle_integer_solution(mip_node_t<i_t, f_t>* node,
+                                       f_t obj,
+                                       const std::vector<f_t>& x)                  = 0;
+  virtual branch_variable_t<i_t> select_branch_variable(mip_node_t<i_t, f_t>* node,
+                                                        const std::vector<i_t>& fractional,
+                                                        const std::vector<f_t>& x) = 0;
+  virtual void update_objective_estimate(mip_node_t<i_t, f_t>* node,
+                                         const std::vector<i_t>& fractional,
+                                         const std::vector<f_t>& x)                = 0;
+  virtual void on_node_completed(mip_node_t<i_t, f_t>* node,
+                                 node_status_t status,
+                                 rounding_direction_t dir)                         = 0;
+  virtual void on_numerical_issue(mip_node_t<i_t, f_t>*)                           = 0;
+  virtual void graphviz(search_tree_t<i_t, f_t>&, mip_node_t<i_t, f_t>*, const char*, f_t) = 0;
+  virtual void on_optimal_callback(const std::vector<f_t>&, f_t)                           = 0;
+};
+
+template <typename i_t, typename f_t>
+struct nondeterministic_policy_t : tree_update_policy_t<i_t, f_t> {
   branch_and_bound_t<i_t, f_t>& bnb;
   branch_and_bound_worker_t<i_t, f_t>* worker;
   logger_t& log;
 
-  f_t upper_bound() const { return bnb.upper_bound_.load(); }
+  nondeterministic_policy_t(branch_and_bound_t<i_t, f_t>& bnb,
+                            branch_and_bound_worker_t<i_t, f_t>* worker,
+                            logger_t& log)
+    : bnb(bnb), worker(worker), log(log)
+  {
+  }
 
-  void update_pseudo_costs(mip_node_t<i_t, f_t>* node, f_t leaf_obj)
+  f_t upper_bound() const override { return bnb.upper_bound_.load(); }
+
+  void update_pseudo_costs(mip_node_t<i_t, f_t>* node, f_t leaf_obj) override
   {
     bnb.pc_.update_pseudo_costs(node, leaf_obj);
   }
 
-  void handle_integer_solution(mip_node_t<i_t, f_t>* node, f_t obj, const std::vector<f_t>& x)
+  void handle_integer_solution(mip_node_t<i_t, f_t>* node,
+                               f_t obj,
+                               const std::vector<f_t>& x) override
   {
     bnb.add_feasible_solution(obj, x, node->depth, worker->search_strategy);
   }
 
   branch_variable_t<i_t> select_branch_variable(mip_node_t<i_t, f_t>* node,
                                                 const std::vector<i_t>& fractional,
-                                                const std::vector<f_t>&)
+                                                const std::vector<f_t>&) override
   {
     return bnb.variable_selection(node, fractional, worker);
   }
 
   void update_objective_estimate(mip_node_t<i_t, f_t>* node,
                                  const std::vector<i_t>& fractional,
-                                 const std::vector<f_t>& x)
+                                 const std::vector<f_t>& x) override
   {
     if (worker->search_strategy == search_strategy_t::BEST_FIRST) {
       logger_t pc_log;
@@ -876,7 +923,7 @@ struct opportunistic_tree_update_callbacks_t {
     }
   }
 
-  void on_numerical_issue(mip_node_t<i_t, f_t>* node)
+  void on_numerical_issue(mip_node_t<i_t, f_t>* node) override
   {
     if (worker->search_strategy == search_strategy_t::BEST_FIRST) {
       fetch_min(bnb.lower_bound_ceiling_, node->lower_bound);
@@ -889,12 +936,12 @@ struct opportunistic_tree_update_callbacks_t {
   void graphviz(search_tree_t<i_t, f_t>& tree,
                 mip_node_t<i_t, f_t>* node,
                 const char* label,
-                f_t value)
+                f_t value) override
   {
     tree.graphviz_node(log, node, label, value);
   }
 
-  void on_optimal_callback(const std::vector<f_t>& x, f_t objective)
+  void on_optimal_callback(const std::vector<f_t>& x, f_t objective) override
   {
     if (worker->search_strategy == search_strategy_t::BEST_FIRST &&
         bnb.settings_.node_processed_callback != nullptr) {
@@ -904,17 +951,22 @@ struct opportunistic_tree_update_callbacks_t {
     }
   }
 
-  void on_node_completed(mip_node_t<i_t, f_t>*, node_status_t, rounding_direction_t) {}
+  void on_node_completed(mip_node_t<i_t, f_t>*, node_status_t, rounding_direction_t) override {}
 };
 
 template <typename i_t, typename f_t, typename WorkerT>
-struct determinism_tree_update_policy_base_t {
+struct determinism_policy_base_t : tree_update_policy_t<i_t, f_t> {
   branch_and_bound_t<i_t, f_t>& bnb;
   WorkerT& worker;
 
-  f_t upper_bound() const { return worker.local_upper_bound; }
+  determinism_policy_base_t(branch_and_bound_t<i_t, f_t>& bnb, WorkerT& worker)
+    : bnb(bnb), worker(worker)
+  {
+  }
 
-  void update_pseudo_costs(mip_node_t<i_t, f_t>* node, f_t leaf_obj)
+  f_t upper_bound() const override { return worker.local_upper_bound; }
+
+  void update_pseudo_costs(mip_node_t<i_t, f_t>* node, f_t leaf_obj) override
   {
     if (node->branch_var < 0) return;
     f_t change = std::max(leaf_obj - node->lower_bound, f_t(0));
@@ -926,15 +978,20 @@ struct determinism_tree_update_policy_base_t {
     }
   }
 
-  void on_numerical_issue(mip_node_t<i_t, f_t>*) {}
-  void graphviz(search_tree_t<i_t, f_t>&, mip_node_t<i_t, f_t>*, const char*, f_t) {}
-  void on_optimal_callback(const std::vector<f_t>&, f_t) {}
+  void on_numerical_issue(mip_node_t<i_t, f_t>*) override {}
+  void graphviz(search_tree_t<i_t, f_t>&, mip_node_t<i_t, f_t>*, const char*, f_t) override {}
+  void on_optimal_callback(const std::vector<f_t>&, f_t) override {}
 };
 
 template <typename i_t, typename f_t>
-struct determinism_bfs_tree_update_callbacks_t
-  : determinism_tree_update_policy_base_t<i_t, f_t, determinism_bfs_worker_t<i_t, f_t>> {
-  void handle_integer_solution(mip_node_t<i_t, f_t>* node, f_t obj, const std::vector<f_t>& x)
+struct deterministic_bfs_policy_t
+  : determinism_policy_base_t<i_t, f_t, determinism_bfs_worker_t<i_t, f_t>> {
+  using base = determinism_policy_base_t<i_t, f_t, determinism_bfs_worker_t<i_t, f_t>>;
+  using base::base;
+
+  void handle_integer_solution(mip_node_t<i_t, f_t>* node,
+                               f_t obj,
+                               const std::vector<f_t>& x) override
   {
     if (obj < this->worker.local_upper_bound) {
       this->worker.local_upper_bound = obj;
@@ -945,7 +1002,7 @@ struct determinism_bfs_tree_update_callbacks_t
 
   branch_variable_t<i_t> select_branch_variable(mip_node_t<i_t, f_t>*,
                                                 const std::vector<i_t>& fractional,
-                                                const std::vector<f_t>& x)
+                                                const std::vector<f_t>& x) override
   {
     i_t var  = this->worker.variable_selection_from_snapshot(fractional, x);
     auto dir = martin_criteria(x[var], this->bnb.root_relax_soln_.x[var]);
@@ -954,7 +1011,7 @@ struct determinism_bfs_tree_update_callbacks_t
 
   void update_objective_estimate(mip_node_t<i_t, f_t>* node,
                                  const std::vector<i_t>& fractional,
-                                 const std::vector<f_t>& x)
+                                 const std::vector<f_t>& x) override
   {
     node->objective_estimate =
       obj_estimate_from_arrays(this->worker.pc_sum_down_snapshot.data(),
@@ -967,7 +1024,9 @@ struct determinism_bfs_tree_update_callbacks_t
                                node->lower_bound);
   }
 
-  void on_node_completed(mip_node_t<i_t, f_t>* node, node_status_t status, rounding_direction_t dir)
+  void on_node_completed(mip_node_t<i_t, f_t>* node,
+                         node_status_t status,
+                         rounding_direction_t dir) override
   {
     switch (status) {
       case node_status_t::INFEASIBLE: this->worker.record_infeasible(node); break;
@@ -990,7 +1049,7 @@ struct determinism_bfs_tree_update_callbacks_t
     if (status != node_status_t::HAS_CHILDREN) { this->worker.recompute_bounds_and_basis = true; }
   }
 
-  void on_numerical_issue(mip_node_t<i_t, f_t>* node)
+  void on_numerical_issue(mip_node_t<i_t, f_t>* node) override
   {
     this->worker.local_lower_bound_ceiling =
       std::min<f_t>(node->lower_bound, this->worker.local_lower_bound_ceiling);
@@ -998,12 +1057,24 @@ struct determinism_bfs_tree_update_callbacks_t
 };
 
 template <typename i_t, typename f_t>
-struct determinism_diving_tree_update_callbacks_t
-  : determinism_tree_update_policy_base_t<i_t, f_t, determinism_diving_worker_t<i_t, f_t>> {
+struct deterministic_diving_policy_t
+  : determinism_policy_base_t<i_t, f_t, determinism_diving_worker_t<i_t, f_t>> {
+  using base = determinism_policy_base_t<i_t, f_t, determinism_diving_worker_t<i_t, f_t>>;
+
   std::deque<mip_node_t<i_t, f_t>*>& stack;
   i_t max_backtrack_depth;
 
-  void handle_integer_solution(mip_node_t<i_t, f_t>* node, f_t obj, const std::vector<f_t>& x)
+  deterministic_diving_policy_t(branch_and_bound_t<i_t, f_t>& bnb,
+                                determinism_diving_worker_t<i_t, f_t>& worker,
+                                std::deque<mip_node_t<i_t, f_t>*>& stack,
+                                i_t max_backtrack_depth)
+    : base(bnb, worker), stack(stack), max_backtrack_depth(max_backtrack_depth)
+  {
+  }
+
+  void handle_integer_solution(mip_node_t<i_t, f_t>* node,
+                               f_t obj,
+                               const std::vector<f_t>& x) override
   {
     if (obj < this->worker.local_upper_bound) {
       this->worker.local_upper_bound = obj;
@@ -1013,7 +1084,7 @@ struct determinism_diving_tree_update_callbacks_t
 
   branch_variable_t<i_t> select_branch_variable(mip_node_t<i_t, f_t>*,
                                                 const std::vector<i_t>& fractional,
-                                                const std::vector<f_t>& x)
+                                                const std::vector<f_t>& x) override
   {
     switch (this->worker.diving_type) {
       case search_strategy_t::PSEUDOCOST_DIVING:
@@ -1047,11 +1118,13 @@ struct determinism_diving_tree_update_callbacks_t
 
   void update_objective_estimate(mip_node_t<i_t, f_t>* node,
                                  const std::vector<i_t>& fractional,
-                                 const std::vector<f_t>& x)
+                                 const std::vector<f_t>& x) override
   {
   }
 
-  void on_node_completed(mip_node_t<i_t, f_t>* node, node_status_t status, rounding_direction_t dir)
+  void on_node_completed(mip_node_t<i_t, f_t>* node,
+                         node_status_t status,
+                         rounding_direction_t dir) override
   {
     if (status == node_status_t::HAS_CHILDREN) {
       if (dir == rounding_direction_t::UP) {
@@ -1187,7 +1260,7 @@ std::pair<node_status_t, rounding_direction_t> branch_and_bound_t<i_t, f_t>::upd
   dual::status_t lp_status,
   logger_t& log)
 {
-  opportunistic_tree_update_callbacks_t<i_t, f_t> policy{*this, worker, log};
+  nondeterministic_policy_t<i_t, f_t> policy{*this, worker, log};
   return update_tree_impl(node_ptr, search_tree, worker, lp_status, policy);
 }
 
@@ -1728,7 +1801,8 @@ lp_status_t branch_and_bound_t<i_t, f_t>::solve_root_relaxation(
                                   std::ref(basic_list),
                                   std::ref(nonbasic_list),
                                   std::ref(root_vstatus),
-                                  std::ref(edge_norms));
+                                  std::ref(edge_norms),
+                                  nullptr);
   // Wait for the root relaxation solution to be sent by the diversity manager or dual simplex
   // to finish
   while (!root_crossover_solution_set_.load(std::memory_order_acquire) &&
@@ -2359,6 +2433,15 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
   if (settings_.diving_settings.coefficient_diving != 0) {
     calculate_variable_locks(original_lp_, var_up_locks_, var_down_locks_);
   }
+  if (settings_.deterministic) {
+    settings_.log.printf(
+      " | Explored | Unexplored |    Objective    |     Bound     | IntInf | Depth | Iter/Node "
+      "|   Gap    |  Time  |  Work |\n");
+  } else {
+    settings_.log.printf(
+      " | Explored | Unexplored |    Objective    |     Bound     | IntInf | Depth | Iter/Node "
+      "|   Gap    |  Time  |\n");
+  }
 
   if (settings_.deterministic) {
     run_determinism_coordinator(Arow_);
@@ -2377,10 +2460,7 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
   // Compute final lower bound
   f_t lower_bound;
   if (determinism_mode_enabled_) {
-    lower_bound = determinism_compute_lower_bound();
-    if (lower_bound == std::numeric_limits<f_t>::infinity() && incumbent_.has_incumbent) {
-      lower_bound = upper_bound_.load();
-    }
+    lower_bound    = determinism_compute_lower_bound();
     solver_status_ = determinism_global_termination_status_;
   } else {
     lower_bound = node_queue_.best_first_queue_size() > 0 ? node_queue_.get_lower_bound()
@@ -2535,11 +2615,9 @@ void branch_and_bound_t<i_t, f_t>::run_determinism_coordinator(const csr_matrix_
   std::vector<f_t> incumbent_snapshot;
   if (incumbent_.has_incumbent) { incumbent_snapshot = incumbent_.x; }
 
-  determinism_broadcast_snapshots(
-    *determinism_workers_, incumbent_snapshot, 0.0, determinism_horizon_step_);
+  determinism_broadcast_snapshots(*determinism_workers_, incumbent_snapshot);
   if (determinism_diving_workers_) {
-    determinism_broadcast_snapshots(
-      *determinism_diving_workers_, incumbent_snapshot, 0.0, determinism_horizon_step_);
+    determinism_broadcast_snapshots(*determinism_diving_workers_, incumbent_snapshot);
   }
 
   const int total_thread_count = num_bfs_workers + num_diving_workers;
@@ -2689,7 +2767,7 @@ void branch_and_bound_t<i_t, f_t>::determinism_sync_callback()
 
   determinism_prune_worker_nodes_vs_incumbent();
 
-  determinism_collect_diving_solutions();
+  determistic_collect_diving_solutions_and_update_psuedocosts();
 
   for (auto& worker : *determinism_workers_) {
     worker.integer_solutions.clear();
@@ -2747,11 +2825,9 @@ void branch_and_bound_t<i_t, f_t>::determinism_sync_callback()
   std::vector<f_t> incumbent_snapshot;
   if (incumbent_.has_incumbent) { incumbent_snapshot = incumbent_.x; }
 
-  determinism_broadcast_snapshots(
-    *determinism_workers_, incumbent_snapshot, horizon_end, determinism_current_horizon_);
+  determinism_broadcast_snapshots(*determinism_workers_, incumbent_snapshot);
   if (determinism_diving_workers_) {
-    determinism_broadcast_snapshots(
-      *determinism_diving_workers_, incumbent_snapshot, horizon_end, determinism_current_horizon_);
+    determinism_broadcast_snapshots(*determinism_diving_workers_, incumbent_snapshot);
   }
 
   f_t lower_bound = determinism_compute_lower_bound();
@@ -2786,6 +2862,13 @@ void branch_and_bound_t<i_t, f_t>::determinism_sync_callback()
     determinism_scheduler_->signal_shutdown();
   }
 
+  f_t time_since_last_log =
+    exploration_stats_.last_log == 0 ? 1.0 : toc(exploration_stats_.last_log);
+  if (time_since_last_log >= 1) {
+    report(' ', upper_bound, lower_bound, 0, 0, determinism_current_horizon_);
+    exploration_stats_.last_log = tic();
+  }
+
   f_t obj              = compute_user_objective(original_lp_, upper_bound);
   f_t user_lower       = compute_user_objective(original_lp_, lower_bound);
   std::string gap_user = user_mip_gap<f_t>(obj, user_lower);
@@ -2793,14 +2876,11 @@ void branch_and_bound_t<i_t, f_t>::determinism_sync_callback()
   std::string idle_workers;
   i_t idle_count = 0;
   for (const auto& w : *determinism_workers_) {
-    if (!w.has_work() && w.current_node == nullptr) {
-      ++idle_count;
-      // if (!idle_workers.empty()) idle_workers += ",";
-      // idle_workers += "W" + std::to_string(w.worker_id);
-    }
+    if (!w.has_work() && w.current_node == nullptr) { ++idle_count; }
   }
   idle_workers = idle_count > 0 ? std::to_string(idle_count) + " idle" : "";
 
+#ifdef DETERMINISM_LOG_SYNCS
   settings_.log.printf("W%-5g %8d   %8lu    %+13.6e    %+10.6e    %s %8.2f  [%08x]%s%s\n",
                        determinism_current_horizon_,
                        exploration_stats_.nodes_explored,
@@ -2812,6 +2892,7 @@ void branch_and_bound_t<i_t, f_t>::determinism_sync_callback()
                        state_hash,
                        idle_workers.empty() ? "" : " ",
                        idle_workers.c_str());
+#endif
 }
 
 template <typename i_t, typename f_t>
@@ -2901,7 +2982,8 @@ node_status_t branch_and_bound_t<i_t, f_t>::solve_node_deterministic(
                                                                          worker.basic_list,
                                                                          worker.nonbasic_list,
                                                                          leaf_vstatus,
-                                                                         leaf_edge_norms);
+                                                                         leaf_edge_norms,
+                                                                         &worker.work_context);
     lp_status                 = convert_lp_status_to_dual_status(second_status);
   }
 
@@ -2913,7 +2995,7 @@ node_status_t branch_and_bound_t<i_t, f_t>::solve_node_deterministic(
   ++exploration_stats_.nodes_explored;
   --exploration_stats_.nodes_unexplored;
 
-  determinism_bfs_tree_update_callbacks_t<i_t, f_t> policy{*this, worker};
+  deterministic_bfs_policy_t<i_t, f_t> policy{*this, worker};
   auto [status, round_dir] = update_tree_impl(node_ptr, search_tree, &worker, lp_status, policy);
 
   return status;
@@ -2931,6 +3013,8 @@ void branch_and_bound_t<i_t, f_t>::determinism_process_worker_solutions(
     }
   }
 
+  // relies on queued_integer_solution_t's operator<
+  // sorts based on objective first, then the <worker_id, seq_id> tuple
   std::sort(all_solutions.begin(),
             all_solutions.end(),
             [](const queued_integer_solution_t<i_t, f_t>* a,
@@ -2947,8 +3031,12 @@ void branch_and_bound_t<i_t, f_t>::determinism_process_worker_solutions(
       i_t nodes_unexplored = exploration_stats_.nodes_unexplored.load();
 
       search_strategy_t worker_type = get_worker_type(pool, sol->worker_id);
-      report(
-        feasible_solution_symbol(worker_type), sol->objective, determinism_lower, sol->depth, 0);
+      report(feasible_solution_symbol(worker_type),
+             sol->objective,
+             determinism_lower,
+             sol->depth,
+             0,
+             determinism_current_horizon_);
 
       bool improved = false;
       if (sol->objective < upper_bound_) {
@@ -3002,18 +3090,25 @@ void branch_and_bound_t<i_t, f_t>::determinism_merge_pseudo_cost_updates(PoolT& 
 template <typename i_t, typename f_t>
 template <typename PoolT>
 void branch_and_bound_t<i_t, f_t>::determinism_broadcast_snapshots(
-  PoolT& pool, const std::vector<f_t>& incumbent_snapshot, double horizon_start, double horizon_end)
+  PoolT& pool, const std::vector<f_t>& incumbent_snapshot)
 {
+  const i_t n = original_lp_.num_cols;
+  determinism_snapshot_t<i_t, f_t> snap;
+  snap.upper_bound    = upper_bound_.load();
+  snap.total_lp_iters = exploration_stats_.total_lp_iters.load();
+  snap.incumbent      = incumbent_snapshot;
+  // Copy from atomic vectors once, then broadcast the snapshot to all workers
+  snap.pc_sum_up.assign((const f_t*)pc_.pseudo_cost_sum_up.data(),
+                        (const f_t*)pc_.pseudo_cost_sum_up.data() + n);
+  snap.pc_sum_down.assign((const f_t*)pc_.pseudo_cost_sum_down.data(),
+                          (const f_t*)pc_.pseudo_cost_sum_down.data() + n);
+  snap.pc_num_up.assign((const i_t*)pc_.pseudo_cost_num_up.data(),
+                        (const i_t*)pc_.pseudo_cost_num_up.data() + n);
+  snap.pc_num_down.assign((const i_t*)pc_.pseudo_cost_num_down.data(),
+                          (const i_t*)pc_.pseudo_cost_num_down.data() + n);
+
   for (auto& worker : pool) {
-    worker.set_snapshots(upper_bound_.load(),
-                         (const f_t*)pc_.pseudo_cost_sum_up.data(),
-                         (const f_t*)pc_.pseudo_cost_sum_down.data(),
-                         (const i_t*)pc_.pseudo_cost_num_up.data(),
-                         (const i_t*)pc_.pseudo_cost_num_down.data(),
-                         incumbent_snapshot,
-                         exploration_stats_.total_lp_iters.load(),
-                         horizon_start,
-                         horizon_end);
+    worker.set_snapshots(snap);
   }
 }
 
@@ -3048,7 +3143,7 @@ void branch_and_bound_t<i_t, f_t>::determinism_sort_replay_events(
           // Queue repaired solution with work unit timestamp (...workstamp?)
           mutex_heuristic_queue_.lock();
           heuristic_solution_queue_.push_back(
-            {std::move(repaired_solution), repaired_obj, determinism_current_horizon_});
+            {repaired_obj, std::move(repaired_solution), 0, -1, 0, determinism_current_horizon_});
           mutex_heuristic_queue_.unlock();
         }
       }
@@ -3057,12 +3152,12 @@ void branch_and_bound_t<i_t, f_t>::determinism_sort_replay_events(
 
   // Extract heuristic solutions, keeping future solutions for next horizon
   // Use determinism_current_horizon_ as the upper bound (horizon_end)
-  std::vector<queued_heuristic_solution_t> heuristic_solutions;
+  std::vector<queued_integer_solution_t<i_t, f_t>> heuristic_solutions;
   mutex_heuristic_queue_.lock();
   {
-    std::vector<queued_heuristic_solution_t> future_solutions;
+    std::vector<queued_integer_solution_t<i_t, f_t>> future_solutions;
     for (auto& sol : heuristic_solution_queue_) {
-      if (sol.wut < determinism_current_horizon_) {
+      if (sol.work_timestamp < determinism_current_horizon_) {
         heuristic_solutions.push_back(std::move(sol));
       } else {
         future_solutions.push_back(std::move(sol));
@@ -3073,13 +3168,14 @@ void branch_and_bound_t<i_t, f_t>::determinism_sort_replay_events(
   mutex_heuristic_queue_.unlock();
 
   // sort by work unit timestamp, with objective and solution values as tie-breakers
-  std::sort(heuristic_solutions.begin(),
-            heuristic_solutions.end(),
-            [](const queued_heuristic_solution_t& a, const queued_heuristic_solution_t& b) {
-              if (a.wut != b.wut) { return a.wut < b.wut; }
-              if (a.objective != b.objective) { return a.objective < b.objective; }
-              return a.solution < b.solution;  // edge-case - lexicographical comparison
-            });
+  std::sort(
+    heuristic_solutions.begin(),
+    heuristic_solutions.end(),
+    [](const queued_integer_solution_t<i_t, f_t>& a, const queued_integer_solution_t<i_t, f_t>& b) {
+      if (a.work_timestamp != b.work_timestamp) { return a.work_timestamp < b.work_timestamp; }
+      if (a.objective != b.objective) { return a.objective < b.objective; }
+      return a.solution < b.solution;  // edge-case - lexicographical comparison
+    });
 
   // Merge B&B events and heuristic solutions for unified timeline replay
   size_t event_idx     = 0;
@@ -3095,7 +3191,8 @@ void branch_and_bound_t<i_t, f_t>::determinism_sort_replay_events(
       process_event = true;
     } else {
       // Both have items - pick the one with smaller WUT
-      if (events.events[event_idx].wut <= heuristic_solutions[heuristic_idx].wut) {
+      if (events.events[event_idx].work_timestamp <=
+          heuristic_solutions[heuristic_idx].work_timestamp) {
         process_event = true;
       } else {
         process_heuristic = true;
@@ -3119,7 +3216,7 @@ void branch_and_bound_t<i_t, f_t>::determinism_sort_replay_events(
       CUOPT_LOG_TRACE(
         "Deterministic sync: Heuristic solution received at WUT %f with objective %g, current "
         "horizon %f",
-        hsol.wut,
+        hsol.work_timestamp,
         hsol.objective,
         determinism_current_horizon_);
 
@@ -3247,15 +3344,9 @@ void branch_and_bound_t<i_t, f_t>::determinism_balance_worker_loads()
   };
   std::sort(all_nodes.begin(), all_nodes.end(), deterministic_less);
 
-  // Redistribute round-robin
-  std::vector<size_t> worker_order;
-  for (size_t w = 0; w < num_workers; ++w) {
-    worker_order.push_back(w);
-  }
-
   // Distribute nodes
   for (size_t i = 0; i < all_nodes.size(); ++i) {
-    size_t worker_idx = worker_order[i % num_workers];
+    size_t worker_idx = i % num_workers;
     (*determinism_workers_)[worker_idx].enqueue_node(all_nodes[i]);
   }
 }
@@ -3264,9 +3355,7 @@ template <typename i_t, typename f_t>
 f_t branch_and_bound_t<i_t, f_t>::determinism_compute_lower_bound()
 {
   // Compute lower bound from BFS worker local structures only
-  const f_t inf   = std::numeric_limits<f_t>::infinity();
   f_t lower_bound = lower_bound_ceiling_.load();
-  if (!std::isfinite(lower_bound)) lower_bound = inf;
 
   // Check all BFS worker queues
   for (const auto& worker : *determinism_workers_) {
@@ -3284,6 +3373,11 @@ f_t branch_and_bound_t<i_t, f_t>::determinism_compute_lower_bound()
     for (auto* node : worker.backlog.data()) {
       lower_bound = std::min(node->lower_bound, lower_bound);
     }
+  }
+
+  // Tree is exhausted
+  if (lower_bound == std::numeric_limits<f_t>::infinity() && incumbent_.has_incumbent) {
+    lower_bound = upper_bound_.load();
   }
 
   return lower_bound;
@@ -3309,7 +3403,7 @@ void branch_and_bound_t<i_t, f_t>::determinism_populate_diving_heap()
     for (auto* node : worker.backlog.data()) {
       if (node->lower_bound < upper_bound) {
         f_t score = node->objective_estimate;
-        if (!std::isfinite(score)) { score = node->lower_bound; }
+        if (score >= inf) { score = node->lower_bound; }
         candidates.push_back({node, score});
       }
     }
@@ -3350,11 +3444,10 @@ void branch_and_bound_t<i_t, f_t>::determinism_assign_diving_nodes()
 
   while (!diving_heap_.empty()) {
     auto& worker = (*determinism_diving_workers_)[worker_idx];
+    worker_idx   = (worker_idx + 1) % num_workers;
 
     // Skip workers that already have enough nodes
     if ((int)worker.dive_queue_size() >= target_nodes_per_worker) {
-      worker_idx = (worker_idx + 1) % num_workers;
-      // Check if all workers are full
       bool all_full = true;
       for (auto& w : *determinism_diving_workers_) {
         if ((int)w.dive_queue_size() < target_nodes_per_worker) {
@@ -3362,23 +3455,21 @@ void branch_and_bound_t<i_t, f_t>::determinism_assign_diving_nodes()
           break;
         }
       }
-      if (all_full) break;
-      continue;
+      if (all_full) break;  // all workers have enough nodes, stop assigning
+      continue;             // this worker is full, try next one
     }
 
     auto entry = diving_heap_.pop();
     if (entry.has_value()) {
       worker.enqueue_dive_node(entry.value().node, original_lp_, settings_);
     }
-
-    worker_idx = (worker_idx + 1) % num_workers;
   }
 
   diving_heap_.clear();
 }
 
 template <typename i_t, typename f_t>
-void branch_and_bound_t<i_t, f_t>::determinism_collect_diving_solutions()
+void branch_and_bound_t<i_t, f_t>::determistic_collect_diving_solutions_and_update_psuedocosts()
 {
   if (!determinism_diving_workers_) return;
 
@@ -3474,6 +3565,11 @@ void branch_and_bound_t<i_t, f_t>::deterministic_dive(determinism_diving_worker_
     bool feasible = worker.node_presolver.bounds_strengthening(
       lp_settings, worker.bounds_changed, worker.leaf_problem.lower, worker.leaf_problem.upper);
 
+    if (settings_.deterministic) {
+      // TEMP APPROXIMATION;
+      worker.work_context.record_work(worker.node_presolver.last_nnz_processed / 1e8);
+    }
+
     if (!feasible) {
       worker.recompute_bounds_and_basis = true;
       continue;
@@ -3518,7 +3614,8 @@ void branch_and_bound_t<i_t, f_t>::deterministic_dive(determinism_diving_worker_
                                                                            worker.basic_list,
                                                                            worker.nonbasic_list,
                                                                            leaf_vstatus,
-                                                                           leaf_edge_norms);
+                                                                           leaf_edge_norms,
+                                                                           &worker.work_context);
       lp_status                 = convert_lp_status_to_dual_status(second_status);
     }
 
@@ -3533,8 +3630,7 @@ void branch_and_bound_t<i_t, f_t>::deterministic_dive(determinism_diving_worker_
       break;
     }
 
-    determinism_diving_tree_update_callbacks_t<i_t, f_t> policy{
-      *this, worker, stack, max_backtrack_depth};
+    deterministic_diving_policy_t<i_t, f_t> policy{*this, worker, stack, max_backtrack_depth};
     update_tree_impl(node_ptr, dive_tree, &worker, lp_status, policy);
   }
 }
