@@ -382,7 +382,7 @@ struct reliability_branching_settings_t {
   // Set to 1 to have the same priority as the other tasks.
   i_t task_priority = 5;
 
-  // The maximum number of candidates initialized by strong branching in a single
+  // 1The maximum number of candidates initialized by strong branching in a single
   // node
   i_t max_num_candidates = 100;
 
