@@ -43,6 +43,12 @@ cuopt_int_t test_maximize_problem_dual_variables(cuopt_int_t method,
                                                  cuopt_float_t* dual_variables,
                                                  cuopt_float_t* reduced_costs,
                                                  cuopt_float_t* dual_obj_ptr);
+cuopt_int_t test_deterministic_bb(const char* filename,
+                                  cuopt_int_t num_runs,
+                                  cuopt_int_t num_threads,
+                                  cuopt_float_t time_limit,
+                                  cuopt_float_t work_limit);
+
 #ifdef __cplusplus
 }
 #endif
