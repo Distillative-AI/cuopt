@@ -243,3 +243,27 @@ INSTANTIATE_TEST_SUITE_P(c_api,
                                            "/mip/enlight_hard.mps",
                                            "/mip/enlight11.mps",
                                            "/mip/supportcase22.mps"));
+
+class DeterministicBBTestFixture
+  : public ::testing::TestWithParam<std::tuple<std::string, int, double, double>> {};
+TEST_P(DeterministicBBTestFixture, deterministic_reproducibility)
+{
+  const std::string& rapidsDatasetRootDir = cuopt::test::get_rapids_dataset_root_dir();
+  std::string filename                    = rapidsDatasetRootDir + std::get<0>(GetParam());
+  int num_threads                         = std::get<1>(GetParam());
+  double time_limit                       = std::get<2>(GetParam());
+  double work_limit                       = std::get<3>(GetParam());
+
+  // Run 3 times and verify identical results
+  EXPECT_EQ(test_deterministic_bb(filename.c_str(), 3, num_threads, time_limit, work_limit),
+            CUOPT_SUCCESS);
+}
+INSTANTIATE_TEST_SUITE_P(c_api,
+                         DeterministicBBTestFixture,
+                         ::testing::Values(
+                           // Low thread count
+                           std::make_tuple("/mip/gen-ip054.mps", 4, 60.0, 2),
+                           // High thread count (high contention)
+                           std::make_tuple("/mip/gen-ip054.mps", 128, 60.0, 2),
+                           // Different instance
+                           std::make_tuple("/mip/bb_optimality.mps", 8, 60.0, 2)));
